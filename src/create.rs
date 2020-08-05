@@ -57,7 +57,8 @@ impl Party0 {
         let TX_f = FundingTransaction::new(
             (x_self.public(), tid_self.clone()),
             (X_other, tid_other.clone()),
-        );
+        )
+        .expect(todo!("Should we use anyhow everywhere?"));
 
         Party1 {
             x_self,

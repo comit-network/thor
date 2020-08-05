@@ -6,6 +6,8 @@ use bitcoin::{
     secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash, Transaction,
     TxIn, TxOut,
 };
+use miniscript::Segwitv0;
+use std::str::FromStr;
 
 pub struct FundingTransaction(Transaction);
 
@@ -22,18 +24,20 @@ impl FundingTransaction {
     // references the `previous_output`'s `TxId` and `vout`. There may
     // be a better way of modelling each input than `(TxIn, Amount)`.
     pub fn new(
-        (_X_0, (tid_0, amount_0)): (PublicKey, (TxIn, Amount)),
-        (_X_1, (tid_1, amount_1)): (PublicKey, (TxIn, Amount)),
-    ) -> Self {
-        Self(Transaction {
+        (X_0, (tid_0, amount_0)): (PublicKey, (TxIn, Amount)),
+        (X_1, (tid_1, amount_1)): (PublicKey, (TxIn, Amount)),
+    ) -> anyhow::Result<Self> {
+        let descriptor = descriptor(&X_0, &X_1)?;
+
+        Ok(Self(Transaction {
             version: 2,
             lock_time: 0,
             input: vec![tid_0, tid_1],
             output: vec![TxOut {
                 value: (amount_0 + amount_1).as_sat(),
-                script_pubkey: todo!("Use Miniscript to generate it from X_0 and X_1"),
+                script_pubkey: descriptor.script_pubkey(),
             }],
-        })
+        }))
     }
 
     pub fn as_txin(&self) -> TxIn {
@@ -157,5 +161,44 @@ impl SplitTransaction {
 
     pub fn digest(&self) -> SigHash {
         self.digest
+    }
+}
+
+fn descriptor(
+    X_0: &secp256k1::PublicKey,
+    X_1: &secp256k1::PublicKey,
+) -> anyhow::Result<miniscript::Descriptor<bitcoin::PublicKey>> {
+    let X_0 = hex::encode(X_0.serialize().to_vec());
+    let X_1 = hex::encode(X_1.serialize().to_vec());
+
+    // Describes the spending policy of the channel fund transaction T_f.
+    //
+    // For now we use `and(x_0, x_1)` - eventually we might want to replace this with a threshold signature.
+    let descriptor_str = format!("and(pk({}),pk({}))", X_0, X_1,);
+    let policy = miniscript::policy::Concrete::<bitcoin::PublicKey>::from_str(&descriptor_str)?;
+    let miniscript = policy.compile()?;
+    let descriptor = miniscript::Descriptor::Wsh(miniscript);
+
+    Ok(descriptor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn descriptor_to_witness_script() {
+        let X_0 = secp256k1::PublicKey::from_str(
+            "0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166",
+        )
+        .expect("key 0");
+        let X_1 = secp256k1::PublicKey::from_str(
+            "022222222222222222222222222222222222222222222222222222222222222222",
+        )
+        .expect("key 1");
+        let descriptor = descriptor(&X_0, &X_1).unwrap();
+
+        let witness_script = format!("{}", descriptor.witness_script());
+        assert_eq!(witness_script, "Script(OP_PUSHBYTES_33 0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166 OP_CHECKSIGVERIFY OP_PUSHBYTES_33 022222222222222222222222222222222222222222222222222222222222222222 OP_CHECKSIG)");
     }
 }
