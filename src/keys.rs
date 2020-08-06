@@ -1,6 +1,7 @@
 use conquer_once::Lazy;
 
 pub use bitcoin::secp256k1::{PublicKey, SecretKey};
+use std::fmt;
 
 pub static SECP: Lazy<bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>> =
     Lazy::new(bitcoin::secp256k1::Secp256k1::new);
@@ -29,6 +30,15 @@ impl KeyPair {
     }
 }
 
+impl From<SecretKey> for KeyPair {
+    fn from(secret_key: SecretKey) -> Self {
+        Self {
+            secret_key,
+            public_key: PublicKey::from_secret_key(&SECP, &secret_key),
+        }
+    }
+}
+
 pub struct RevocationKeyPair(KeyPair);
 pub struct RevocationPublicKey(PublicKey);
 
@@ -44,6 +54,18 @@ impl RevocationKeyPair {
     }
 }
 
+impl From<PublicKey> for RevocationPublicKey {
+    fn from(public_key: PublicKey) -> Self {
+        Self(public_key)
+    }
+}
+
+impl From<RevocationPublicKey> for PublicKey {
+    fn from(r_public_key: RevocationPublicKey) -> Self {
+        r_public_key.0
+    }
+}
+
 pub struct PublishingKeyPair(KeyPair);
 pub struct PublishingPublicKey(PublicKey);
 
@@ -56,5 +78,35 @@ impl PublishingKeyPair {
 
     pub fn public(&self) -> PublishingPublicKey {
         PublishingPublicKey(self.0.public_key)
+    }
+}
+
+impl From<SecretKey> for PublishingKeyPair {
+    fn from(secret_key: SecretKey) -> Self {
+        Self(secret_key.into())
+    }
+}
+
+impl From<PublicKey> for PublishingPublicKey {
+    fn from(public_key: PublicKey) -> Self {
+        Self(public_key)
+    }
+}
+
+impl From<PublishingPublicKey> for PublicKey {
+    fn from(p_public_key: PublishingPublicKey) -> Self {
+        p_public_key.0
+    }
+}
+
+impl fmt::LowerHex for PublishingPublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:x}", self.0)
+    }
+}
+
+impl fmt::Display for PublishingPublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
