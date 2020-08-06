@@ -9,6 +9,8 @@ use crate::{
 use anyhow::Context;
 use bitcoin::{secp256k1, Amount, TxIn};
 
+pub struct AdaptorSignature;
+
 pub struct Message0 {
     X: PublicKey,
     tid: (TxIn, Amount),
@@ -61,6 +63,8 @@ impl Party0 {
         )
         .context("failed to build funding transaction")?;
 
+        let sig_TX_f_self = todo!("Sign TX_f.digest() using x_self");
+
         Ok(Party1 {
             x_self,
             X_other,
@@ -69,6 +73,7 @@ impl Party0 {
             r_self: r,
             y_self: y,
             TX_f,
+            sig_TX_f_self,
         })
     }
 }
@@ -81,6 +86,7 @@ pub struct Party1 {
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
     TX_f: FundingTransaction,
+    sig_TX_f_self: secp256k1::Signature,
 }
 
 impl Party1 {
@@ -100,6 +106,7 @@ impl Party1 {
             r_self,
             y_self,
             TX_f,
+            sig_TX_f_self,
         }: Self,
         Message1 {
             R: R_other,
@@ -112,6 +119,8 @@ impl Party1 {
             (X_other, R_other, Y_other),
         );
 
+        let sig_TX_c_self = todo!("pSign TX_c.digest() using x_self and Y_other");
+
         let TX_s = SplitTransaction::new(
             &TX_c,
             ChannelState {
@@ -120,8 +129,6 @@ impl Party1 {
             },
         );
 
-        // TODO: Like we do here, for the other transactions we could
-        // also generate our signature straight away and save it
         let sig_TX_s_self = todo!("Sign TX_s.digest() using x_self");
 
         Party2 {
@@ -134,7 +141,9 @@ impl Party1 {
             TX_f,
             TX_c,
             TX_s,
+            sig_TX_f_self,
             sig_TX_s_self,
+            sig_TX_c_self,
         }
     }
 }
@@ -149,6 +158,8 @@ pub struct Party2 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
+    sig_TX_f_self: secp256k1::Signature,
+    sig_TX_c_self: AdaptorSignature,
     sig_TX_s_self: secp256k1::Signature,
 }
 
@@ -159,9 +170,46 @@ impl Party2 {
         }
     }
 
-    pub fn receive(self, _message: Message2) -> Party3 {
-        todo!()
+    pub fn receive(
+        self,
+        Message2 {
+            sig_TX_s: sig_TX_s_other,
+        }: Message2,
+    ) -> anyhow::Result<Party3> {
+        todo!("verify sig_TX_s_other is a valid signature on self.TX_s.digest() for self.X_other");
+
+        Ok(Party3 {
+            x_self: self.x_self,
+            X_other: self.X_other,
+            tid_self: self.tid_self,
+            tid_other: self.tid_other,
+            r_self: self.r_self,
+            y_self: self.y_self,
+            TX_f: self.TX_f,
+            TX_c: self.TX_c,
+            TX_s: self.TX_s,
+            sig_TX_f_self: self.sig_TX_f_self,
+            sig_TX_c_self: self.sig_TX_c_self,
+            sig_TX_s_self: self.sig_TX_s_self,
+            sig_TX_s_other,
+        })
     }
 }
 
-pub struct Party3;
+pub struct Party3 {
+    x_self: KeyPair,
+    X_other: PublicKey,
+    tid_self: (TxIn, Amount),
+    tid_other: (TxIn, Amount),
+    r_self: RevocationKeyPair,
+    y_self: PublishingKeyPair,
+    TX_f: FundingTransaction,
+    TX_c: CommitTransaction,
+    TX_s: SplitTransaction,
+    sig_TX_f_self: secp256k1::Signature,
+    sig_TX_c_self: AdaptorSignature,
+    sig_TX_s_self: secp256k1::Signature,
+    sig_TX_s_other: secp256k1::Signature,
+}
+
+impl Party3 {}
