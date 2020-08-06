@@ -56,6 +56,7 @@ impl Party0 {
         }
     }
 
+    /// TODO: we will need to split up Party0 because we need to know which party fills in X_self and which party fills in X_other
     pub fn receive(
         Self { x_self, tid_self }: Self,
         Message0 {
@@ -116,14 +117,16 @@ impl Party1 {
             R: R_other,
             Y: Y_other,
         }: Message1,
-    ) -> Party2 {
+    ) -> anyhow::Result<Party2> {
         let TX_c = CommitTransaction::new(
             &TX_f,
             (x_self.public(), r_self.public(), y_self.public()),
             (X_other, R_other, Y_other),
         );
 
-        let sig_TX_c_self = todo!("pSign TX_c.digest() using x_self and Y_other");
+        let sig_TX_c_self =
+            TX_c.digest(FundingTransaction::descriptor(&x_self.public(), &X_other)?);
+        let sig_TX_c_self = todo!("adapt with Y_other");
 
         let TX_s = SplitTransaction::new(
             &TX_c,
@@ -135,7 +138,7 @@ impl Party1 {
 
         let sig_TX_s_self = todo!("Sign TX_s.digest() using x_self");
 
-        Party2 {
+        Ok(Party2 {
             x_self,
             X_other,
             tid_self,
@@ -147,7 +150,7 @@ impl Party1 {
             TX_s,
             sig_TX_s_self,
             sig_TX_c_self,
-        }
+        })
     }
 }
 

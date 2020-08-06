@@ -49,17 +49,17 @@ impl FundingTransaction {
         Amount::from_sat(self.0.output[0].value)
     }
 
-    fn descriptor(
-        X_0: &secp256k1::PublicKey,
-        X_1: &secp256k1::PublicKey,
+    pub fn descriptor(
+        X_self: &secp256k1::PublicKey,
+        X_other: &secp256k1::PublicKey,
     ) -> anyhow::Result<miniscript::Descriptor<bitcoin::PublicKey>> {
-        let X_0 = hex::encode(X_0.serialize().to_vec());
-        let X_1 = hex::encode(X_1.serialize().to_vec());
+        let X_self = hex::encode(X_self.serialize().to_vec());
+        let X_other = hex::encode(X_other.serialize().to_vec());
 
         // Describes the spending policy of the channel fund transaction T_f.
         //
-        // For now we use `and(x_0, x_1)` - eventually we might want to replace this with a threshold signature.
-        let descriptor_str = format!("and(pk({}),pk({}))", X_0, X_1,);
+        // For now we use `and(x_self, x_other)` - eventually we might want to replace this with a threshold signature.
+        let descriptor_str = format!("and(pk({}),pk({}))", X_self, X_other,);
         let policy = miniscript::policy::Concrete::<bitcoin::PublicKey>::from_str(&descriptor_str)?;
         let miniscript = policy.compile()?;
         let descriptor = miniscript::Descriptor::Wsh(miniscript);
@@ -70,7 +70,6 @@ impl FundingTransaction {
 
 pub struct CommitTransaction {
     inner: Transaction,
-    digest: SigHash,
 }
 
 impl CommitTransaction {
@@ -96,19 +95,7 @@ impl CommitTransaction {
             }],
         };
 
-        let digest = SighashComponents::new(&transaction).sighash_all(
-            &input,
-            // TODO: May need to instead call `.witness_script()` on the
-            // descriptor used to produce the `FundingTransaction`'s output
-            // `script_pubkey`
-            &input.script_sig,
-            TX_f.value().as_sat(),
-        );
-
-        Self {
-            inner: transaction,
-            digest,
-        }
+        Self { inner: transaction }
     }
 
     /// Sign the commit transaction.
@@ -139,8 +126,10 @@ impl CommitTransaction {
         Amount::from_sat(self.inner.output[0].value)
     }
 
-    pub fn digest(&self) -> SigHash {
-        self.digest
+    pub fn digest(&self, descriptor: miniscript::Descriptor<bitcoin::PublicKey>) -> SigHash {
+        let sighash_all = 1;
+        self.inner
+            .signature_hash(0, &descriptor.witness_script(), sighash_all)
     }
 }
 
