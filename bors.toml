@@ -1,4 +1,5 @@
 status = [
     "static_analysis",
-    "build_test (stable, false)",
+    "build_test (ubuntu-latest, stable, false)",
+    "build_test (macos-latest, stable, false)",
 ]
