@@ -148,24 +148,22 @@ impl SplitTransaction {
     ) -> Self {
         let input = TX_c.as_txin();
 
+        let descriptor = SplitTransaction::wpk_descriptor(X_0);
         let output_0 = TxOut {
             value: amount_0.as_sat(),
-            script_pubkey: todo!(
-                "Use Miniscript to generate based on providing a signature w.r.t. X_0"
-            ),
+            script_pubkey: descriptor.script_pubkey(),
         };
 
+        let descriptor = SplitTransaction::wpk_descriptor(X_1);
         let output_1 = TxOut {
             value: amount_1.as_sat(),
-            script_pubkey: todo!(
-                "Use Miniscript to generate based on providing a signature w.r.t. X_1"
-            ),
+            script_pubkey: descriptor.script_pubkey(),
         };
 
         let transaction = Transaction {
             version: 2,
             lock_time: 0,
-            input: vec![input],
+            input: vec![input.clone()],
             output: vec![output_0, output_1],
         };
 
@@ -182,6 +180,17 @@ impl SplitTransaction {
             inner: transaction,
             digest,
         }
+    }
+
+    fn wpk_descriptor(key: PublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
+        let output_0_descriptor = {
+            let pk = bitcoin::PublicKey {
+                key,
+                compressed: true,
+            };
+            miniscript::Descriptor::Wpkh(pk)
+        };
+        output_0_descriptor
     }
 
     pub fn digest(&self) -> SigHash {
