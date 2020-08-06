@@ -9,19 +9,9 @@ use bitcoin::{
 };
 use std::str::FromStr;
 
-pub struct FundingTransaction {
-    inner: Transaction,
-    digest: SigHash,
-}
+#[derive(Clone)]
+pub struct FundingTransaction(Transaction);
 
-// Both parties will have to sign the funding transaction and share
-// the signature with the other party. Assuming that the input each
-// party provides is owned by a wallet, we will need to use the wallet
-// to produce the signature. In A2L, we used bitcoind's
-// `signrawtransactionwithwallet` RPC call. In that case we were only
-// dealing with transactions which had inputs owned by one party. I
-// wonder if it will work with a transaction like this one, which has
-// inputs from two parties.
 impl FundingTransaction {
     // A `bitcoin::TxIn` does not include the amount, it just
     // references the `previous_output`'s `TxId` and `vout`. There may
@@ -43,21 +33,12 @@ impl FundingTransaction {
             }],
         };
 
-        let digest = SighashComponents::new(&transaction).sighash_all(
-            &tid_self,
-            &tid_self.script_sig,
-            amount_self.as_sat(),
-        );
-
-        Ok(Self {
-            inner: transaction,
-            digest,
-        })
+        Ok(Self(transaction))
     }
 
     pub fn as_txin(&self) -> TxIn {
         TxIn {
-            previous_output: OutPoint::new(self.inner.txid(), 0),
+            previous_output: OutPoint::new(self.0.txid(), 0),
             script_sig: Script::new(),
             sequence: 0xFFFF_FFFF,
             witness: Vec::new(),
@@ -65,11 +46,7 @@ impl FundingTransaction {
     }
 
     pub fn value(&self) -> Amount {
-        Amount::from_sat(self.inner.output[0].value)
-    }
-
-    pub fn digest(&self) -> SigHash {
-        self.digest
+        Amount::from_sat(self.0.output[0].value)
     }
 
     fn descriptor(

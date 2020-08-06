@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
 bitcoin = { version = "0.23.0", features = ["rand", "use-serde"] }
 conquer-once = "0.2"
 hex = "0.4.2"
