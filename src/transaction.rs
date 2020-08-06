@@ -19,10 +19,8 @@ impl FundingTransaction {
     pub fn new(
         (X_self, (tid_self, amount_self)): (PublicKey, (TxIn, Amount)),
         (X_other, (tid_other, amount_other)): (PublicKey, (TxIn, Amount)),
+        descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
     ) -> anyhow::Result<Self> {
-        let descriptor =
-            Self::descriptor(&X_self, &X_other).context("failed to build descriptor")?;
-
         let transaction = Transaction {
             version: 2,
             lock_time: 0,

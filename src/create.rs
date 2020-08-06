@@ -55,10 +55,16 @@ impl Party0 {
             tid: self.tid_self.clone(),
         }
     }
+}
 
-    /// TODO: we will need to split up Party0 because we need to know which party fills in X_self and which party fills in X_other
-    pub fn receive(
-        Self { x_self, tid_self }: Self,
+trait Party0_Receive {
+    fn receive_from_A(self, message0: Message0) -> anyhow::Result<Party1>;
+    fn receive_from_B(self, message0: Message0) -> anyhow::Result<Party1>;
+}
+
+impl Party0_Receive for Party0 {
+    fn receive_from_A(
+        self,
         Message0 {
             X: X_other,
             tid: tid_other,
@@ -68,15 +74,46 @@ impl Party0 {
         let y = PublishingKeyPair::new_random();
 
         let TX_f = FundingTransaction::new(
-            (x_self.public(), tid_self.clone()),
+            (self.x_self.public(), self.tid_self.clone()),
             (X_other, tid_other.clone()),
+            FundingTransaction::descriptor(&self.x_self.public(), &X_other)
+                .context("failed to build descriptor")?,
         )
         .context("failed to build funding transaction")?;
 
         Ok(Party1 {
-            x_self,
+            x_self: self.x_self,
             X_other,
-            tid_self,
+            tid_self: self.tid_self,
+            tid_other,
+            r_self: r,
+            y_self: y,
+            TX_f,
+        })
+    }
+
+    fn receive_from_B(
+        self,
+        Message0 {
+            X: X_other,
+            tid: tid_other,
+        }: Message0,
+    ) -> anyhow::Result<Party1> {
+        let r = RevocationKeyPair::new_random();
+        let y = PublishingKeyPair::new_random();
+
+        let TX_f = FundingTransaction::new(
+            (self.x_self.public(), self.tid_self.clone()),
+            (X_other, tid_other.clone()),
+            FundingTransaction::descriptor(&X_other, &self.x_self.public())
+                .context("failed to build descriptor")?,
+        )
+        .context("failed to build funding transaction")?;
+
+        Ok(Party1 {
+            x_self: self.x_self,
+            X_other,
+            tid_self: self.tid_self,
             tid_other,
             r_self: r,
             y_self: y,
