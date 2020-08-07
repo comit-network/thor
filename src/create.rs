@@ -7,6 +7,7 @@ use crate::{
     ChannelState,
 };
 use bitcoin::{secp256k1, Amount, TxIn};
+use anyhow::Context;
 
 pub struct Message0 {
     X: PublicKey,
@@ -50,7 +51,7 @@ impl Party0 {
             X: X_other,
             tid: tid_other,
         }: Message0,
-    ) -> Party1 {
+    ) -> anyhow::Result<Party1> {
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
 
@@ -58,9 +59,9 @@ impl Party0 {
             (x_self.public(), tid_self.clone()),
             (X_other, tid_other.clone()),
         )
-        .expect(todo!("Should we use anyhow everywhere?"));
+        .context("failed to build funding transaction")?;
 
-        Party1 {
+        Ok(Party1 {
             x_self,
             X_other,
             tid_self,
@@ -68,7 +69,7 @@ impl Party0 {
             r_self: r,
             y_self: y,
             TX_f,
-        }
+        })
     }
 }
 
@@ -154,7 +155,7 @@ pub struct Party2 {
 impl Party2 {
     pub fn new_message(&self) -> Message2 {
         Message2 {
-            sig_TX_s: self.sig_TX_s_self.clone(),
+            sig_TX_s: self.sig_TX_s_self,
         }
     }
 
