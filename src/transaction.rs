@@ -6,6 +6,7 @@ use bitcoin::{
     secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash, Transaction,
     TxIn, TxOut,
 };
+use miniscript::Segwitv0;
 use std::str::FromStr;
 
 #[derive(Clone)]
@@ -50,18 +51,22 @@ impl FundingTransaction {
         X_self: &secp256k1::PublicKey,
         X_other: &secp256k1::PublicKey,
     ) -> anyhow::Result<miniscript::Descriptor<bitcoin::PublicKey>> {
+        // Describes the spending policy of the channel fund transaction T_f.
+        // For now we use `and(x_self, x_other)` - eventually we might want to replace this with a threshold signature.
+        const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_self),pk_k(X_other))";
+
         let X_self = hex::encode(X_self.serialize().to_vec());
         let X_other = hex::encode(X_other.serialize().to_vec());
 
-        // Describes the spending policy of the channel fund transaction T_f.
-        //
-        // For now we use `and(x_self, x_other)` - eventually we might want to replace this with a threshold signature.
-        let descriptor_str = format!("and(pk({}),pk({}))", X_self, X_other,);
-        let policy = miniscript::policy::Concrete::<bitcoin::PublicKey>::from_str(&descriptor_str)?;
-        let miniscript = policy.compile()?;
-        let descriptor = miniscript::Descriptor::Wsh(miniscript);
+        let miniscript = MINISCRIPT_TEMPLATE
+            .replace("X_self", &X_self)
+            .replace("X_other", &X_other);
 
-        Ok(descriptor)
+        let miniscript =
+            miniscript::Miniscript::<bitcoin::PublicKey, Segwitv0>::from_str(&miniscript)
+                .expect("a valid miniscript");
+
+        Ok(miniscript::Descriptor::Wsh(miniscript))
     }
 }
 
@@ -195,6 +200,20 @@ impl SplitTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use miniscript::Miniscript;
+
+    #[test]
+    fn compile_funding_transaction_spending_policy() {
+        // Describes the spending policy of the fund transaction.
+        // The resulting descriptor is hardcoded used above in the code
+        let spending_policy = "and(pk(X_self),pk(X_other))";
+        let policy = miniscript::policy::Concrete::<String>::from_str(spending_policy).unwrap();
+        let miniscript: Miniscript<String, Segwitv0> = policy.compile().unwrap();
+
+        let descriptor = format!("{}", miniscript);
+
+        println!("{}", descriptor);
+    }
 
     #[test]
     fn descriptor_to_witness_script() {
