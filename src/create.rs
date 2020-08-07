@@ -57,12 +57,12 @@ impl Party0 {
     }
 }
 
-trait Party0_Receive {
+trait Party0Receive {
     fn receive_from_A(self, message0: Message0) -> anyhow::Result<Party1>;
     fn receive_from_B(self, message0: Message0) -> anyhow::Result<Party1>;
 }
 
-impl Party0_Receive for Party0 {
+impl Party0Receive for Party0 {
     fn receive_from_A(
         self,
         Message0 {

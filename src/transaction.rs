@@ -2,7 +2,6 @@ use crate::{
     keys::{PublicKey, PublishingPublicKey, RevocationPublicKey},
     ChannelState,
 };
-use anyhow::Context;
 use bitcoin::{
     secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash, Transaction,
     TxIn, TxOut,
@@ -17,14 +16,14 @@ impl FundingTransaction {
     // references the `previous_output`'s `TxId` and `vout`. There may
     // be a better way of modelling each input than `(TxIn, Amount)`.
     pub fn new(
-        (X_self, (tid_self, amount_self)): (PublicKey, (TxIn, Amount)),
-        (X_other, (tid_other, amount_other)): (PublicKey, (TxIn, Amount)),
+        (_X_self, (tid_self, amount_self)): (PublicKey, (TxIn, Amount)),
+        (_X_other, (tid_other, amount_other)): (PublicKey, (TxIn, Amount)),
         descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
     ) -> anyhow::Result<Self> {
         let transaction = Transaction {
             version: 2,
             lock_time: 0,
-            input: vec![tid_self.clone(), tid_other],
+            input: vec![tid_self, tid_other],
             output: vec![TxOut {
                 value: (amount_self + amount_other).as_sat(),
                 script_pubkey: descriptor.script_pubkey(),
@@ -102,7 +101,7 @@ impl CommitTransaction {
     /// same order that they did when calling
     /// `FundingTransaction::new`.
     pub fn sign(
-        mut self,
+        self,
         (_X_0, _sig_0): (PublicKey, secp256k1::Signature),
         (_X_1, _sig_1): (PublicKey, secp256k1::Signature),
     ) -> anyhow::Result<Self> {
@@ -181,14 +180,11 @@ impl SplitTransaction {
     }
 
     fn wpk_descriptor(key: PublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
-        let output_0_descriptor = {
-            let pk = bitcoin::PublicKey {
-                key,
-                compressed: true,
-            };
-            miniscript::Descriptor::Wpkh(pk)
+        let pk = bitcoin::PublicKey {
+            key,
+            compressed: true,
         };
-        output_0_descriptor
+        miniscript::Descriptor::Wpkh(pk)
     }
 
     pub fn digest(&self) -> SigHash {
