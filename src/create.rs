@@ -6,8 +6,8 @@ use crate::{
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
     ChannelState,
 };
-use bitcoin::{secp256k1, Amount, TxIn};
 use anyhow::Context;
+use bitcoin::{secp256k1, Amount, TxIn};
 
 pub struct Message0 {
     X: PublicKey,

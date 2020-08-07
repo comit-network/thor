@@ -1,4 +1,4 @@
-#![allow(non_snake_case,unused,unreachable_code)]
+#![allow(non_snake_case, unused, unreachable_code)]
 
 pub mod create;
 mod keys;
