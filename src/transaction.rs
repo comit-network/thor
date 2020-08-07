@@ -2,11 +2,12 @@ use crate::{
     keys::{PublicKey, PublishingPublicKey, RevocationPublicKey},
     ChannelState,
 };
+use bitcoin::hashes::Hash;
 use bitcoin::{
-    secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash, Transaction,
-    TxIn, TxOut,
+    hashes::hash160, secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash,
+    Transaction, TxIn, TxOut,
 };
-use miniscript::Segwitv0;
+use miniscript::{Descriptor, Segwitv0};
 use std::str::FromStr;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -139,31 +140,47 @@ impl CommitTransaction {
         (X_0, R_0, Y_0): (PublicKey, RevocationPublicKey, PublishingPublicKey),
         (X_1, R_1, Y_1): (PublicKey, RevocationPublicKey, PublishingPublicKey),
         time_lock: u32,
-    ) -> Result<miniscript::Descriptor<bitcoin::PublicKey>> {
+    ) -> Result<Descriptor<bitcoin::PublicKey>> {
+        let X_0_hash = hash160::Hash::hash(&X_0.serialize()[..]);
         let X_0 = hex::encode(X_0.serialize().to_vec());
-        let R_0 = hex::encode(Into::<PublicKey>::into(R_0).serialize().to_vec());
-        let Y_0 = hex::encode(Into::<PublicKey>::into(Y_0).serialize().to_vec());
+        let X_1_hash = hash160::Hash::hash(&X_1.serialize()[..]);
         let X_1 = hex::encode(X_1.serialize().to_vec());
-        let R_1 = hex::encode(Into::<PublicKey>::into(R_1).serialize().to_vec());
-        let Y_1 = hex::encode(Into::<PublicKey>::into(Y_1).serialize().to_vec());
+
+        let R_0: PublicKey = R_0.into();
+        let R_0_hash = hash160::Hash::hash(&R_0.serialize()[..]);
+        let R_1: PublicKey = R_1.into();
+        let R_1_hash = hash160::Hash::hash(&R_1.serialize()[..]);
+
+        let Y_0: PublicKey = Y_0.into();
+        let Y_0_hash = hash160::Hash::hash(&Y_0.serialize()[..]);
+        let Y_1: PublicKey = Y_1.into();
+        let Y_1_hash = hash160::Hash::hash(&Y_1.serialize()[..]);
 
         // Describes the spending policy of the channel commit transaction T_c.
         // There are possible way to spend this transaction:
         // 1. Channel state: It is correctly signed w.r.t pk_0, pk_1 and after relative timelock
         // 2. Punish 0: It is correctly signed w.r.t pk_1, Y_0, R_0
         // 3. Punish 1: It is correctly signed w.r.t pk_0, Y_1, R_1
-        // TODO: Make an explicit choice between using `tresh` or composing `or` and `and` (which are both binary operators)
-        let channel_state_condition =
-            format!("and(older({}),and(pk({}),pk({})))", time_lock, X_0, X_1);
-        let punish_0_condition = format!("and(pk({}),and(pk({}),pk({})))", X_1, Y_0, R_0);
-        let punish_1_condition = format!("and(pk({}),and(pk({}),pk({})))", X_0, Y_1, R_1);
-        let descriptor_str = format!(
-            "or({},or({},{}))",
-            channel_state_condition, punish_0_condition, punish_1_condition
+
+        // Policy is or(and(older(144),and(pk(X0),pk(X1))),or(and(pk(X1),and(pk(Y0),pk(R0))),and(pk(X0),and(pk(Y1),pk(R1)))))
+
+        let channel_state_condition = format!(
+            "and_v(v:older({}),and_v(v:pk({}),pk_k({})))",
+            time_lock, X_0, X_1
         );
-        let policy = miniscript::policy::Concrete::<bitcoin::PublicKey>::from_str(&descriptor_str)?;
-        let miniscript = policy.compile()?;
-        let descriptor = miniscript::Descriptor::Wsh(miniscript);
+        let punish_0_condition = format!(
+            "and_v(v:pkh({}),and_v(v:pkh({}),pk_h({})))",
+            X_1_hash, Y_0_hash, R_0_hash
+        );
+        let punish_1_condition = format!(
+            "and_v(v:pkh({}),and_v(v:pkh({}),pk_h({})))",
+            X_0_hash, Y_1_hash, R_1_hash
+        );
+        let descriptor_str = format!(
+            "wsh(c:or_i(or_i({},{}),{}))",
+            punish_0_condition, punish_1_condition, channel_state_condition
+        );
+        let descriptor = Descriptor::<bitcoin::PublicKey>::from_str(&descriptor_str)?;
 
         Ok(descriptor)
     }
@@ -309,6 +326,6 @@ mod tests {
             CommitTransaction::descriptor((X_0, R_0, Y_0), (X_1, R_1, Y_1), time_lock).unwrap();
 
         let witness_script = format!("{}", descriptor.witness_script());
-        assert_eq!(witness_script, "Script(OP_IF OP_PUSHBYTES_33 032a34617a9141231baa27bcadf622322eed1e16b6036fdf15f42a85f7250c4823 OP_CHECKSIGVERIFY OP_PUSHBYTES_33 03437a3813f17a264e2c8fc41fb0895634d34c7c9cb9147c553cc67ff37293b1cd OP_CHECKSIGVERIFY OP_PUSHBYTES_2 9000 OP_CSV OP_ELSE OP_IF OP_DUP OP_HASH160 OP_PUSHBYTES_20 635de934904ad5406559beebcc3ca0d119721323 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 be60bbce0058cb25f268d70559e1a3433d75f557 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 4c8a3449333f92f386b4b8a202353719016261e8 OP_EQUALVERIFY OP_ELSE OP_DUP OP_HASH160 OP_PUSHBYTES_20 1b08ea4a2fbbe0121205f63068f78564ff204995 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 ea92d4bb15b4babd0c216c12f61fe7083ed06e3b OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 565dd1650db6ffae1c2dd67d83a5709aa0ddd2e9 OP_EQUALVERIFY OP_ENDIF OP_CHECKSIG OP_ENDIF)");
+        assert_eq!(witness_script, "Script(OP_IF OP_IF OP_DUP OP_HASH160 OP_PUSHBYTES_20 635de934904ad5406559beebcc3ca0d119721323 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 be60bbce0058cb25f268d70559e1a3433d75f557 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 4c8a3449333f92f386b4b8a202353719016261e8 OP_EQUALVERIFY OP_ELSE OP_DUP OP_HASH160 OP_PUSHBYTES_20 1b08ea4a2fbbe0121205f63068f78564ff204995 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 ea92d4bb15b4babd0c216c12f61fe7083ed06e3b OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 565dd1650db6ffae1c2dd67d83a5709aa0ddd2e9 OP_EQUALVERIFY OP_ENDIF OP_ELSE OP_PUSHBYTES_2 9000 OP_CSV OP_VERIFY OP_PUSHBYTES_33 032a34617a9141231baa27bcadf622322eed1e16b6036fdf15f42a85f7250c4823 OP_CHECKSIGVERIFY OP_PUSHBYTES_33 03437a3813f17a264e2c8fc41fb0895634d34c7c9cb9147c553cc67ff37293b1cd OP_ENDIF OP_CHECKSIG)");
     }
 }
