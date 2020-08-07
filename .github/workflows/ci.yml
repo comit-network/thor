@@ -50,7 +50,8 @@ jobs:
         rust_toolchain: [stable, beta]
         continue_on_error: [false]
         include:
-          - rust_toolchain: nightly
+          - os: ubuntu-latest
+            rust_toolchain: nightly
             continue_on_error: true
     continue-on-error: ${{ matrix.continue_on_error }}
     runs-on: ${{ matrix.os }}
