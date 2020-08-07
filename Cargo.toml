@@ -19,3 +19,4 @@ thiserror = "1"
 [dev-dependencies]
 bitcoin-harness = { git = "https://github.com/coblox/bitcoin-harness-rs.git", rev = "974cbf078815d24b199a3d1d8d0b2c189218eaea" }
 testcontainers = "0.9"
+tokio = "0.2"
