@@ -9,6 +9,8 @@ use crate::{
 use anyhow::Context;
 use bitcoin::{secp256k1, Amount, TxIn};
 
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Clone)]
 pub struct AdaptorSignature;
 
@@ -154,12 +156,14 @@ impl Party1 {
             R: R_other,
             Y: Y_other,
         }: Message1,
-    ) -> anyhow::Result<Party2> {
+        time_lock: u32,
+    ) -> Result<Party2> {
         let TX_c = CommitTransaction::new(
             &TX_f,
             (x_self.public(), r_self.public(), y_self.public()),
             (X_other, R_other, Y_other),
-        );
+            time_lock,
+        )?;
 
         let sig_TX_c_self =
             TX_c.digest(FundingTransaction::descriptor(&x_self.public(), &X_other)?);
@@ -358,4 +362,10 @@ pub struct Party5 {
     sig_TX_c_other: AdaptorSignature,
     sig_TX_s_self: secp256k1::Signature,
     sig_TX_s_other: secp256k1::Signature,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Transaction: ")]
+    Transaction(#[from] crate::transaction::Error),
 }
