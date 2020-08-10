@@ -46,7 +46,7 @@ jobs:
   build_test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         rust_toolchain: [stable, beta]
         continue_on_error: [false]
         include:
@@ -68,7 +68,6 @@ jobs:
 
       - name: Cache target directory
         uses: actions/cache@v1
-        if: matrix.os == 'ubuntu-latest'
         with:
           path: target
           key: rust-${{ matrix.rust_toolchain }}-target-directory-${{ hashFiles('Cargo.lock') }}-v1
