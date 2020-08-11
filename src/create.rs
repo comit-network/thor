@@ -37,23 +37,15 @@ pub struct Message4 {
     TX_f_signed_once: FundingTransaction,
 }
 
-struct Alice;
-struct Bob;
-
-pub struct Party0<R> {
+pub struct Alice0 {
     x_self: KeyPair,
     tid_self: (TxIn, Amount),
-    phantom: PhantomData<R>,
 }
 
-impl Party0<Alice> {
+impl Alice0 {
     pub fn new(tid_self: (TxIn, Amount)) -> Self {
         let x_self = KeyPair::new_random();
-        Self {
-            x_self,
-            tid_self,
-            phantom: Default::default(),
-        }
+        Self { x_self, tid_self }
     }
 
     pub fn next_message(&self) -> Message0 {
@@ -69,7 +61,7 @@ impl Party0<Alice> {
             X: X_other,
             tid: tid_other,
         }: Message0,
-    ) -> anyhow::Result<Party1<Alice>> {
+    ) -> anyhow::Result<Alice1> {
         let TX_f = FundingTransaction::new(
             (self.x_self.public(), self.tid_self.clone()),
             (X_other, tid_other.clone()),
@@ -78,7 +70,7 @@ impl Party0<Alice> {
 
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
-        Ok(Party1 {
+        Ok(Alice1 {
             x_self: self.x_self,
             X_other,
             tid_self: self.tid_self,
@@ -86,19 +78,19 @@ impl Party0<Alice> {
             r_self: r,
             y_self: y,
             TX_f,
-            phantom: PhantomData::default(),
         })
     }
 }
 
-impl Party0<Bob> {
+pub struct Bob0 {
+    x_self: KeyPair,
+    tid_self: (TxIn, Amount),
+}
+
+impl Bob0 {
     pub fn new(tid_self: (TxIn, Amount)) -> Self {
         let x_self = KeyPair::new_random();
-        Self {
-            x_self,
-            tid_self,
-            phantom: Default::default(),
-        }
+        Self { x_self, tid_self }
     }
 
     pub fn next_message(&self) -> Message0 {
@@ -114,7 +106,7 @@ impl Party0<Bob> {
             X: X_other,
             tid: tid_other,
         }: Message0,
-    ) -> anyhow::Result<Party1<Bob>> {
+    ) -> anyhow::Result<Bob1> {
         let TX_f = FundingTransaction::new(
             (X_other, tid_other.clone()),
             (self.x_self.public(), self.tid_self.clone()),
@@ -123,7 +115,7 @@ impl Party0<Bob> {
 
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
-        Ok(Party1 {
+        Ok(Bob1 {
             x_self: self.x_self,
             X_other,
             tid_self: self.tid_self,
@@ -131,12 +123,11 @@ impl Party0<Bob> {
             r_self: r,
             y_self: y,
             TX_f,
-            phantom: PhantomData::default(),
         })
     }
 }
 
-pub struct Party1<R> {
+pub struct Alice1 {
     x_self: KeyPair,
     X_other: PublicKey,
     tid_self: (TxIn, Amount),
@@ -144,10 +135,9 @@ pub struct Party1<R> {
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
     TX_f: FundingTransaction,
-    phantom: PhantomData<R>,
 }
 
-impl Party1<Alice> {
+impl Alice1 {
     pub fn next_message(&self) -> Message1 {
         Message1 {
             R: self.r_self.public(),
@@ -205,7 +195,17 @@ impl Party1<Alice> {
     }
 }
 
-impl Party1<Bob> {
+pub struct Bob1 {
+    x_self: KeyPair,
+    X_other: PublicKey,
+    tid_self: (TxIn, Amount),
+    tid_other: (TxIn, Amount),
+    r_self: RevocationKeyPair,
+    y_self: PublishingKeyPair,
+    TX_f: FundingTransaction,
+}
+
+impl Bob1 {
     pub fn next_message(&self) -> Message1 {
         Message1 {
             R: self.r_self.public(),
