@@ -8,6 +8,7 @@ use crate::{
 };
 use anyhow::Context;
 use bitcoin::{secp256k1, Amount, TxIn};
+use std::marker::PhantomData;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -36,19 +37,15 @@ pub struct Message4 {
     TX_f_signed_once: FundingTransaction,
 }
 
-pub struct Party0 {
+pub struct Alice0 {
     x_self: KeyPair,
     tid_self: (TxIn, Amount),
 }
 
-impl Party0 {
-    pub fn new(tid: (TxIn, Amount)) -> Self {
-        let key_pair = KeyPair::new_random();
-
-        Self {
-            x_self: key_pair,
-            tid_self: tid,
-        }
+impl Alice0 {
+    pub fn new(tid_self: (TxIn, Amount)) -> Self {
+        let x_self = KeyPair::new_random();
+        Self { x_self, tid_self }
     }
 
     pub fn next_message(&self) -> Message0 {
@@ -57,62 +54,23 @@ impl Party0 {
             tid: self.tid_self.clone(),
         }
     }
-}
 
-trait Party0Receive {
-    fn receive_from_A(self, message0: Message0) -> anyhow::Result<Party1>;
-    fn receive_from_B(self, message0: Message0) -> anyhow::Result<Party1>;
-}
-
-impl Party0Receive for Party0 {
-    fn receive_from_A(
+    pub fn receive(
         self,
         Message0 {
             X: X_other,
             tid: tid_other,
         }: Message0,
-    ) -> anyhow::Result<Party1> {
-        let r = RevocationKeyPair::new_random();
-        let y = PublishingKeyPair::new_random();
-
+    ) -> anyhow::Result<Alice1> {
         let TX_f = FundingTransaction::new(
             (self.x_self.public(), self.tid_self.clone()),
             (X_other, tid_other.clone()),
-            FundingTransaction::descriptor(&self.x_self.public(), &X_other)
-                .context("failed to build descriptor")?,
         )
         .context("failed to build funding transaction")?;
 
-        Ok(Party1 {
-            x_self: self.x_self,
-            X_other,
-            tid_self: self.tid_self,
-            tid_other,
-            r_self: r,
-            y_self: y,
-            TX_f,
-        })
-    }
-
-    fn receive_from_B(
-        self,
-        Message0 {
-            X: X_other,
-            tid: tid_other,
-        }: Message0,
-    ) -> anyhow::Result<Party1> {
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
-
-        let TX_f = FundingTransaction::new(
-            (self.x_self.public(), self.tid_self.clone()),
-            (X_other, tid_other.clone()),
-            FundingTransaction::descriptor(&X_other, &self.x_self.public())
-                .context("failed to build descriptor")?,
-        )
-        .context("failed to build funding transaction")?;
-
-        Ok(Party1 {
+        Ok(Alice1 {
             x_self: self.x_self,
             X_other,
             tid_self: self.tid_self,
@@ -124,7 +82,52 @@ impl Party0Receive for Party0 {
     }
 }
 
-pub struct Party1 {
+pub struct Bob0 {
+    x_self: KeyPair,
+    tid_self: (TxIn, Amount),
+}
+
+impl Bob0 {
+    pub fn new(tid_self: (TxIn, Amount)) -> Self {
+        let x_self = KeyPair::new_random();
+        Self { x_self, tid_self }
+    }
+
+    pub fn next_message(&self) -> Message0 {
+        Message0 {
+            X: self.x_self.public(),
+            tid: self.tid_self.clone(),
+        }
+    }
+
+    pub fn receive(
+        self,
+        Message0 {
+            X: X_other,
+            tid: tid_other,
+        }: Message0,
+    ) -> anyhow::Result<Bob1> {
+        let TX_f = FundingTransaction::new(
+            (X_other, tid_other.clone()),
+            (self.x_self.public(), self.tid_self.clone()),
+        )
+        .context("failed to build funding transaction")?;
+
+        let r = RevocationKeyPair::new_random();
+        let y = PublishingKeyPair::new_random();
+        Ok(Bob1 {
+            x_self: self.x_self,
+            X_other,
+            tid_self: self.tid_self,
+            tid_other,
+            r_self: r,
+            y_self: y,
+            TX_f,
+        })
+    }
+}
+
+pub struct Alice1 {
     x_self: KeyPair,
     X_other: PublicKey,
     tid_self: (TxIn, Amount),
@@ -134,7 +137,7 @@ pub struct Party1 {
     TX_f: FundingTransaction,
 }
 
-impl Party1 {
+impl Alice1 {
     pub fn next_message(&self) -> Message1 {
         Message1 {
             R: self.r_self.public(),
@@ -151,33 +154,98 @@ impl Party1 {
             r_self,
             y_self,
             TX_f,
+            ..
         }: Self,
         Message1 {
             R: R_other,
             Y: Y_other,
         }: Message1,
         time_lock: u32,
-    ) -> Result<Party2> {
+    ) -> anyhow::Result<Party2> {
         let TX_c = CommitTransaction::new(
             &TX_f,
             (x_self.public(), r_self.public(), y_self.public()),
             (X_other, R_other, Y_other),
             time_lock,
         )?;
-
-        let sig_TX_c_self =
-            TX_c.digest(FundingTransaction::descriptor(&x_self.public(), &X_other)?);
-        let sig_TX_c_self = todo!("adapt with Y_other");
+        let sig_TX_c_self = TX_c.sign_once(x_self.clone(), Y_other)?;
 
         let TX_s = SplitTransaction::new(
             &TX_c,
             ChannelState {
-                party_0: (tid_self.1, x_self.public()),
-                party_1: (tid_other.1, X_other),
+                a: (tid_self.1, x_self.public()),
+                b: (tid_other.1, X_other),
             },
         );
-
         let sig_TX_s_self = todo!("Sign TX_s.digest() using x_self");
+
+        Ok(Party2 {
+            x_self,
+            X_other,
+            tid_self,
+            tid_other,
+            r_self,
+            y_self,
+            TX_f,
+            TX_c,
+            TX_s,
+            sig_TX_s_self,
+            sig_TX_c_self,
+        })
+    }
+}
+
+pub struct Bob1 {
+    x_self: KeyPair,
+    X_other: PublicKey,
+    tid_self: (TxIn, Amount),
+    tid_other: (TxIn, Amount),
+    r_self: RevocationKeyPair,
+    y_self: PublishingKeyPair,
+    TX_f: FundingTransaction,
+}
+
+impl Bob1 {
+    pub fn next_message(&self) -> Message1 {
+        Message1 {
+            R: self.r_self.public(),
+            Y: self.y_self.public(),
+        }
+    }
+
+    pub fn receive(
+        Self {
+            x_self,
+            X_other,
+            tid_self,
+            tid_other,
+            r_self,
+            y_self,
+            TX_f,
+            ..
+        }: Self,
+        Message1 {
+            R: R_other,
+            Y: Y_other,
+        }: Message1,
+        time_lock: u32,
+    ) -> anyhow::Result<Party2> {
+        let TX_c = CommitTransaction::new(
+            &TX_f,
+            (X_other, R_other, Y_other),
+            (x_self.public(), r_self.public(), y_self.public()),
+            time_lock,
+        )?;
+        let sig_TX_c_self = TX_c.sign_once(x_self.clone(), Y_other)?;
+
+        let TX_s = SplitTransaction::new(
+            &TX_c,
+            ChannelState {
+                a: (tid_other.1, X_other),
+                b: (tid_self.1, x_self.public()),
+            },
+        );
+        let sig_TX_s_self = TX_s.sign_once(x_self.clone())?;
 
         Ok(Party2 {
             x_self,

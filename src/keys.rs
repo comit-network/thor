@@ -9,6 +9,7 @@ pub static SECP: Lazy<bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>> =
 // TODO: Consider using libsecp256k1 instead of bitcoin::secp256k1 (or
 // even secp256k1FUN!), like we did in A2L. That way we can get rid of
 // the `static SECP`, among other things
+#[derive(Clone)]
 pub struct KeyPair {
     secret_key: SecretKey,
     public_key: PublicKey,
@@ -67,6 +68,8 @@ impl From<RevocationPublicKey> for PublicKey {
 }
 
 pub struct PublishingKeyPair(KeyPair);
+
+#[derive(Clone, Copy)]
 pub struct PublishingPublicKey(PublicKey);
 
 impl PublishingKeyPair {
