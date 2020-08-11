@@ -8,6 +8,7 @@ use crate::{
 };
 use anyhow::Context;
 use bitcoin::{secp256k1, Amount, TxIn};
+use std::marker::PhantomData;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -42,7 +43,7 @@ struct Bob;
 pub struct Party0<R> {
     x_self: KeyPair,
     tid_self: (TxIn, Amount),
-    phantom: std::marker::PhantomData<R>,
+    phantom: PhantomData<R>,
 }
 
 impl Party0<Alice> {
@@ -68,7 +69,7 @@ impl Party0<Alice> {
             X: X_other,
             tid: tid_other,
         }: Message0,
-    ) -> anyhow::Result<Party1> {
+    ) -> anyhow::Result<Party1<Alice>> {
         let TX_f = FundingTransaction::new(
             (self.x_self.public(), self.tid_self.clone()),
             (X_other, tid_other.clone()),
@@ -85,6 +86,7 @@ impl Party0<Alice> {
             r_self: r,
             y_self: y,
             TX_f,
+            phantom: PhantomData::default(),
         })
     }
 }
@@ -112,7 +114,7 @@ impl Party0<Bob> {
             X: X_other,
             tid: tid_other,
         }: Message0,
-    ) -> anyhow::Result<Party1> {
+    ) -> anyhow::Result<Party1<Bob>> {
         let TX_f = FundingTransaction::new(
             (X_other, tid_other.clone()),
             (self.x_self.public(), self.tid_self.clone()),
@@ -129,11 +131,12 @@ impl Party0<Bob> {
             r_self: r,
             y_self: y,
             TX_f,
+            phantom: PhantomData::default(),
         })
     }
 }
 
-pub struct Party1 {
+pub struct Party1<R> {
     x_self: KeyPair,
     X_other: PublicKey,
     tid_self: (TxIn, Amount),
@@ -141,9 +144,10 @@ pub struct Party1 {
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
     TX_f: FundingTransaction,
+    phantom: PhantomData<R>,
 }
 
-impl Party1 {
+impl Party1<Alice> {
     pub fn next_message(&self) -> Message1 {
         Message1 {
             R: self.r_self.public(),
@@ -160,33 +164,88 @@ impl Party1 {
             r_self,
             y_self,
             TX_f,
+            ..
         }: Self,
         Message1 {
             R: R_other,
             Y: Y_other,
         }: Message1,
         time_lock: u32,
-    ) -> Result<Party2> {
+    ) -> anyhow::Result<Party2> {
         let TX_c = CommitTransaction::new(
             &TX_f,
             (x_self.public(), r_self.public(), y_self.public()),
             (X_other, R_other, Y_other),
             time_lock,
         )?;
-
-        let sig_TX_c_self =
-            TX_c.digest(FundingTransaction::descriptor(&x_self.public(), &X_other)?);
-        let sig_TX_c_self = todo!("adapt with Y_other");
+        let sig_TX_c_self = TX_c.sign_once(x_self.clone(), Y_other)?;
 
         let TX_s = SplitTransaction::new(
             &TX_c,
             ChannelState {
-                party_0: (tid_self.1, x_self.public()),
-                party_1: (tid_other.1, X_other),
+                a: (tid_self.1, x_self.public()),
+                b: (tid_other.1, X_other),
             },
         );
-
         let sig_TX_s_self = todo!("Sign TX_s.digest() using x_self");
+
+        Ok(Party2 {
+            x_self,
+            X_other,
+            tid_self,
+            tid_other,
+            r_self,
+            y_self,
+            TX_f,
+            TX_c,
+            TX_s,
+            sig_TX_s_self,
+            sig_TX_c_self,
+        })
+    }
+}
+
+impl Party1<Bob> {
+    pub fn next_message(&self) -> Message1 {
+        Message1 {
+            R: self.r_self.public(),
+            Y: self.y_self.public(),
+        }
+    }
+
+    pub fn receive(
+        Self {
+            x_self,
+            X_other,
+            tid_self,
+            tid_other,
+            r_self,
+            y_self,
+            TX_f,
+            ..
+        }: Self,
+        Message1 {
+            R: R_other,
+            Y: Y_other,
+        }: Message1,
+        time_lock: u32,
+    ) -> anyhow::Result<Party2> {
+        let TX_c = CommitTransaction::new(
+            &TX_f,
+            (X_other, R_other, Y_other),
+            (x_self.public(), r_self.public(), y_self.public()),
+            time_lock,
+        )?;
+        let sig_TX_c_self = TX_c.sign_once(x_self.clone(), Y_other)?;
+
+        let TX_s = SplitTransaction::new(
+            &TX_c,
+            ChannelState {
+                a: (tid_other.1, X_other),
+                b: (tid_self.1, x_self.public()),
+            },
+        );
+        let sig_TX_s_self = TX_s.sign_once(x_self.clone())?;
 
         Ok(Party2 {
             x_self,

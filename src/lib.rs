@@ -8,6 +8,6 @@ use crate::keys::PublicKey;
 use bitcoin::Amount;
 
 pub struct ChannelState {
-    party_0: (Amount, PublicKey),
-    party_1: (Amount, PublicKey),
+    a: (Amount, PublicKey),
+    b: (Amount, PublicKey),
 }
