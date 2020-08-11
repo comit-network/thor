@@ -11,7 +11,7 @@ on:
 jobs:
   static_analysis:
     env:
-      RUST_TOOLCHAIN: stable
+      RUST_TOOLCHAIN: nightly
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -47,7 +47,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        rust_toolchain: [stable, beta]
+        rust_toolchain: [nightly ]
         continue_on_error: [false]
         include:
           - os: ubuntu-latest
