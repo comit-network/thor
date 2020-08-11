@@ -84,6 +84,12 @@ impl From<SecretKey> for KeyPair {
     }
 }
 
+impl From<PublicKey> for Point {
+    fn from(from: PublicKey) -> Self {
+        from.0
+    }
+}
+
 pub struct RevocationKeyPair(KeyPair);
 pub struct RevocationPublicKey(PublicKey);
 
@@ -114,6 +120,9 @@ impl From<RevocationPublicKey> for PublicKey {
 pub struct PublishingKeyPair(KeyPair);
 
 #[derive(Clone)]
+pub struct PublishingSecretKey(SecretKey);
+
+#[derive(Clone)]
 pub struct PublishingPublicKey(PublicKey);
 
 impl PublishingKeyPair {
@@ -141,8 +150,8 @@ impl From<PublicKey> for PublishingPublicKey {
 }
 
 impl From<PublishingPublicKey> for PublicKey {
-    fn from(p_public_key: PublishingPublicKey) -> Self {
-        p_public_key.0
+    fn from(public_key: PublishingPublicKey) -> Self {
+        public_key.0
     }
 }
 

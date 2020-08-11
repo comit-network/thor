@@ -3,6 +3,7 @@ use crate::{
         KeyPair, PublicKey, PublishingKeyPair, PublishingPublicKey, RevocationKeyPair,
         RevocationPublicKey,
     },
+    signature::{preverify_sig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
     ChannelState,
 };
@@ -10,8 +11,6 @@ use anyhow::Context;
 use bitcoin::{secp256k1, Amount, TxIn};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use std::marker::PhantomData;
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Message0 {
     X: PublicKey,
@@ -28,7 +27,7 @@ pub struct Message2 {
 }
 
 pub struct Message3 {
-    sig_TX_c: EncryptedSignature,
+    presig_TX_c: EncryptedSignature,
 }
 
 pub struct Message4 {
@@ -166,7 +165,7 @@ impl Alice1 {
             (X_other.clone(), R_other, Y_other.clone()),
             time_lock,
         )?;
-        let sig_TX_c_self = TX_c.presign_once(x_self.clone(), Y_other);
+        let presig_TX_c_self = TX_c.presign_once(x_self.clone(), Y_other);
 
         let TX_s = SplitTransaction::new(
             &TX_c,
@@ -188,7 +187,7 @@ impl Alice1 {
             TX_c,
             TX_s,
             sig_TX_s_self,
-            sig_TX_c_self,
+            presig_TX_c_self,
         })
     }
 }
@@ -234,7 +233,7 @@ impl Bob1 {
             (x_self.public(), r_self.public(), y_self.public()),
             time_lock,
         )?;
-        let sig_TX_c_self = TX_c.presign_once(x_self.clone(), Y_other);
+        let presig_TX_c_self = TX_c.presign_once(x_self.clone(), Y_other);
 
         let TX_s = SplitTransaction::new(
             &TX_c,
@@ -256,7 +255,7 @@ impl Bob1 {
             TX_c,
             TX_s,
             sig_TX_s_self,
-            sig_TX_c_self,
+            presig_TX_c_self,
         })
     }
 }
@@ -271,7 +270,7 @@ pub struct Party2 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    sig_TX_c_self: EncryptedSignature,
+    presig_TX_c_self: EncryptedSignature,
     sig_TX_s_self: Signature,
 }
 
@@ -288,7 +287,8 @@ impl Party2 {
             sig_TX_s: sig_TX_s_other,
         }: Message2,
     ) -> anyhow::Result<Party3> {
-        todo!("verify sig_TX_s_other is a valid signature on self.TX_s.digest() for self.X_other");
+        verify_sig(self.X_other.clone(), &self.TX_s, &sig_TX_s_other)
+            .context("failed to verify sig_TX_s sent by counterparty")?;
 
         Ok(Party3 {
             x_self: self.x_self,
@@ -300,7 +300,7 @@ impl Party2 {
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             TX_s: self.TX_s,
-            sig_TX_c_self: self.sig_TX_c_self,
+            presig_TX_c_self: self.presig_TX_c_self,
             sig_TX_s_self: self.sig_TX_s_self,
             sig_TX_s_other,
         })
@@ -317,7 +317,7 @@ pub struct Party3 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    sig_TX_c_self: EncryptedSignature,
+    presig_TX_c_self: EncryptedSignature,
     sig_TX_s_self: Signature,
     sig_TX_s_other: Signature,
 }
@@ -325,20 +325,23 @@ pub struct Party3 {
 impl Party3 {
     pub fn new_message(&self) -> Message3 {
         Message3 {
-            sig_TX_c: self.sig_TX_c_self.clone(),
+            presig_TX_c: self.presig_TX_c_self.clone(),
         }
     }
 
     pub fn receive(
         self,
         Message3 {
-            sig_TX_c: sig_TX_c_other,
+            presig_TX_c: presig_TX_c_other,
         }: Message3,
     ) -> anyhow::Result<Party4> {
-        todo!(
-            "pVerify sig_TX_c_other is a valid adaptor signature on
-             self.TX_c.digest() for self.X_other and self.y_self.public()"
-        );
+        preverify_sig(
+            self.X_other.clone(),
+            self.y_self.public(),
+            &self.TX_c,
+            presig_TX_c_other.clone(),
+        )
+        .context("failed to verify sig_TX_s sent by counterparty")?;
 
         Ok(Party4 {
             x_self: self.x_self,
@@ -350,8 +353,8 @@ impl Party3 {
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             TX_s: self.TX_s,
-            sig_TX_c_self: self.sig_TX_c_self,
-            sig_TX_c_other,
+            presig_TX_c_self: self.presig_TX_c_self,
+            presig_TX_c_other,
             sig_TX_s_self: self.sig_TX_s_self,
             sig_TX_s_other: self.sig_TX_s_other,
         })
@@ -368,8 +371,8 @@ pub struct Party4 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    sig_TX_c_self: EncryptedSignature,
-    sig_TX_c_other: EncryptedSignature,
+    presig_TX_c_self: EncryptedSignature,
+    presig_TX_c_other: EncryptedSignature,
     sig_TX_s_self: Signature,
     sig_TX_s_other: Signature,
 }
@@ -404,8 +407,8 @@ impl Party4 {
             signed_TX_f,
             TX_c: self.TX_c,
             TX_s: self.TX_s,
-            sig_TX_c_self: self.sig_TX_c_self,
-            sig_TX_c_other: self.sig_TX_c_other,
+            presig_TX_c_self: self.presig_TX_c_self,
+            presig_TX_c_other: self.presig_TX_c_other,
             sig_TX_s_self: self.sig_TX_s_self,
             sig_TX_s_other: self.sig_TX_s_other,
         })
@@ -424,8 +427,8 @@ pub struct Party5 {
     signed_TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    sig_TX_c_self: EncryptedSignature,
-    sig_TX_c_other: EncryptedSignature,
+    presig_TX_c_self: EncryptedSignature,
+    presig_TX_c_other: EncryptedSignature,
     sig_TX_s_self: Signature,
     sig_TX_s_other: Signature,
 }
