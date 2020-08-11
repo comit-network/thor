@@ -1,24 +1,34 @@
 use conquer_once::Lazy;
 
-pub use bitcoin::secp256k1::{PublicKey, SecretKey};
+use bitcoin::{hashes::Hash, SigHash};
+use ecdsa_fun::{
+    fun::{
+        g,
+        hash::Derivation,
+        marker::{Mark, Normal},
+        Point, Scalar, G,
+    },
+    Signature, ECDSA,
+};
 use std::fmt;
 
-pub static SECP: Lazy<bitcoin::secp256k1::Secp256k1<bitcoin::secp256k1::All>> =
-    Lazy::new(bitcoin::secp256k1::Secp256k1::new);
-
-// TODO: Consider using libsecp256k1 instead of bitcoin::secp256k1 (or
-// even secp256k1FUN!), like we did in A2L. That way we can get rid of
-// the `static SECP`, among other things
 #[derive(Clone)]
 pub struct KeyPair {
     secret_key: SecretKey,
     public_key: PublicKey,
 }
 
+#[derive(Clone)]
+pub struct SecretKey(Scalar);
+#[derive(Clone)]
+pub struct PublicKey(Point);
+
 impl KeyPair {
     pub fn new_random() -> KeyPair {
-        let (secret_key, public_key) =
-            SECP.generate_keypair(&mut bitcoin::secp256k1::rand::thread_rng());
+        let secret_key = Scalar::random(&mut rand::thread_rng());
+        let secret_key = SecretKey(secret_key);
+
+        let public_key = secret_key.public();
 
         Self {
             secret_key,
@@ -27,15 +37,36 @@ impl KeyPair {
     }
 
     pub fn public(&self) -> PublicKey {
-        self.public_key
+        self.public_key.clone()
+    }
+
+    pub fn sign(&self, digest: SigHash) -> Signature {
+        // TODO: Use a sensible tag
+        let ecdsa = ECDSA::from_tag(b"my-tag").enforce_low_s();
+
+        ecdsa.sign(
+            &self.secret_key.0,
+            &digest.into_inner(),
+            Derivation::Deterministic,
+        )
+    }
+}
+
+impl SecretKey {
+    pub fn public(&self) -> PublicKey {
+        let sk = &self.0;
+        // TODO: Determine what is the correct marker for this public key
+        let public_key = g!(sk * G).mark::<Normal>();
+
+        PublicKey(public_key)
     }
 }
 
 impl From<SecretKey> for KeyPair {
     fn from(secret_key: SecretKey) -> Self {
         Self {
-            secret_key,
-            public_key: PublicKey::from_secret_key(&SECP, &secret_key),
+            secret_key: secret_key.clone(),
+            public_key: secret_key.public(),
         }
     }
 }
@@ -51,7 +82,7 @@ impl RevocationKeyPair {
     }
 
     pub fn public(&self) -> RevocationPublicKey {
-        RevocationPublicKey(self.0.public_key)
+        RevocationPublicKey(self.0.public_key.clone())
     }
 }
 
@@ -69,7 +100,7 @@ impl From<RevocationPublicKey> for PublicKey {
 
 pub struct PublishingKeyPair(KeyPair);
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct PublishingPublicKey(PublicKey);
 
 impl PublishingKeyPair {
@@ -80,7 +111,7 @@ impl PublishingKeyPair {
     }
 
     pub fn public(&self) -> PublishingPublicKey {
-        PublishingPublicKey(self.0.public_key)
+        PublishingPublicKey(self.0.public_key.clone())
     }
 }
 
@@ -104,12 +135,38 @@ impl From<PublishingPublicKey> for PublicKey {
 
 impl fmt::LowerHex for PublishingPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:x}", self.0)
+        write!(
+            f,
+            "{:x}",
+            bitcoin::secp256k1::PublicKey::from(self.0.clone())
+        )
     }
 }
 
 impl fmt::Display for PublishingPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
+        write!(
+            f,
+            "{:x}",
+            bitcoin::secp256k1::PublicKey::from(self.0.clone())
+        )
+    }
+}
+
+impl From<RevocationPublicKey> for bitcoin::secp256k1::PublicKey {
+    fn from(_from: RevocationPublicKey) -> Self {
+        todo!()
+    }
+}
+
+impl From<PublishingPublicKey> for bitcoin::secp256k1::PublicKey {
+    fn from(_from: PublishingPublicKey) -> Self {
+        todo!()
+    }
+}
+
+impl From<PublicKey> for bitcoin::secp256k1::PublicKey {
+    fn from(_from: PublicKey) -> Self {
+        todo!()
     }
 }

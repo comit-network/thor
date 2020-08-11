@@ -9,6 +9,7 @@ use bitcoin::{
     hashes::hash160, secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash,
     Transaction, TxIn, TxOut,
 };
+use ecdsa_fun::{self, fun::hash::Derivation, Signature, ECDSA};
 use miniscript::{Descriptor, Segwitv0};
 use std::str::FromStr;
 
@@ -31,7 +32,7 @@ impl FundingTransaction {
         (X_a, (tid_a, amount_a)): (PublicKey, (TxIn, Amount)),
         (X_b, (tid_b, amount_b)): (PublicKey, (TxIn, Amount)),
     ) -> anyhow::Result<Self> {
-        let output_descriptor = FundingTransaction::build_descriptor(&X_a, &X_b)
+        let output_descriptor = FundingTransaction::build_descriptor(&X_a.into(), &X_b.into())
             .context("failed to build descriptor")?;
         let transaction = Transaction {
             version: 2,
@@ -138,8 +139,8 @@ impl CommitTransaction {
     /// Add signatures to CommitTransaction.
     pub fn add_signatures(
         self,
-        (_X_a, _sig_a): (PublicKey, secp256k1::Signature),
-        (_X_b, _sig_b): (PublicKey, secp256k1::Signature),
+        (_X_a, _sig_a): (PublicKey, Signature),
+        (_X_b, _sig_b): (PublicKey, Signature),
     ) -> anyhow::Result<Self> {
         // NOTE: Could return a `SignedCommitTransaction` for extra type
         // safety.
@@ -181,19 +182,42 @@ impl CommitTransaction {
         (X_1, R_1, Y_1): (PublicKey, RevocationPublicKey, PublishingPublicKey),
         time_lock: u32,
     ) -> Result<Descriptor<bitcoin::PublicKey>> {
+        let X_0 = bitcoin::secp256k1::PublicKey::from(X_0);
+        let R_0 = bitcoin::secp256k1::PublicKey::from(R_0);
+        let Y_0 = bitcoin::secp256k1::PublicKey::from(Y_0);
+
+        let X_1 = bitcoin::secp256k1::PublicKey::from(X_1);
+        let R_1 = bitcoin::secp256k1::PublicKey::from(R_1);
+        let Y_1 = bitcoin::secp256k1::PublicKey::from(Y_1);
+
+        Self::bitcoin_descriptor((X_0, R_0, Y_0), (X_1, R_1, Y_1), time_lock)
+    }
+
+    // TODO: Remove this layer when conversion between
+    // ecdsa_fun::Signature and bitcoin::secp256k1::Signature is
+    // implemented
+    fn bitcoin_descriptor(
+        (X_0, R_0, Y_0): (
+            bitcoin::secp256k1::PublicKey,
+            bitcoin::secp256k1::PublicKey,
+            bitcoin::secp256k1::PublicKey,
+        ),
+        (X_1, R_1, Y_1): (
+            bitcoin::secp256k1::PublicKey,
+            bitcoin::secp256k1::PublicKey,
+            bitcoin::secp256k1::PublicKey,
+        ),
+        time_lock: u32,
+    ) -> Result<Descriptor<bitcoin::PublicKey>> {
         let X_0_hash = hash160::Hash::hash(&X_0.serialize()[..]);
         let X_0 = hex::encode(X_0.serialize().to_vec());
         let X_1_hash = hash160::Hash::hash(&X_1.serialize()[..]);
         let X_1 = hex::encode(X_1.serialize().to_vec());
 
-        let R_0: PublicKey = R_0.into();
         let R_0_hash = hash160::Hash::hash(&R_0.serialize()[..]);
-        let R_1: PublicKey = R_1.into();
         let R_1_hash = hash160::Hash::hash(&R_1.serialize()[..]);
 
-        let Y_0: PublicKey = Y_0.into();
         let Y_0_hash = hash160::Hash::hash(&Y_0.serialize()[..]);
-        let Y_1: PublicKey = Y_1.into();
         let Y_1_hash = hash160::Hash::hash(&Y_1.serialize()[..]);
 
         // Describes the spending policy of the channel commit transaction T_c.
@@ -275,15 +299,13 @@ impl SplitTransaction {
         }
     }
 
-    pub fn sign_once(&self, _x_self: KeyPair) -> anyhow::Result<secp256k1::Signature> {
-        let sig = todo!("Sign self.digest with x_self");
-
-        Ok(sig)
+    pub fn sign_once(&self, x_self: KeyPair) -> Signature {
+        x_self.sign(self.digest)
     }
 
     fn wpk_descriptor(key: PublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
         let pk = bitcoin::PublicKey {
-            key,
+            key: key.into(),
             compressed: true,
         };
         miniscript::Descriptor::Wpkh(pk)
@@ -345,13 +367,11 @@ mod tests {
         let R_0 = secp256k1::PublicKey::from_str(
             "03ff65a7fedd9dc637bbaf3cbe4c5971de853e0c359195f19c57211fe0b96ab39e",
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let Y_0 = secp256k1::PublicKey::from_str(
             "03b3ee07bb851fec17e6cdb2dc235523555dc3193c2ff6399ef28ce941bc57b2b4",
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let X_1 = secp256k1::PublicKey::from_str(
             "03437a3813f17a264e2c8fc41fb0895634d34c7c9cb9147c553cc67ff37293b1cd",
         )
@@ -359,17 +379,16 @@ mod tests {
         let R_1 = secp256k1::PublicKey::from_str(
             "02b637ba109a2a844b27d31c9ffac41bfe080d2f0256eeb03839d66442c4ce0deb",
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let Y_1 = secp256k1::PublicKey::from_str(
             "03851562dd136d68ff0911b4aa6b1ec95850144ddb939a1070159f0a4163d20895",
         )
-        .unwrap()
-        .into();
+        .unwrap();
         let time_lock = 144;
 
         let descriptor =
-            CommitTransaction::descriptor((X_0, R_0, Y_0), (X_1, R_1, Y_1), time_lock).unwrap();
+            CommitTransaction::bitcoin_descriptor((X_0, R_0, Y_0), (X_1, R_1, Y_1), time_lock)
+                .unwrap();
 
         let witness_script = format!("{}", descriptor.witness_script());
         assert_eq!(witness_script, "Script(OP_IF OP_IF OP_DUP OP_HASH160 OP_PUSHBYTES_20 635de934904ad5406559beebcc3ca0d119721323 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 be60bbce0058cb25f268d70559e1a3433d75f557 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 4c8a3449333f92f386b4b8a202353719016261e8 OP_EQUALVERIFY OP_ELSE OP_DUP OP_HASH160 OP_PUSHBYTES_20 1b08ea4a2fbbe0121205f63068f78564ff204995 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 ea92d4bb15b4babd0c216c12f61fe7083ed06e3b OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 565dd1650db6ffae1c2dd67d83a5709aa0ddd2e9 OP_EQUALVERIFY OP_ENDIF OP_ELSE OP_PUSHBYTES_2 9000 OP_CSV OP_VERIFY OP_PUSHBYTES_33 032a34617a9141231baa27bcadf622322eed1e16b6036fdf15f42a85f7250c4823 OP_CHECKSIGVERIFY OP_PUSHBYTES_33 03437a3813f17a264e2c8fc41fb0895634d34c7c9cb9147c553cc67ff37293b1cd OP_ENDIF OP_CHECKSIG)");

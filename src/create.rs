@@ -8,6 +8,7 @@ use crate::{
 };
 use anyhow::Context;
 use bitcoin::{secp256k1, Amount, TxIn};
+use ecdsa_fun::Signature;
 use std::marker::PhantomData;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -26,7 +27,7 @@ pub struct Message1 {
 }
 
 pub struct Message2 {
-    sig_TX_s: secp256k1::Signature,
+    sig_TX_s: Signature,
 }
 
 pub struct Message3 {
@@ -64,7 +65,7 @@ impl Alice0 {
     ) -> anyhow::Result<Alice1> {
         let TX_f = FundingTransaction::new(
             (self.x_self.public(), self.tid_self.clone()),
-            (X_other, tid_other.clone()),
+            (X_other.clone(), tid_other.clone()),
         )
         .context("failed to build funding transaction")?;
 
@@ -108,7 +109,7 @@ impl Bob0 {
         }: Message0,
     ) -> anyhow::Result<Bob1> {
         let TX_f = FundingTransaction::new(
-            (X_other, tid_other.clone()),
+            (X_other.clone(), tid_other.clone()),
             (self.x_self.public(), self.tid_self.clone()),
         )
         .context("failed to build funding transaction")?;
@@ -165,7 +166,7 @@ impl Alice1 {
         let TX_c = CommitTransaction::new(
             &TX_f,
             (x_self.public(), r_self.public(), y_self.public()),
-            (X_other, R_other, Y_other),
+            (X_other.clone(), R_other, Y_other.clone()),
             time_lock,
         )?;
         let sig_TX_c_self = TX_c.sign_once(x_self.clone(), Y_other)?;
@@ -174,10 +175,10 @@ impl Alice1 {
             &TX_c,
             ChannelState {
                 a: (tid_self.1, x_self.public()),
-                b: (tid_other.1, X_other),
+                b: (tid_other.1, X_other.clone()),
             },
         );
-        let sig_TX_s_self = todo!("Sign TX_s.digest() using x_self");
+        let sig_TX_s_self = TX_s.sign_once(x_self.clone());
 
         Ok(Party2 {
             x_self,
@@ -232,7 +233,7 @@ impl Bob1 {
     ) -> anyhow::Result<Party2> {
         let TX_c = CommitTransaction::new(
             &TX_f,
-            (X_other, R_other, Y_other),
+            (X_other.clone(), R_other, Y_other.clone()),
             (x_self.public(), r_self.public(), y_self.public()),
             time_lock,
         )?;
@@ -241,11 +242,11 @@ impl Bob1 {
         let TX_s = SplitTransaction::new(
             &TX_c,
             ChannelState {
-                a: (tid_other.1, X_other),
+                a: (tid_other.1, X_other.clone()),
                 b: (tid_self.1, x_self.public()),
             },
         );
-        let sig_TX_s_self = TX_s.sign_once(x_self.clone())?;
+        let sig_TX_s_self = TX_s.sign_once(x_self.clone());
 
         Ok(Party2 {
             x_self,
@@ -274,13 +275,13 @@ pub struct Party2 {
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
     sig_TX_c_self: AdaptorSignature,
-    sig_TX_s_self: secp256k1::Signature,
+    sig_TX_s_self: Signature,
 }
 
 impl Party2 {
     pub fn new_message(&self) -> Message2 {
         Message2 {
-            sig_TX_s: self.sig_TX_s_self,
+            sig_TX_s: self.sig_TX_s_self.clone(),
         }
     }
 
@@ -320,8 +321,8 @@ pub struct Party3 {
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
     sig_TX_c_self: AdaptorSignature,
-    sig_TX_s_self: secp256k1::Signature,
-    sig_TX_s_other: secp256k1::Signature,
+    sig_TX_s_self: Signature,
+    sig_TX_s_other: Signature,
 }
 
 impl Party3 {
@@ -372,8 +373,8 @@ pub struct Party4 {
     TX_s: SplitTransaction,
     sig_TX_c_self: AdaptorSignature,
     sig_TX_c_other: AdaptorSignature,
-    sig_TX_s_self: secp256k1::Signature,
-    sig_TX_s_other: secp256k1::Signature,
+    sig_TX_s_self: Signature,
+    sig_TX_s_other: Signature,
 }
 
 /// Sign one of the inputs of the `FundingTransaction`.
@@ -428,8 +429,8 @@ pub struct Party5 {
     TX_s: SplitTransaction,
     sig_TX_c_self: AdaptorSignature,
     sig_TX_c_other: AdaptorSignature,
-    sig_TX_s_self: secp256k1::Signature,
-    sig_TX_s_other: secp256k1::Signature,
+    sig_TX_s_self: Signature,
+    sig_TX_s_other: Signature,
 }
 
 #[derive(Debug, thiserror::Error)]
