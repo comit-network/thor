@@ -2,6 +2,7 @@ use conquer_once::Lazy;
 
 use bitcoin::{hashes::Hash, SigHash};
 use ecdsa_fun::{
+    adaptor::{Adaptor, EncryptedSignature},
     fun::{
         g,
         hash::Derivation,
@@ -46,6 +47,18 @@ impl KeyPair {
 
         ecdsa.sign(
             &self.secret_key.0,
+            &digest.into_inner(),
+            Derivation::Deterministic,
+        )
+    }
+
+    pub fn presign(&self, Y: PublishingPublicKey, digest: SigHash) -> EncryptedSignature {
+        // TODO: Use a sensible tag
+        let adaptor = Adaptor::from_tag(b"my-tag");
+
+        adaptor.encrypted_sign(
+            &self.secret_key.0,
+            &(Y.0).0,
             &digest.into_inner(),
             Derivation::Deterministic,
         )

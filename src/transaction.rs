@@ -1,5 +1,4 @@
 use crate::{
-    create::AdaptorSignature,
     keys::{KeyPair, PublicKey, PublishingPublicKey, RevocationPublicKey},
     ChannelState,
 };
@@ -9,7 +8,7 @@ use bitcoin::{
     hashes::hash160, secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash,
     Transaction, TxIn, TxOut,
 };
-use ecdsa_fun::{self, fun::hash::Derivation, Signature, ECDSA};
+use ecdsa_fun::{self, adaptor::EncryptedSignature, fun::hash::Derivation, Signature, ECDSA};
 use miniscript::{Descriptor, Segwitv0};
 use std::str::FromStr;
 
@@ -126,14 +125,12 @@ impl CommitTransaction {
         })
     }
 
-    pub fn sign_once(
+    pub fn presign_once(
         &self,
-        _x_self: KeyPair,
-        _Y_other: PublishingPublicKey,
-    ) -> anyhow::Result<AdaptorSignature> {
-        let sig = todo!("pSign self.digest with x_self and Y_other");
-
-        Ok(sig)
+        x_self: KeyPair,
+        Y_other: PublishingPublicKey,
+    ) -> EncryptedSignature {
+        x_self.presign(Y_other, self.digest)
     }
 
     /// Add signatures to CommitTransaction.

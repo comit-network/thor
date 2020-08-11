@@ -8,13 +8,10 @@ use crate::{
 };
 use anyhow::Context;
 use bitcoin::{secp256k1, Amount, TxIn};
-use ecdsa_fun::Signature;
+use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use std::marker::PhantomData;
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Clone)]
-pub struct AdaptorSignature;
 
 pub struct Message0 {
     X: PublicKey,
@@ -31,7 +28,7 @@ pub struct Message2 {
 }
 
 pub struct Message3 {
-    sig_TX_c: AdaptorSignature,
+    sig_TX_c: EncryptedSignature,
 }
 
 pub struct Message4 {
@@ -169,7 +166,7 @@ impl Alice1 {
             (X_other.clone(), R_other, Y_other.clone()),
             time_lock,
         )?;
-        let sig_TX_c_self = TX_c.sign_once(x_self.clone(), Y_other)?;
+        let sig_TX_c_self = TX_c.presign_once(x_self.clone(), Y_other);
 
         let TX_s = SplitTransaction::new(
             &TX_c,
@@ -237,7 +234,7 @@ impl Bob1 {
             (x_self.public(), r_self.public(), y_self.public()),
             time_lock,
         )?;
-        let sig_TX_c_self = TX_c.sign_once(x_self.clone(), Y_other)?;
+        let sig_TX_c_self = TX_c.presign_once(x_self.clone(), Y_other);
 
         let TX_s = SplitTransaction::new(
             &TX_c,
@@ -274,7 +271,7 @@ pub struct Party2 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    sig_TX_c_self: AdaptorSignature,
+    sig_TX_c_self: EncryptedSignature,
     sig_TX_s_self: Signature,
 }
 
@@ -320,7 +317,7 @@ pub struct Party3 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    sig_TX_c_self: AdaptorSignature,
+    sig_TX_c_self: EncryptedSignature,
     sig_TX_s_self: Signature,
     sig_TX_s_other: Signature,
 }
@@ -371,8 +368,8 @@ pub struct Party4 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    sig_TX_c_self: AdaptorSignature,
-    sig_TX_c_other: AdaptorSignature,
+    sig_TX_c_self: EncryptedSignature,
+    sig_TX_c_other: EncryptedSignature,
     sig_TX_s_self: Signature,
     sig_TX_s_other: Signature,
 }
@@ -427,8 +424,8 @@ pub struct Party5 {
     signed_TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    sig_TX_c_self: AdaptorSignature,
-    sig_TX_c_other: AdaptorSignature,
+    sig_TX_c_self: EncryptedSignature,
+    sig_TX_c_other: EncryptedSignature,
     sig_TX_s_self: Signature,
     sig_TX_s_other: Signature,
 }
