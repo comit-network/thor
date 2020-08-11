@@ -2,6 +2,7 @@ use crate::{
     keys::{PublicKey, PublishingPublicKey, RevocationPublicKey},
     ChannelState,
 };
+use anyhow::Context;
 use bitcoin::hashes::Hash;
 use bitcoin::{
     hashes::hash160, secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash,
@@ -20,16 +21,17 @@ impl FundingTransaction {
     // references the `previous_output`'s `TxId` and `vout`. There may
     // be a better way of modelling each input than `(TxIn, Amount)`.
     pub fn new(
-        (_X_self, (tid_self, amount_self)): (PublicKey, (TxIn, Amount)),
-        (_X_other, (tid_other, amount_other)): (PublicKey, (TxIn, Amount)),
-        descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+        (X_a, (tid_a, amount_a)): (PublicKey, (TxIn, Amount)),
+        (X_b, (tid_b, amount_b)): (PublicKey, (TxIn, Amount)),
     ) -> anyhow::Result<Self> {
+        let descriptor =
+            FundingTransaction::descriptor(&X_a, &X_b).context("failed to build descriptor")?;
         let transaction = Transaction {
             version: 2,
             lock_time: 0,
-            input: vec![tid_self, tid_other],
+            input: vec![tid_a, tid_b],
             output: vec![TxOut {
-                value: (amount_self + amount_other).as_sat(),
+                value: (amount_a + amount_b).as_sat(),
                 script_pubkey: descriptor.script_pubkey(),
             }],
         };
@@ -51,19 +53,19 @@ impl FundingTransaction {
     }
 
     pub fn descriptor(
-        X_self: &secp256k1::PublicKey,
-        X_other: &secp256k1::PublicKey,
+        X_a: &secp256k1::PublicKey,
+        X_b: &secp256k1::PublicKey,
     ) -> Result<miniscript::Descriptor<bitcoin::PublicKey>> {
         // Describes the spending policy of the channel fund transaction T_f.
-        // For now we use `and(x_self, x_other)` - eventually we might want to replace this with a threshold signature.
-        const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_self),pk_k(X_other))";
+        // For now we use `and(X_a, X_b)` - eventually we might want to replace this with a threshold signature.
+        const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_a),pk_k(X_b))";
 
-        let X_self = hex::encode(X_self.serialize().to_vec());
-        let X_other = hex::encode(X_other.serialize().to_vec());
+        let X_a = hex::encode(X_a.serialize().to_vec());
+        let X_b = hex::encode(X_b.serialize().to_vec());
 
         let miniscript = MINISCRIPT_TEMPLATE
-            .replace("X_self", &X_self)
-            .replace("X_other", &X_other);
+            .replace("X_a", &X_a)
+            .replace("X_b", &X_b);
 
         let miniscript =
             miniscript::Miniscript::<bitcoin::PublicKey, Segwitv0>::from_str(&miniscript)

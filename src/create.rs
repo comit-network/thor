@@ -36,18 +36,22 @@ pub struct Message4 {
     TX_f_signed_once: FundingTransaction,
 }
 
-pub struct Party0 {
+struct Alice;
+struct Bob;
+
+pub struct Party0<R> {
     x_self: KeyPair,
     tid_self: (TxIn, Amount),
+    phantom: std::marker::PhantomData<R>,
 }
 
-impl Party0 {
-    pub fn new(tid: (TxIn, Amount)) -> Self {
-        let key_pair = KeyPair::new_random();
-
+impl Party0<Alice> {
+    pub fn new(tid_self: (TxIn, Amount)) -> Self {
+        let x_self = KeyPair::new_random();
         Self {
-            x_self: key_pair,
-            tid_self: tid,
+            x_self,
+            tid_self,
+            phantom: Default::default(),
         }
     }
 
@@ -57,32 +61,22 @@ impl Party0 {
             tid: self.tid_self.clone(),
         }
     }
-}
 
-trait Party0Receive {
-    fn receive_from_A(self, message0: Message0) -> anyhow::Result<Party1>;
-    fn receive_from_B(self, message0: Message0) -> anyhow::Result<Party1>;
-}
-
-impl Party0Receive for Party0 {
-    fn receive_from_A(
+    pub fn receive(
         self,
         Message0 {
             X: X_other,
             tid: tid_other,
         }: Message0,
     ) -> anyhow::Result<Party1> {
-        let r = RevocationKeyPair::new_random();
-        let y = PublishingKeyPair::new_random();
-
         let TX_f = FundingTransaction::new(
             (self.x_self.public(), self.tid_self.clone()),
             (X_other, tid_other.clone()),
-            FundingTransaction::descriptor(&self.x_self.public(), &X_other)
-                .context("failed to build descriptor")?,
         )
         .context("failed to build funding transaction")?;
 
+        let r = RevocationKeyPair::new_random();
+        let y = PublishingKeyPair::new_random();
         Ok(Party1 {
             x_self: self.x_self,
             X_other,
@@ -93,25 +87,40 @@ impl Party0Receive for Party0 {
             TX_f,
         })
     }
+}
 
-    fn receive_from_B(
+impl Party0<Bob> {
+    pub fn new(tid_self: (TxIn, Amount)) -> Self {
+        let x_self = KeyPair::new_random();
+        Self {
+            x_self,
+            tid_self,
+            phantom: Default::default(),
+        }
+    }
+
+    pub fn next_message(&self) -> Message0 {
+        Message0 {
+            X: self.x_self.public(),
+            tid: self.tid_self.clone(),
+        }
+    }
+
+    pub fn receive(
         self,
         Message0 {
             X: X_other,
             tid: tid_other,
         }: Message0,
     ) -> anyhow::Result<Party1> {
-        let r = RevocationKeyPair::new_random();
-        let y = PublishingKeyPair::new_random();
-
         let TX_f = FundingTransaction::new(
-            (self.x_self.public(), self.tid_self.clone()),
             (X_other, tid_other.clone()),
-            FundingTransaction::descriptor(&X_other, &self.x_self.public())
-                .context("failed to build descriptor")?,
+            (self.x_self.public(), self.tid_self.clone()),
         )
         .context("failed to build funding transaction")?;
 
+        let r = RevocationKeyPair::new_random();
+        let y = PublishingKeyPair::new_random();
         Ok(Party1 {
             x_self: self.x_self,
             X_other,
