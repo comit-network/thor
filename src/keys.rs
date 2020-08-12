@@ -43,7 +43,7 @@ impl OwnershipKeyPair {
         ecdsa.sign(&self.secret_key, &digest.into_inner())
     }
 
-    pub fn presign(&self, Y: PublishingPublicKey, digest: SigHash) -> EncryptedSignature {
+    pub fn encsign(&self, Y: PublishingPublicKey, digest: SigHash) -> EncryptedSignature {
         let adaptor = Adaptor::<Sha256, _>::new(nonce::from_global_rng::<Sha256, ThreadRng>());
 
         adaptor.encrypted_sign(&self.secret_key, &Y.0, &digest.into_inner())

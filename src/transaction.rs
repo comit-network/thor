@@ -127,12 +127,12 @@ impl CommitTransaction {
         })
     }
 
-    pub fn presign_once(
+    pub fn encsign_once(
         &self,
         x_self: OwnershipKeyPair,
         Y_other: PublishingPublicKey,
     ) -> EncryptedSignature {
-        x_self.presign(Y_other, self.digest)
+        x_self.encsign(Y_other, self.digest)
     }
 
     /// Add signatures to CommitTransaction.

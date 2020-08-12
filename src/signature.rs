@@ -15,13 +15,17 @@ use sha2::Sha256;
 pub struct InvalidSignature;
 
 pub fn verify_sig(
-    public_key: OwnershipPublicKey,
+    verification_key: OwnershipPublicKey,
     TX_s: &SplitTransaction,
     signature: &Signature,
 ) -> Result<(), InvalidSignature> {
     let ecdsa = ECDSA::verify_only();
 
-    if ecdsa.verify(&public_key.into(), &TX_s.digest().into_inner(), &signature) {
+    if ecdsa.verify(
+        &verification_key.into(),
+        &TX_s.digest().into_inner(),
+        &signature,
+    ) {
         Ok(())
     } else {
         Err(InvalidSignature)
@@ -29,25 +33,25 @@ pub fn verify_sig(
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("presignature is invalid")]
-pub struct InvalidPresignature;
+#[error("encrypted signature is invalid")]
+pub struct InvalidEncryptedSignature;
 
-pub fn preverify_sig(
+pub fn verify_encsig(
     verification_key: OwnershipPublicKey,
     encryption_key: PublishingPublicKey,
     TX_c: &CommitTransaction,
-    presignature: EncryptedSignature,
-) -> Result<(), InvalidPresignature> {
+    encsig: &EncryptedSignature,
+) -> Result<(), InvalidEncryptedSignature> {
     let adaptor = Adaptor::<Sha256, _>::new(nonce::from_global_rng::<Sha256, ThreadRng>());
 
     if adaptor.verify_encrypted_signature(
         &verification_key.into(),
         &encryption_key.into(),
         &TX_c.digest().into_inner(),
-        &presignature,
+        &encsig,
     ) {
         Ok(())
     } else {
-        Err(InvalidPresignature)
+        Err(InvalidEncryptedSignature)
     }
 }

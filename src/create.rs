@@ -3,7 +3,7 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    signature::{preverify_sig, verify_sig},
+    signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
     ChannelState,
 };
@@ -27,7 +27,7 @@ pub struct Message2 {
 }
 
 pub struct Message3 {
-    presig_TX_c: EncryptedSignature,
+    encsig_TX_c: EncryptedSignature,
 }
 
 pub struct Message4 {
@@ -165,7 +165,7 @@ impl Alice1 {
             (X_other.clone(), R_other, Y_other.clone()),
             time_lock,
         )?;
-        let presig_TX_c_self = TX_c.presign_once(x_self.clone(), Y_other);
+        let encsig_TX_c_self = TX_c.encsign_once(x_self.clone(), Y_other);
 
         let TX_s = SplitTransaction::new(
             &TX_c,
@@ -187,7 +187,7 @@ impl Alice1 {
             TX_c,
             TX_s,
             sig_TX_s_self,
-            presig_TX_c_self,
+            encsig_TX_c_self,
         })
     }
 }
@@ -233,7 +233,7 @@ impl Bob1 {
             (x_self.public(), r_self.public(), y_self.public()),
             time_lock,
         )?;
-        let presig_TX_c_self = TX_c.presign_once(x_self.clone(), Y_other);
+        let encsig_TX_c_self = TX_c.encsign_once(x_self.clone(), Y_other);
 
         let TX_s = SplitTransaction::new(
             &TX_c,
@@ -255,7 +255,7 @@ impl Bob1 {
             TX_c,
             TX_s,
             sig_TX_s_self,
-            presig_TX_c_self,
+            encsig_TX_c_self,
         })
     }
 }
@@ -270,7 +270,7 @@ pub struct Party2 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    presig_TX_c_self: EncryptedSignature,
+    encsig_TX_c_self: EncryptedSignature,
     sig_TX_s_self: Signature,
 }
 
@@ -300,7 +300,7 @@ impl Party2 {
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             TX_s: self.TX_s,
-            presig_TX_c_self: self.presig_TX_c_self,
+            encsig_TX_c_self: self.encsig_TX_c_self,
             sig_TX_s_self: self.sig_TX_s_self,
             sig_TX_s_other,
         })
@@ -317,7 +317,7 @@ pub struct Party3 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    presig_TX_c_self: EncryptedSignature,
+    encsig_TX_c_self: EncryptedSignature,
     sig_TX_s_self: Signature,
     sig_TX_s_other: Signature,
 }
@@ -325,21 +325,21 @@ pub struct Party3 {
 impl Party3 {
     pub fn new_message(&self) -> Message3 {
         Message3 {
-            presig_TX_c: self.presig_TX_c_self.clone(),
+            encsig_TX_c: self.encsig_TX_c_self.clone(),
         }
     }
 
     pub fn receive(
         self,
         Message3 {
-            presig_TX_c: presig_TX_c_other,
+            encsig_TX_c: encsig_TX_c_other,
         }: Message3,
     ) -> anyhow::Result<Party4> {
-        preverify_sig(
+        verify_encsig(
             self.X_other.clone(),
             self.y_self.public(),
             &self.TX_c,
-            presig_TX_c_other.clone(),
+            &encsig_TX_c_other,
         )
         .context("failed to verify sig_TX_s sent by counterparty")?;
 
@@ -353,8 +353,8 @@ impl Party3 {
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             TX_s: self.TX_s,
-            presig_TX_c_self: self.presig_TX_c_self,
-            presig_TX_c_other,
+            encsig_TX_c_self: self.encsig_TX_c_self,
+            encsig_TX_c_other,
             sig_TX_s_self: self.sig_TX_s_self,
             sig_TX_s_other: self.sig_TX_s_other,
         })
@@ -371,8 +371,8 @@ pub struct Party4 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    presig_TX_c_self: EncryptedSignature,
-    presig_TX_c_other: EncryptedSignature,
+    encsig_TX_c_self: EncryptedSignature,
+    encsig_TX_c_other: EncryptedSignature,
     sig_TX_s_self: Signature,
     sig_TX_s_other: Signature,
 }
@@ -407,8 +407,8 @@ impl Party4 {
             signed_TX_f,
             TX_c: self.TX_c,
             TX_s: self.TX_s,
-            presig_TX_c_self: self.presig_TX_c_self,
-            presig_TX_c_other: self.presig_TX_c_other,
+            encsig_TX_c_self: self.encsig_TX_c_self,
+            encsig_TX_c_other: self.encsig_TX_c_other,
             sig_TX_s_self: self.sig_TX_s_self,
             sig_TX_s_other: self.sig_TX_s_other,
         })
@@ -427,8 +427,8 @@ pub struct Party5 {
     signed_TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    presig_TX_c_self: EncryptedSignature,
-    presig_TX_c_other: EncryptedSignature,
+    encsig_TX_c_self: EncryptedSignature,
+    encsig_TX_c_other: EncryptedSignature,
     sig_TX_s_self: Signature,
     sig_TX_s_other: Signature,
 }
