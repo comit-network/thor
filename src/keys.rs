@@ -1,5 +1,6 @@
 use conquer_once::Lazy;
 
+use anyhow::anyhow;
 use bitcoin::{hashes::Hash, SigHash};
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
@@ -11,25 +12,20 @@ use ecdsa_fun::{
     },
     Signature, ECDSA,
 };
-use std::fmt;
+use std::{convert::TryFrom, fmt};
 
 #[derive(Clone)]
-pub struct KeyPair {
-    secret_key: SecretKey,
-    public_key: PublicKey,
+pub struct OwnershipKeyPair {
+    secret_key: Scalar,
+    public_key: Point,
 }
 
 #[derive(Clone)]
-pub struct SecretKey(Scalar);
-#[derive(Clone)]
-pub struct PublicKey(Point);
+pub struct OwnershipPublicKey(Point);
 
-impl KeyPair {
-    pub fn new_random() -> KeyPair {
-        let secret_key = Scalar::random(&mut rand::thread_rng());
-        let secret_key = SecretKey(secret_key);
-
-        let public_key = secret_key.public();
+impl OwnershipKeyPair {
+    pub fn new_random() -> OwnershipKeyPair {
+        let (secret_key, public_key) = random_key_pair();
 
         Self {
             secret_key,
@@ -37,8 +33,8 @@ impl KeyPair {
         }
     }
 
-    pub fn public(&self) -> PublicKey {
-        self.public_key.clone()
+    pub fn public(&self) -> OwnershipPublicKey {
+        OwnershipPublicKey(self.public_key.clone())
     }
 
     pub fn sign(&self, digest: SigHash) -> Signature {
@@ -46,7 +42,7 @@ impl KeyPair {
         let ecdsa = ECDSA::from_tag(b"my-tag").enforce_low_s();
 
         ecdsa.sign(
-            &self.secret_key.0,
+            &self.secret_key,
             &digest.into_inner(),
             Derivation::Deterministic,
         )
@@ -57,99 +53,115 @@ impl KeyPair {
         let adaptor = Adaptor::from_tag(b"my-tag");
 
         adaptor.encrypted_sign(
-            &self.secret_key.0,
-            &(Y.0).0,
+            &self.secret_key,
+            &Y.0,
             &digest.into_inner(),
             Derivation::Deterministic,
         )
     }
 }
 
-impl SecretKey {
-    pub fn public(&self) -> PublicKey {
-        let sk = &self.0;
-        // TODO: Determine what is the correct marker for this public key
-        let public_key = g!(sk * G).mark::<Normal>();
-
-        PublicKey(public_key)
+impl From<Point> for OwnershipPublicKey {
+    fn from(public_key: Point) -> Self {
+        Self(public_key)
     }
 }
 
-impl From<SecretKey> for KeyPair {
-    fn from(secret_key: SecretKey) -> Self {
+impl From<OwnershipPublicKey> for Point {
+    fn from(public_key: OwnershipPublicKey) -> Self {
+        public_key.0
+    }
+}
+
+impl From<Scalar> for OwnershipKeyPair {
+    fn from(secret_key: Scalar) -> Self {
+        let public_key = public_key(&secret_key);
+
         Self {
-            secret_key: secret_key.clone(),
-            public_key: secret_key.public(),
+            secret_key,
+            public_key,
         }
     }
 }
 
-impl From<PublicKey> for Point {
-    fn from(from: PublicKey) -> Self {
-        from.0
-    }
+pub struct RevocationKeyPair {
+    secret_key: Scalar,
+    public_key: Point,
 }
 
-pub struct RevocationKeyPair(KeyPair);
-pub struct RevocationPublicKey(PublicKey);
+pub struct RevocationPublicKey(Point);
 
 impl RevocationKeyPair {
     pub fn new_random() -> Self {
-        let key_pair = KeyPair::new_random();
+        let (secret_key, public_key) = random_key_pair();
 
-        Self(key_pair)
+        Self {
+            secret_key,
+            public_key,
+        }
     }
 
     pub fn public(&self) -> RevocationPublicKey {
-        RevocationPublicKey(self.0.public_key.clone())
+        RevocationPublicKey(self.public_key.clone())
     }
 }
 
-impl From<PublicKey> for RevocationPublicKey {
-    fn from(public_key: PublicKey) -> Self {
+impl From<Point> for RevocationPublicKey {
+    fn from(public_key: Point) -> Self {
         Self(public_key)
     }
 }
 
-impl From<RevocationPublicKey> for PublicKey {
-    fn from(r_public_key: RevocationPublicKey) -> Self {
-        r_public_key.0
+impl From<RevocationPublicKey> for Point {
+    fn from(public_key: RevocationPublicKey) -> Self {
+        public_key.0
     }
 }
 
-pub struct PublishingKeyPair(KeyPair);
+pub struct PublishingKeyPair {
+    secret_key: Scalar,
+    public_key: Point,
+}
 
 #[derive(Clone)]
-pub struct PublishingSecretKey(SecretKey);
+pub struct PublishingSecretKey(Scalar);
 
 #[derive(Clone)]
-pub struct PublishingPublicKey(PublicKey);
+pub struct PublishingPublicKey(Point);
 
 impl PublishingKeyPair {
     pub fn new_random() -> Self {
-        let key_pair = KeyPair::new_random();
+        let (secret_key, public_key) = random_key_pair();
 
-        Self(key_pair)
+        Self {
+            secret_key,
+            public_key,
+        }
     }
 
     pub fn public(&self) -> PublishingPublicKey {
-        PublishingPublicKey(self.0.public_key.clone())
+        PublishingPublicKey(self.public_key.clone())
     }
 }
 
-impl From<SecretKey> for PublishingKeyPair {
-    fn from(secret_key: SecretKey) -> Self {
-        Self(secret_key.into())
+impl From<Scalar> for PublishingKeyPair {
+    fn from(secret_key: Scalar) -> Self {
+        let public_key = public_key(&secret_key);
+
+        Self {
+            secret_key,
+            public_key,
+        }
     }
 }
 
-impl From<PublicKey> for PublishingPublicKey {
-    fn from(public_key: PublicKey) -> Self {
+impl From<Point> for PublishingPublicKey {
+    fn from(public_key: Point) -> Self {
         Self(public_key)
     }
 }
 
-impl From<PublishingPublicKey> for PublicKey {
+impl From<PublishingPublicKey> for Point {
     fn from(public_key: PublishingPublicKey) -> Self {
         public_key.0
     }
@@ -157,38 +169,68 @@ impl From<PublishingPublicKey> for PublicKey {
 
 impl fmt::LowerHex for PublishingPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{:x}",
-            bitcoin::secp256k1::PublicKey::from(self.0.clone())
-        )
+        write!(f, "{}", hex::encode(self.0.to_bytes()))
     }
 }
 
 impl fmt::Display for PublishingPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{:x}",
-            bitcoin::secp256k1::PublicKey::from(self.0.clone())
-        )
+        write!(f, "{}", hex::encode(self.0.to_bytes()))
     }
 }
 
-impl From<RevocationPublicKey> for bitcoin::secp256k1::PublicKey {
-    fn from(_from: RevocationPublicKey) -> Self {
-        todo!()
+impl TryFrom<OwnershipPublicKey> for bitcoin::secp256k1::PublicKey {
+    type Error = anyhow::Error;
+
+    fn try_from(value: OwnershipPublicKey) -> anyhow::Result<Self> {
+        point_to_bitcoin_pk(value.0)
     }
 }
 
-impl From<PublishingPublicKey> for bitcoin::secp256k1::PublicKey {
-    fn from(_from: PublishingPublicKey) -> Self {
-        todo!()
+impl TryFrom<RevocationPublicKey> for bitcoin::secp256k1::PublicKey {
+    type Error = anyhow::Error;
+
+    fn try_from(value: RevocationPublicKey) -> anyhow::Result<Self> {
+        point_to_bitcoin_pk(value.0)
     }
 }
 
-impl From<PublicKey> for bitcoin::secp256k1::PublicKey {
-    fn from(_from: PublicKey) -> Self {
-        todo!()
+impl TryFrom<PublishingPublicKey> for bitcoin::secp256k1::PublicKey {
+    type Error = anyhow::Error;
+
+    fn try_from(value: PublishingPublicKey) -> anyhow::Result<Self> {
+        point_to_bitcoin_pk(value.0)
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("point {0} is not a bitcoin::secp256k1::PublicKey")]
+pub struct NotBitcoinPublicKey(Point);
+
+fn point_to_bitcoin_pk(point: Point) -> anyhow::Result<bitcoin::secp256k1::PublicKey> {
+    bitcoin::secp256k1::PublicKey::from_slice(&point.to_bytes())
+        .map_err(|_| NotBitcoinPublicKey(point).into())
+}
+
+fn random_key_pair() -> (Scalar, Point) {
+    let secret_key = Scalar::random(&mut rand::thread_rng());
+    let public_key = public_key(&secret_key);
+
+    (secret_key, public_key)
+}
+
+fn public_key(secret_key: &Scalar) -> Point {
+    g!(secret_key * G).mark::<Normal>()
+}
+
+#[cfg(test)]
+pub fn point_from_str(from: &str) -> anyhow::Result<Point> {
+    let point = hex::decode(from)?;
+
+    let mut bytes = [0u8; 33];
+    bytes.copy_from_slice(point.as_slice());
+
+    let point = Point::from_bytes(bytes).ok_or_else(|| anyhow!("string slice is not a Point"))?;
+
+    Ok(point)
 }

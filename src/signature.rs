@@ -1,5 +1,5 @@
 use crate::{
-    keys::{PublicKey, PublishingPublicKey},
+    keys::{OwnershipPublicKey, PublishingPublicKey},
     transaction::{CommitTransaction, SplitTransaction},
 };
 use bitcoin::{hashes::Hash, SigHash};
@@ -13,7 +13,7 @@ use ecdsa_fun::{
 pub struct InvalidSignature;
 
 pub fn verify_sig(
-    public_key: PublicKey,
+    public_key: OwnershipPublicKey,
     TX_s: &SplitTransaction,
     signature: &Signature,
 ) -> Result<(), InvalidSignature> {
@@ -31,7 +31,7 @@ pub fn verify_sig(
 pub struct InvalidPresignature;
 
 pub fn preverify_sig(
-    verification_key: PublicKey,
+    verification_key: OwnershipPublicKey,
     encryption_key: PublishingPublicKey,
     TX_c: &CommitTransaction,
     presignature: EncryptedSignature,
@@ -40,7 +40,7 @@ pub fn preverify_sig(
 
     if adaptor.verify_encrypted_signature(
         &verification_key.into(),
-        &PublicKey::from(encryption_key).into(),
+        &encryption_key.into(),
         &TX_c.digest().into_inner(),
         presignature,
     ) {

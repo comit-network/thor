@@ -1,7 +1,7 @@
 use crate::{
     keys::{
-        KeyPair, PublicKey, PublishingKeyPair, PublishingPublicKey, RevocationKeyPair,
-        RevocationPublicKey,
+        OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
+        RevocationKeyPair, RevocationPublicKey,
     },
     signature::{preverify_sig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
@@ -13,7 +13,7 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use std::marker::PhantomData;
 
 pub struct Message0 {
-    X: PublicKey,
+    X: OwnershipPublicKey,
     tid: (TxIn, Amount),
 }
 
@@ -35,13 +35,13 @@ pub struct Message4 {
 }
 
 pub struct Alice0 {
-    x_self: KeyPair,
+    x_self: OwnershipKeyPair,
     tid_self: (TxIn, Amount),
 }
 
 impl Alice0 {
     pub fn new(tid_self: (TxIn, Amount)) -> Self {
-        let x_self = KeyPair::new_random();
+        let x_self = OwnershipKeyPair::new_random();
         Self { x_self, tid_self }
     }
 
@@ -80,13 +80,13 @@ impl Alice0 {
 }
 
 pub struct Bob0 {
-    x_self: KeyPair,
+    x_self: OwnershipKeyPair,
     tid_self: (TxIn, Amount),
 }
 
 impl Bob0 {
     pub fn new(tid_self: (TxIn, Amount)) -> Self {
-        let x_self = KeyPair::new_random();
+        let x_self = OwnershipKeyPair::new_random();
         Self { x_self, tid_self }
     }
 
@@ -125,8 +125,8 @@ impl Bob0 {
 }
 
 pub struct Alice1 {
-    x_self: KeyPair,
-    X_other: PublicKey,
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
     tid_self: (TxIn, Amount),
     tid_other: (TxIn, Amount),
     r_self: RevocationKeyPair,
@@ -173,7 +173,7 @@ impl Alice1 {
                 a: (tid_self.1, x_self.public()),
                 b: (tid_other.1, X_other.clone()),
             },
-        );
+        )?;
         let sig_TX_s_self = TX_s.sign_once(x_self.clone());
 
         Ok(Party2 {
@@ -193,8 +193,8 @@ impl Alice1 {
 }
 
 pub struct Bob1 {
-    x_self: KeyPair,
-    X_other: PublicKey,
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
     tid_self: (TxIn, Amount),
     tid_other: (TxIn, Amount),
     r_self: RevocationKeyPair,
@@ -241,7 +241,7 @@ impl Bob1 {
                 a: (tid_other.1, X_other.clone()),
                 b: (tid_self.1, x_self.public()),
             },
-        );
+        )?;
         let sig_TX_s_self = TX_s.sign_once(x_self.clone());
 
         Ok(Party2 {
@@ -261,8 +261,8 @@ impl Bob1 {
 }
 
 pub struct Party2 {
-    x_self: KeyPair,
-    X_other: PublicKey,
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
     tid_self: (TxIn, Amount),
     tid_other: (TxIn, Amount),
     r_self: RevocationKeyPair,
@@ -308,8 +308,8 @@ impl Party2 {
 }
 
 pub struct Party3 {
-    x_self: KeyPair,
-    X_other: PublicKey,
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
     tid_self: (TxIn, Amount),
     tid_other: (TxIn, Amount),
     r_self: RevocationKeyPair,
@@ -362,8 +362,8 @@ impl Party3 {
 }
 
 pub struct Party4 {
-    x_self: KeyPair,
-    X_other: PublicKey,
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
     tid_self: (TxIn, Amount),
     tid_other: (TxIn, Amount),
     r_self: RevocationKeyPair,
@@ -418,8 +418,8 @@ impl Party4 {
 /// A party which has reached this state is now able to safely
 /// broadcast the `FundingTransaction` in order to open the channel.
 pub struct Party5 {
-    x_self: KeyPair,
-    X_other: PublicKey,
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
     tid_self: (TxIn, Amount),
     tid_other: (TxIn, Amount),
     r_self: RevocationKeyPair,
