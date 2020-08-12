@@ -5,8 +5,10 @@ use crate::{
 use bitcoin::{hashes::Hash, SigHash};
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
-    Signature, ECDSA,
+    nonce, Signature, ECDSA,
 };
+use rand::prelude::ThreadRng;
+use sha2::Sha256;
 
 #[derive(Debug, thiserror::Error)]
 #[error("signature is invalid")]
@@ -36,13 +38,13 @@ pub fn preverify_sig(
     TX_c: &CommitTransaction,
     presignature: EncryptedSignature,
 ) -> Result<(), InvalidPresignature> {
-    let adaptor = Adaptor::from_tag(b"my-tag");
+    let adaptor = Adaptor::<Sha256, _>::new(nonce::from_global_rng::<Sha256, ThreadRng>());
 
     if adaptor.verify_encrypted_signature(
         &verification_key.into(),
         &encryption_key.into(),
         &TX_c.digest().into_inner(),
-        presignature,
+        &presignature,
     ) {
         Ok(())
     } else {

@@ -8,7 +8,7 @@ use bitcoin::{
     hashes::hash160, secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash,
     Transaction, TxIn, TxOut,
 };
-use ecdsa_fun::{self, adaptor::EncryptedSignature, fun::hash::Derivation, Signature, ECDSA};
+use ecdsa_fun::{self, adaptor::EncryptedSignature, Signature, ECDSA};
 use miniscript::{Descriptor, Segwitv0};
 use std::{
     convert::{TryFrom, TryInto},

@@ -1,17 +1,17 @@
-use conquer_once::Lazy;
-
 use anyhow::anyhow;
 use bitcoin::{hashes::Hash, SigHash};
+use conquer_once::Lazy;
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
     fun::{
         g,
-        hash::Derivation,
         marker::{Mark, Normal},
         Point, Scalar, G,
     },
-    Signature, ECDSA,
+    nonce, Signature, ECDSA,
 };
+use rand::prelude::ThreadRng;
+use sha2::Sha256;
 use std::{convert::TryFrom, fmt};
 
 #[derive(Clone)]
@@ -38,26 +38,15 @@ impl OwnershipKeyPair {
     }
 
     pub fn sign(&self, digest: SigHash) -> Signature {
-        // TODO: Use a sensible tag
-        let ecdsa = ECDSA::from_tag(b"my-tag").enforce_low_s();
+        let ecdsa = ECDSA::new(nonce::from_global_rng::<Sha256, ThreadRng>()).enforce_low_s();
 
-        ecdsa.sign(
-            &self.secret_key,
-            &digest.into_inner(),
-            Derivation::Deterministic,
-        )
+        ecdsa.sign(&self.secret_key, &digest.into_inner())
     }
 
     pub fn presign(&self, Y: PublishingPublicKey, digest: SigHash) -> EncryptedSignature {
-        // TODO: Use a sensible tag
-        let adaptor = Adaptor::from_tag(b"my-tag");
+        let adaptor = Adaptor::<Sha256, _>::new(nonce::from_global_rng::<Sha256, ThreadRng>());
 
-        adaptor.encrypted_sign(
-            &self.secret_key,
-            &Y.0,
-            &digest.into_inner(),
-            Derivation::Deterministic,
-        )
+        adaptor.encrypted_sign(&self.secret_key, &Y.0, &digest.into_inner())
     }
 }
 
