@@ -38,7 +38,7 @@ impl OwnershipKeyPair {
     }
 
     pub fn sign(&self, digest: SigHash) -> Signature {
-        let ecdsa = ECDSA::new(nonce::from_global_rng::<Sha256, ThreadRng>()).enforce_low_s();
+        let ecdsa = ECDSA::new(nonce::from_global_rng::<Sha256, ThreadRng>());
 
         ecdsa.sign(&self.secret_key, &digest.into_inner())
     }
