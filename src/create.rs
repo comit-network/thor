@@ -7,7 +7,7 @@ use crate::{
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
     ChannelState,
 };
-use anyhow::Context;
+use anyhow::{bail, Context};
 use bitcoin::{secp256k1, Amount, TxIn};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use std::marker::PhantomData;
@@ -15,6 +15,7 @@ use std::marker::PhantomData;
 pub struct Message0 {
     X: OwnershipPublicKey,
     tid: (TxIn, Amount),
+    time_lock: u32,
 }
 
 pub struct Message1 {
@@ -37,18 +38,25 @@ pub struct Message4 {
 pub struct Alice0 {
     x_self: OwnershipKeyPair,
     tid_self: (TxIn, Amount),
+    time_lock: u32,
 }
 
 impl Alice0 {
-    pub fn new(tid_self: (TxIn, Amount)) -> Self {
+    pub fn new(tid_self: (TxIn, Amount), time_lock: u32) -> Self {
         let x_self = OwnershipKeyPair::new_random();
-        Self { x_self, tid_self }
+
+        Self {
+            x_self,
+            tid_self,
+            time_lock,
+        }
     }
 
     pub fn next_message(&self) -> Message0 {
         Message0 {
             X: self.x_self.public(),
             tid: self.tid_self.clone(),
+            time_lock: self.time_lock,
         }
     }
 
@@ -57,8 +65,13 @@ impl Alice0 {
         Message0 {
             X: X_other,
             tid: tid_other,
+            time_lock: time_lock_other,
         }: Message0,
     ) -> anyhow::Result<Alice1> {
+        // NOTE: A real application would also verify that the amount
+        // provided by the other party is satisfactory
+        check_timelocks(self.time_lock, time_lock_other)?;
+
         let TX_f = FundingTransaction::new(
             (self.x_self.public(), self.tid_self.clone()),
             (X_other.clone(), tid_other.clone()),
@@ -72,6 +85,7 @@ impl Alice0 {
             X_other,
             tid_self: self.tid_self,
             tid_other,
+            time_lock: self.time_lock,
             r_self: r,
             y_self: y,
             TX_f,
@@ -82,18 +96,24 @@ impl Alice0 {
 pub struct Bob0 {
     x_self: OwnershipKeyPair,
     tid_self: (TxIn, Amount),
+    time_lock: u32,
 }
 
 impl Bob0 {
-    pub fn new(tid_self: (TxIn, Amount)) -> Self {
+    pub fn new(tid_self: (TxIn, Amount), time_lock: u32) -> Self {
         let x_self = OwnershipKeyPair::new_random();
-        Self { x_self, tid_self }
+        Self {
+            x_self,
+            tid_self,
+            time_lock,
+        }
     }
 
     pub fn next_message(&self) -> Message0 {
         Message0 {
             X: self.x_self.public(),
             tid: self.tid_self.clone(),
+            time_lock: self.time_lock,
         }
     }
 
@@ -102,8 +122,13 @@ impl Bob0 {
         Message0 {
             X: X_other,
             tid: tid_other,
+            time_lock: time_lock_other,
         }: Message0,
     ) -> anyhow::Result<Bob1> {
+        // NOTE: A real application would also verify that the amount
+        // provided by the other party is satisfactory
+        check_timelocks(self.time_lock, time_lock_other)?;
+
         let TX_f = FundingTransaction::new(
             (X_other.clone(), tid_other.clone()),
             (self.x_self.public(), self.tid_self.clone()),
@@ -112,15 +137,29 @@ impl Bob0 {
 
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
+
         Ok(Bob1 {
             x_self: self.x_self,
             X_other,
             tid_self: self.tid_self,
             tid_other,
+            time_lock: self.time_lock,
             r_self: r,
             y_self: y,
             TX_f,
         })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("time_locks are not equal")]
+pub struct IncompatibleTimeLocks;
+
+fn check_timelocks(time_lock_self: u32, time_lock_other: u32) -> Result<(), IncompatibleTimeLocks> {
+    if time_lock_self != time_lock_other {
+        Err(IncompatibleTimeLocks)
+    } else {
+        Ok(())
     }
 }
 
@@ -129,6 +168,7 @@ pub struct Alice1 {
     X_other: OwnershipPublicKey,
     tid_self: (TxIn, Amount),
     tid_other: (TxIn, Amount),
+    time_lock: u32,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
     TX_f: FundingTransaction,
@@ -143,51 +183,45 @@ impl Alice1 {
     }
 
     pub fn receive(
-        Self {
-            x_self,
-            X_other,
-            tid_self,
-            tid_other,
-            r_self,
-            y_self,
-            TX_f,
-            ..
-        }: Self,
+        self,
         Message1 {
             R: R_other,
             Y: Y_other,
         }: Message1,
-        time_lock: u32,
     ) -> anyhow::Result<Party2> {
         let TX_c = CommitTransaction::new(
-            &TX_f,
-            (x_self.public(), r_self.public(), y_self.public()),
-            (X_other.clone(), R_other, Y_other.clone()),
-            time_lock,
+            &self.TX_f,
+            (
+                self.x_self.public(),
+                self.r_self.public(),
+                self.y_self.public(),
+            ),
+            (self.X_other.clone(), R_other, Y_other.clone()),
+            self.time_lock,
         )?;
-        let encsig_TX_c_self = TX_c.encsign_once(x_self.clone(), Y_other);
+        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other);
 
         let TX_s = SplitTransaction::new(
             &TX_c,
             ChannelState {
-                a: (tid_self.1, x_self.public()),
-                b: (tid_other.1, X_other.clone()),
+                a: (self.tid_self.1, self.x_self.public()),
+                b: (self.tid_other.1, self.X_other.clone()),
             },
         )?;
-        let sig_TX_s_self = TX_s.sign_once(x_self.clone());
+        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {
-            x_self,
-            X_other,
-            tid_self,
-            tid_other,
-            r_self,
-            y_self,
-            TX_f,
+            x_self: self.x_self,
+            X_other: self.X_other,
+            tid_self: self.tid_self,
+            tid_other: self.tid_other,
+            r_self: self.r_self,
+            y_self: self.y_self,
+            TX_f: self.TX_f,
             TX_c,
             TX_s,
-            sig_TX_s_self,
             encsig_TX_c_self,
+            sig_TX_s_self,
         })
     }
 }
@@ -197,6 +231,7 @@ pub struct Bob1 {
     X_other: OwnershipPublicKey,
     tid_self: (TxIn, Amount),
     tid_other: (TxIn, Amount),
+    time_lock: u32,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
     TX_f: FundingTransaction,
@@ -211,47 +246,41 @@ impl Bob1 {
     }
 
     pub fn receive(
-        Self {
-            x_self,
-            X_other,
-            tid_self,
-            tid_other,
-            r_self,
-            y_self,
-            TX_f,
-            ..
-        }: Self,
+        self,
         Message1 {
             R: R_other,
             Y: Y_other,
         }: Message1,
-        time_lock: u32,
     ) -> anyhow::Result<Party2> {
         let TX_c = CommitTransaction::new(
-            &TX_f,
-            (X_other.clone(), R_other, Y_other.clone()),
-            (x_self.public(), r_self.public(), y_self.public()),
-            time_lock,
+            &self.TX_f,
+            (self.X_other.clone(), R_other, Y_other.clone()),
+            (
+                self.x_self.public(),
+                self.r_self.public(),
+                self.y_self.public(),
+            ),
+            self.time_lock,
         )?;
-        let encsig_TX_c_self = TX_c.encsign_once(x_self.clone(), Y_other);
+        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other);
 
         let TX_s = SplitTransaction::new(
             &TX_c,
             ChannelState {
-                a: (tid_other.1, X_other.clone()),
-                b: (tid_self.1, x_self.public()),
+                a: (self.tid_other.1, self.X_other.clone()),
+                b: (self.tid_self.1, self.x_self.public()),
             },
         )?;
-        let sig_TX_s_self = TX_s.sign_once(x_self.clone());
+        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {
-            x_self,
-            X_other,
-            tid_self,
-            tid_other,
-            r_self,
-            y_self,
-            TX_f,
+            x_self: self.x_self,
+            X_other: self.X_other,
+            tid_self: self.tid_self,
+            tid_other: self.tid_other,
+            r_self: self.r_self,
+            y_self: self.y_self,
+            TX_f: self.TX_f,
             TX_c,
             TX_s,
             sig_TX_s_self,
@@ -275,7 +304,7 @@ pub struct Party2 {
 }
 
 impl Party2 {
-    pub fn new_message(&self) -> Message2 {
+    pub fn next_message(&self) -> Message2 {
         Message2 {
             sig_TX_s: self.sig_TX_s_self.clone(),
         }
@@ -323,7 +352,7 @@ pub struct Party3 {
 }
 
 impl Party3 {
-    pub fn new_message(&self) -> Message3 {
+    pub fn next_message(&self) -> Message3 {
         Message3 {
             encsig_TX_c: self.encsig_TX_c_self.clone(),
         }
@@ -384,7 +413,7 @@ pub trait Sign {
 }
 
 impl Party4 {
-    pub async fn new_message(&self, wallet: impl Sign) -> anyhow::Result<Message4> {
+    pub async fn next_message(&self, wallet: impl Sign) -> anyhow::Result<Message4> {
         let TX_f_signed_once = wallet.sign(self.TX_f.clone()).await?;
 
         Ok(Message4 { TX_f_signed_once })
@@ -437,4 +466,52 @@ pub struct Party5 {
 pub enum Error {
     #[error("Transaction: ")]
     Transaction(#[from] crate::transaction::Error),
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn channel_creation() {
+        let time_lock = 60 * 60;
+
+        let alice0 = {
+            let input = TxIn::default();
+            let amount = Amount::from_sat(1_000);
+
+            Alice0::new((input, amount), time_lock)
+        };
+
+        let bob0 = {
+            let input = TxIn::default();
+            let amount = Amount::from_sat(1_000);
+
+            Bob0::new((input, amount), time_lock)
+        };
+
+        let message0_alice = alice0.next_message();
+        let message0_bob = bob0.next_message();
+
+        let alice1 = alice0.receive(message0_bob).unwrap();
+        let bob1 = bob0.receive(message0_alice).unwrap();
+
+        let message1_alice = alice1.next_message();
+        let message1_bob = bob1.next_message();
+
+        let alice2 = alice1.receive(message1_bob).unwrap();
+        let bob2 = bob1.receive(message1_alice).unwrap();
+
+        let message2_alice = alice2.next_message();
+        let message2_bob = bob2.next_message();
+
+        let alice3 = alice2.receive(message2_bob).unwrap();
+        let bob3 = bob2.receive(message2_alice).unwrap();
+
+        let message3_alice = alice3.next_message();
+        let message3_bob = bob3.next_message();
+
+        let alice4 = alice3.receive(message3_bob).unwrap();
+        let bob4 = bob3.receive(message3_alice).unwrap();
+    }
 }
