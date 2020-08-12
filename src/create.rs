@@ -5,7 +5,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    ChannelState,
+    ChannelBalance,
 };
 use anyhow::{bail, Context};
 use bitcoin::{secp256k1, Amount, TxIn};
@@ -69,7 +69,8 @@ impl Alice0 {
         }: Message0,
     ) -> anyhow::Result<Alice1> {
         // NOTE: A real application would also verify that the amount
-        // provided by the other party is satisfactory
+        // provided by the other party is satisfactory, together with
+        // the time_lock
         check_timelocks(self.time_lock, time_lock_other)?;
 
         let TX_f = FundingTransaction::new(
@@ -80,6 +81,7 @@ impl Alice0 {
 
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
+
         Ok(Alice1 {
             x_self: self.x_self,
             X_other,
@@ -203,7 +205,7 @@ impl Alice1 {
 
         let TX_s = SplitTransaction::new(
             &TX_c,
-            ChannelState {
+            ChannelBalance {
                 a: (self.tid_self.1, self.x_self.public()),
                 b: (self.tid_other.1, self.X_other.clone()),
             },
@@ -266,7 +268,7 @@ impl Bob1 {
 
         let TX_s = SplitTransaction::new(
             &TX_c,
-            ChannelState {
+            ChannelBalance {
                 a: (self.tid_other.1, self.X_other.clone()),
                 b: (self.tid_self.1, self.x_self.public()),
             },

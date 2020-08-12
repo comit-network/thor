@@ -20,7 +20,7 @@ pub struct OwnershipKeyPair {
     public_key: Point,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct OwnershipPublicKey(Point);
 
 impl OwnershipKeyPair {
@@ -73,10 +73,13 @@ impl From<Scalar> for OwnershipKeyPair {
     }
 }
 
+#[derive(Clone)]
 pub struct RevocationKeyPair {
     secret_key: Scalar,
     public_key: Point,
 }
+
+pub struct RevocationSecretKey(Scalar);
 
 pub struct RevocationPublicKey(Point);
 
@@ -107,6 +110,7 @@ impl From<RevocationPublicKey> for Point {
     }
 }
 
+#[derive(Clone)]
 pub struct PublishingKeyPair {
     secret_key: Scalar,
     public_key: Point,

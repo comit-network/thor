@@ -1,6 +1,6 @@
 use crate::{
     keys::{OwnershipKeyPair, OwnershipPublicKey, PublishingPublicKey, RevocationPublicKey},
-    ChannelState,
+    ChannelBalance,
 };
 use anyhow::Context;
 use bitcoin::hashes::Hash;
@@ -233,16 +233,16 @@ impl CommitTransaction {
 pub struct SplitTransaction {
     inner: Transaction,
     digest: SigHash,
+    balance: ChannelBalance,
 }
 
 impl SplitTransaction {
-    pub fn new(
-        TX_c: &CommitTransaction,
-        ChannelState {
+    pub fn new(TX_c: &CommitTransaction, channel_balance: ChannelBalance) -> anyhow::Result<Self> {
+        let ChannelBalance {
             a: (amount_a, X_a),
             b: (amount_b, X_b),
-        }: ChannelState,
-    ) -> anyhow::Result<Self> {
+        } = channel_balance.clone();
+
         let input = TX_c.as_txin();
 
         let descriptor = SplitTransaction::wpk_descriptor(X_a)?;
@@ -276,11 +276,16 @@ impl SplitTransaction {
         Ok(Self {
             inner: transaction,
             digest,
+            balance: channel_balance,
         })
     }
 
     pub fn sign_once(&self, x_self: OwnershipKeyPair) -> Signature {
         x_self.sign(self.digest)
+    }
+
+    pub fn balance(&self) -> ChannelBalance {
+        self.balance.clone()
     }
 
     fn wpk_descriptor(
