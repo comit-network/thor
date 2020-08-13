@@ -64,9 +64,17 @@ impl Wallet {
         let mut inputs = tx_f_a.input.clone();
         inputs.extend(tx_f_b.input);
 
-        // TODO remove duplicated output
         let mut outputs = tx_f_a.output;
-        outputs.extend(tx_f_b.output);
+        tx_f_b.output.iter().for_each(|output| {
+            // we don't want to have any duplicates
+            if outputs
+                .iter()
+                .find(|other_output| other_output.script_pubkey == output.script_pubkey)
+                .is_none()
+            {
+                outputs.push(output.clone())
+            }
+        });
 
         Ok(FundingTransaction::new(
             Transaction {
