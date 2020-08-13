@@ -1,21 +1,118 @@
+use std::{collections::HashMap, marker::PhantomData};
+
 use crate::{
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
     signature::{verify_encsig, verify_sig},
-    transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
+    transaction::{
+        CommitTransaction, FundingTransaction, PartialFundingTransaction, SplitTransaction,
+    },
     ChannelState,
 };
 use anyhow::{bail, Context};
-use bitcoin::{secp256k1, Amount, TxIn};
-use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
-use std::marker::PhantomData;
+use bitcoin::{
+    hashes::{core::convert::TryInto, hex::ToHex, Hash},
+    secp256k1,
+    secp256k1::{Message, Secp256k1},
+    util::psbt::PartiallySignedTransaction,
+    Address, Amount, Network, PublicKey, Script, SigHashType, Transaction, TxIn,
+};
+use bitcoin_harness::{bitcoincore_rpc, bitcoincore_rpc::RpcApi};
+use ecdsa_fun::{adaptor::EncryptedSignature, fun::Scalar, nonce, Signature, ECDSA};
+use rand::prelude::ThreadRng;
+use sha2::Sha256;
 
-pub struct Message0 {
+pub struct Wallet {
+    inner: bitcoin_harness::Wallet,
+    funding_address: Address,
+    funding_input_tx: Transaction,
+}
+
+impl Wallet {
+    fn new(
+        wallet: bitcoin_harness::Wallet,
+        funding_address: Address,
+        funding_input_tx: Transaction,
+    ) -> Self {
+        Self {
+            inner: wallet,
+            funding_address,
+            funding_input_tx,
+        }
+    }
+
+    fn create_partial_funded_transaction(
+        &self,
+        (X_a, txin_a): (OwnershipPublicKey, (TxIn, Amount)),
+        (X_b, txin_b): (OwnershipPublicKey, (TxIn, Amount)),
+    ) -> anyhow::Result<PartialFundingTransaction> {
+        // bitcoincore-rpc client does not provide all endpoints to fully use psbts,
+        // hence we do it manually
+        PartialFundingTransaction::new((X_a, txin_a), (X_b, txin_b))
+    }
+
+    fn join_partial_transaction(
+        &self,
+        partial_tx_f_a: PartialFundingTransaction,
+        partial_tx_f_b: PartialFundingTransaction,
+    ) -> anyhow::Result<FundingTransaction> {
+        let tx_f_a = partial_tx_f_a.as_transaction();
+        let tx_f_b = partial_tx_f_b.as_transaction();
+
+        let mut inputs = tx_f_a.input.clone();
+        inputs.extend(tx_f_b.input);
+
+        // TODO remove duplicated output
+        let mut outputs = tx_f_a.output;
+        outputs.extend(tx_f_b.output);
+
+        Ok(FundingTransaction::new(
+            Transaction {
+                version: 2,
+                lock_time: 0,
+                input: inputs,
+                output: outputs,
+            },
+            partial_tx_f_a.output_descriptor(),
+        ))
+    }
+
+    fn sign(self, transaction: FundingTransaction) -> anyhow::Result<FundingTransaction> {
+        let bitcoincore_json_rpc_client = bitcoincore_rpc::Client::from(self.inner);
+        let private_key = bitcoincore_json_rpc_client.dump_private_key(&self.funding_address)?;
+        let funding_address_info =
+            bitcoincore_json_rpc_client.get_address_info(&self.funding_address)?;
+
+        let digest = transaction.compute_digest(
+            funding_address_info.pubkey.unwrap(),
+            self.funding_input_tx.txid(),
+        )?;
+
+        // TODO use secpFun
+        let secp = Secp256k1::new();
+        let message_to_sign = Message::from_slice(&digest.into_inner()).unwrap();
+        let signature = secp.sign(&message_to_sign, &private_key.key);
+
+        // TODO put signature into transaction with miniscript
+        let transaction = FundingTransaction::new(
+            transaction.as_transaction(),
+            transaction.output_descriptor(),
+        );
+        Ok(transaction)
+    }
+}
+
+pub struct Message0_0 {
     X: OwnershipPublicKey,
     tid: (TxIn, Amount),
     time_lock: u32,
+}
+
+pub struct Message0_1 {
+    X: OwnershipPublicKey,
+    partial_TX_f: PartialFundingTransaction,
 }
 
 pub struct Message1 {
@@ -35,25 +132,27 @@ pub struct Message4 {
     TX_f_signed_once: FundingTransaction,
 }
 
-pub struct Alice0 {
+pub struct Alice0_0 {
     x_self: OwnershipKeyPair,
     tid_self: (TxIn, Amount),
     time_lock: u32,
+    wallet: Wallet,
 }
 
-impl Alice0 {
-    pub fn new(tid_self: (TxIn, Amount), time_lock: u32) -> Self {
+impl Alice0_0 {
+    pub fn new(tid_self: (TxIn, Amount), time_lock: u32, wallet: Wallet) -> Self {
         let x_self = OwnershipKeyPair::new_random();
 
         Self {
             x_self,
             tid_self,
             time_lock,
+            wallet,
         }
     }
 
-    pub fn next_message(&self) -> Message0 {
-        Message0 {
+    pub fn next_message(&self) -> Message0_0 {
+        Message0_0 {
             X: self.x_self.public(),
             tid: self.tid_self.clone(),
             time_lock: self.time_lock,
@@ -62,29 +161,129 @@ impl Alice0 {
 
     pub fn receive(
         self,
-        Message0 {
+        Message0_0 {
             X: X_other,
             tid: tid_other,
             time_lock: time_lock_other,
-        }: Message0,
-    ) -> anyhow::Result<Alice1> {
+        }: Message0_0,
+    ) -> anyhow::Result<Alice0_1> {
         // NOTE: A real application would also verify that the amount
         // provided by the other party is satisfactory
         check_timelocks(self.time_lock, time_lock_other)?;
 
-        let TX_f = FundingTransaction::new(
-            (self.x_self.public(), self.tid_self.clone()),
-            (X_other.clone(), tid_other.clone()),
-        )
-        .context("failed to build funding transaction")?;
+        let partial_TX_f = self
+            .wallet
+            .create_partial_funded_transaction(
+                (self.x_self.public(), self.tid_self.clone()),
+                (X_other.clone(), tid_other.clone()),
+            )
+            .context("failed to build funding transaction")?;
+
+        Ok(Alice0_1 {
+            x_self: self.x_self,
+            X_other,
+            tid_self: self.tid_self,
+            tid_other,
+            time_lock: self.time_lock,
+            partial_TX_f,
+            wallet: self.wallet,
+        })
+    }
+}
+
+pub struct Bob0_0 {
+    x_self: OwnershipKeyPair,
+    tid_self: (TxIn, Amount),
+    time_lock: u32,
+    wallet: Wallet,
+}
+
+impl Bob0_0 {
+    pub fn new(tid_self: (TxIn, Amount), time_lock: u32, wallet: Wallet) -> Self {
+        let x_self = OwnershipKeyPair::new_random();
+        Self {
+            x_self,
+            tid_self,
+            time_lock,
+            wallet,
+        }
+    }
+
+    pub fn next_message(&self) -> Message0_0 {
+        Message0_0 {
+            X: self.x_self.public(),
+            tid: self.tid_self.clone(),
+            time_lock: self.time_lock,
+        }
+    }
+
+    pub fn receive(
+        self,
+        Message0_0 {
+            X: X_other,
+            tid: tid_other,
+            time_lock: time_lock_other,
+        }: Message0_0,
+    ) -> anyhow::Result<Bob0_1> {
+        // NOTE: A real application would also verify that the amount
+        // provided by the other party is satisfactory
+        check_timelocks(self.time_lock, time_lock_other)?;
+
+        let partial_TX_f = self
+            .wallet
+            .create_partial_funded_transaction(
+                (X_other.clone(), tid_other.clone()),
+                (self.x_self.public(), self.tid_self.clone()),
+            )
+            .context("failed to build funding transaction")?;
+
+        Ok(Bob0_1 {
+            x_self: self.x_self,
+            X_other,
+            tid_self: self.tid_self,
+            tid_other,
+            time_lock: self.time_lock,
+            partial_TX_f,
+            wallet: self.wallet,
+        })
+    }
+}
+pub struct Alice0_1 {
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
+    tid_self: (TxIn, Amount),
+    tid_other: (TxIn, Amount),
+    time_lock: u32,
+    partial_TX_f: PartialFundingTransaction,
+    wallet: Wallet,
+}
+
+impl Alice0_1 {
+    pub fn next_message(&self) -> Message0_1 {
+        Message0_1 {
+            X: self.x_self.public(),
+            partial_TX_f: self.partial_TX_f.clone(),
+        }
+    }
+
+    pub fn receive(
+        self,
+        Message0_1 {
+            X: X_other,
+            partial_TX_f: partial_tx_f_other,
+        }: Message0_1,
+    ) -> anyhow::Result<Alice1> {
+        let TX_f = self
+            .wallet
+            .join_partial_transaction(self.partial_TX_f, partial_tx_f_other)?;
 
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
         Ok(Alice1 {
             x_self: self.x_self,
-            X_other,
+            X_other: self.X_other,
             tid_self: self.tid_self,
-            tid_other,
+            tid_other: self.tid_other,
             time_lock: self.time_lock,
             r_self: r,
             y_self: y,
@@ -93,56 +292,42 @@ impl Alice0 {
     }
 }
 
-pub struct Bob0 {
+pub struct Bob0_1 {
     x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
     tid_self: (TxIn, Amount),
+    tid_other: (TxIn, Amount),
     time_lock: u32,
+    partial_TX_f: PartialFundingTransaction,
+    wallet: Wallet,
 }
 
-impl Bob0 {
-    pub fn new(tid_self: (TxIn, Amount), time_lock: u32) -> Self {
-        let x_self = OwnershipKeyPair::new_random();
-        Self {
-            x_self,
-            tid_self,
-            time_lock,
-        }
-    }
-
-    pub fn next_message(&self) -> Message0 {
-        Message0 {
+impl Bob0_1 {
+    pub fn next_message(&self) -> Message0_1 {
+        Message0_1 {
             X: self.x_self.public(),
-            tid: self.tid_self.clone(),
-            time_lock: self.time_lock,
+            partial_TX_f: self.partial_TX_f.clone(),
         }
     }
 
     pub fn receive(
         self,
-        Message0 {
+        Message0_1 {
             X: X_other,
-            tid: tid_other,
-            time_lock: time_lock_other,
-        }: Message0,
+            partial_TX_f: partial_tx_f_other,
+        }: Message0_1,
     ) -> anyhow::Result<Bob1> {
-        // NOTE: A real application would also verify that the amount
-        // provided by the other party is satisfactory
-        check_timelocks(self.time_lock, time_lock_other)?;
-
-        let TX_f = FundingTransaction::new(
-            (X_other.clone(), tid_other.clone()),
-            (self.x_self.public(), self.tid_self.clone()),
-        )
-        .context("failed to build funding transaction")?;
+        let TX_f = self
+            .wallet
+            .join_partial_transaction(partial_tx_f_other, self.partial_TX_f)?;
 
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
-
         Ok(Bob1 {
             x_self: self.x_self,
-            X_other,
+            X_other: self.X_other,
             tid_self: self.tid_self,
-            tid_other,
+            tid_other: self.tid_other,
             time_lock: self.time_lock,
             r_self: r,
             y_self: y,
@@ -201,13 +386,10 @@ impl Alice1 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other);
 
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            ChannelState {
-                a: (self.tid_self.1, self.x_self.public()),
-                b: (self.tid_other.1, self.X_other.clone()),
-            },
-        )?;
+        let TX_s = SplitTransaction::new(&TX_c, ChannelState {
+            a: (self.tid_self.1, self.x_self.public()),
+            b: (self.tid_other.1, self.X_other.clone()),
+        })?;
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {
@@ -264,13 +446,10 @@ impl Bob1 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other);
 
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            ChannelState {
-                a: (self.tid_other.1, self.X_other.clone()),
-                b: (self.tid_self.1, self.x_self.public()),
-            },
-        )?;
+        let TX_s = SplitTransaction::new(&TX_c, ChannelState {
+            a: (self.tid_other.1, self.X_other.clone()),
+            b: (self.tid_self.1, self.x_self.public()),
+        })?;
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {
@@ -406,15 +585,9 @@ pub struct Party4 {
     sig_TX_s_other: Signature,
 }
 
-/// Sign one of the inputs of the `FundingTransaction`.
-#[async_trait::async_trait]
-pub trait Sign {
-    async fn sign(&self, transaction: FundingTransaction) -> anyhow::Result<FundingTransaction>;
-}
-
 impl Party4 {
-    pub async fn next_message(&self, wallet: impl Sign) -> anyhow::Result<Message4> {
-        let TX_f_signed_once = wallet.sign(self.TX_f.clone()).await?;
+    pub async fn next_message(&self, wallet: Wallet) -> anyhow::Result<Message4> {
+        let TX_f_signed_once = wallet.sign(self.TX_f.clone())?;
 
         Ok(Message4 { TX_f_signed_once })
     }
@@ -422,9 +595,9 @@ impl Party4 {
     pub async fn receive(
         self,
         Message4 { TX_f_signed_once }: Message4,
-        wallet: impl Sign,
+        wallet: Wallet,
     ) -> anyhow::Result<Party5> {
-        let signed_TX_f = wallet.sign(TX_f_signed_once).await?;
+        let signed_TX_f = wallet.sign(TX_f_signed_once)?;
 
         Ok(Party5 {
             x_self: self.x_self,
@@ -470,48 +643,98 @@ pub enum Error {
 
 #[cfg(test)]
 mod test {
+    use bitcoin::{Address, OutPoint, Transaction};
+    use bitcoin_harness::{bitcoincore_rpc, Bitcoind};
+    use testcontainers::clients;
+
     use super::*;
 
-    #[test]
-    fn channel_creation() {
+    fn find_tx_output(transaction: Transaction, address: Address) -> anyhow::Result<TxIn> {
+        let txid = transaction.txid();
+
+        let vout = transaction
+            .output
+            .iter()
+            .position(|txout| txout.script_pubkey.eq(&address.script_pubkey()))
+            .ok_or_else(|| anyhow::anyhow!("Address not found in transaction"))?
+            as u32;
+
+        Ok(TxIn {
+            previous_output: OutPoint { txid, vout },
+            script_sig: Default::default(),
+            sequence: u32::MAX,
+            witness: vec![],
+        })
+    }
+
+    #[tokio::test]
+    async fn channel_creation() -> anyhow::Result<()> {
+        let tc_client = clients::Cli::default();
+        let bitcoind = Bitcoind::new(&tc_client, "0.19.1")?;
+        bitcoind.init(5).await?;
+
         let time_lock = 60 * 60;
 
-        let alice0 = {
-            let input = TxIn::default();
+        let alice0_0 = {
+            let wallet = bitcoind.new_wallet("alice")?;
+            let address = wallet.new_address()?;
+            let transaction = bitcoind.mint(&address, Amount::ONE_BTC).await?;
+
+            let input = find_tx_output(transaction.clone(), address.clone())?;
             let amount = Amount::from_sat(1_000);
 
-            Alice0::new((input, amount), time_lock)
+            Alice0_0::new(
+                (input, amount),
+                time_lock,
+                Wallet::new(wallet, address, transaction),
+            )
         };
 
-        let bob0 = {
-            let input = TxIn::default();
+        let bob0_0 = {
+            let wallet = bitcoind.new_wallet("bob")?;
+            let address = wallet.new_address()?;
+            let transaction = bitcoind.mint(&address, Amount::ONE_BTC).await?;
+
+            let input = find_tx_output(transaction.clone(), address.clone())?;
             let amount = Amount::from_sat(1_000);
 
-            Bob0::new((input, amount), time_lock)
+            Bob0_0::new(
+                (input, amount),
+                time_lock,
+                Wallet::new(wallet, address, transaction),
+            )
         };
 
-        let message0_alice = alice0.next_message();
-        let message0_bob = bob0.next_message();
+        let message0_alice = alice0_0.next_message();
+        let message0_bob = bob0_0.next_message();
 
-        let alice1 = alice0.receive(message0_bob).unwrap();
-        let bob1 = bob0.receive(message0_alice).unwrap();
+        let alice0_1 = alice0_0.receive(message0_bob)?;
+        let bob_0_1 = bob0_0.receive(message0_alice)?;
+
+        let message0_alice = alice0_1.next_message();
+        let message0_bob = bob_0_1.next_message();
+
+        let alice1 = alice0_1.receive(message0_bob)?;
+        let bob1 = bob_0_1.receive(message0_alice)?;
 
         let message1_alice = alice1.next_message();
         let message1_bob = bob1.next_message();
 
-        let alice2 = alice1.receive(message1_bob).unwrap();
-        let bob2 = bob1.receive(message1_alice).unwrap();
+        let alice2 = alice1.receive(message1_bob)?;
+        let bob2 = bob1.receive(message1_alice)?;
 
         let message2_alice = alice2.next_message();
         let message2_bob = bob2.next_message();
 
-        let alice3 = alice2.receive(message2_bob).unwrap();
-        let bob3 = bob2.receive(message2_alice).unwrap();
+        let alice3 = alice2.receive(message2_bob)?;
+        let bob3 = bob2.receive(message2_alice)?;
 
         let message3_alice = alice3.next_message();
         let message3_bob = bob3.next_message();
 
-        let alice4 = alice3.receive(message3_bob).unwrap();
-        let bob4 = bob3.receive(message3_alice).unwrap();
+        let alice4 = alice3.receive(message3_bob)?;
+        let bob4 = bob3.receive(message3_alice)?;
+
+        Ok(())
     }
 }
