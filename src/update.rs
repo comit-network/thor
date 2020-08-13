@@ -3,29 +3,47 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    transaction::{CommitTransaction, SplitTransaction},
+    signature::{verify_encsig, verify_sig},
+    transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
     ChannelBalance,
 };
-use anyhow::bail;
+use anyhow::{bail, Context};
 use bitcoin::{Amount, Txid};
-use ecdsa_fun::adaptor::EncryptedSignature;
-use std::collections::HashMap;
+use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
-pub struct Message0 {
+/// First message of the channel update protocol.
+pub struct ChannelUpdateProposal {
     proposed_balance: Balance,
     time_lock: u32,
     R: RevocationPublicKey,
     Y: PublishingPublicKey,
 }
 
-pub struct Message1 {
+/// Second message of the channel update protocol.
+pub struct ChannelUpdateAccept {
     R: RevocationPublicKey,
     Y: PublishingPublicKey,
+}
+
+/// Third message of the channel update protocol.
+pub struct ShareSplitSignature {
+    sig_TX_s: Signature,
+}
+
+/// Fourth message of the channel update protocol.
+pub struct ShareCommitEncryptedSignature {
+    encsig_TX_c: EncryptedSignature,
+}
+
+/// Fifth and last message of the channel update protocol.
+pub struct RevealRevocationSecretKey {
+    r: RevocationSecretKey,
 }
 
 pub struct Party0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
+    TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
 }
@@ -50,6 +68,7 @@ pub struct ChannelState {
     /// allow the counterparty to punish us.
     encsig_TX_c_other: EncryptedSignature,
     r_self: RevocationKeyPair,
+    R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
     /// Signed split transaction.
     TX_s: SplitTransaction,
@@ -60,16 +79,17 @@ impl Party0 {
         self,
         update: ChannelUpdate,
         time_lock: u32,
-    ) -> anyhow::Result<(Sender1, Message0)> {
+    ) -> anyhow::Result<(Alice1, ChannelUpdateProposal)> {
         let current_balance = self.balance()?;
         let proposed_balance = current_balance.apply(update)?;
 
         let r_self = RevocationKeyPair::new_random();
         let y_self = PublishingKeyPair::new_random();
 
-        let state = Sender1 {
+        let state = Alice1 {
             x_self: self.x_self,
             X_other: self.X_other,
+            TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
             r_self: r_self.clone(),
@@ -78,7 +98,7 @@ impl Party0 {
             time_lock,
         };
 
-        let message = Message0 {
+        let message = ChannelUpdateProposal {
             proposed_balance,
             time_lock,
             R: r_self.public(),
@@ -92,34 +112,58 @@ impl Party0 {
     // for both parties?
     pub fn receive_channel_update(
         self,
-        Message0 {
-            proposed_balance,
+        ChannelUpdateProposal {
+            proposed_balance:
+                Balance {
+                    alice: balance_other,
+                    bob: balance_self,
+                },
             time_lock,
             R: R_other,
             Y: Y_other,
-        }: Message0,
-    ) -> anyhow::Result<(Receiver1, Message1)> {
-        // NOTE: A real application would also verify that the amount
+        }: ChannelUpdateProposal,
+    ) -> anyhow::Result<(Party2, ChannelUpdateAccept)> {
+        // NOTE: A real application would verify that the amount
         // provided by the other party is satisfactory, together with
         // the time_lock
 
         let r_self = RevocationKeyPair::new_random();
         let y_self = PublishingKeyPair::new_random();
 
-        let state = Receiver1 {
+        let TX_c = CommitTransaction::new(
+            &self.TX_f,
+            (self.X_other.clone(), R_other.clone(), Y_other.clone()),
+            (self.x_self.public(), r_self.public(), y_self.public()),
+            time_lock,
+        )?;
+        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
+
+        let TX_s = SplitTransaction::new(
+            &TX_c,
+            ChannelBalance {
+                a: (balance_other, self.X_other.clone()),
+                b: (balance_self, self.x_self.public()),
+            },
+        )?;
+        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
+
+        let state = Party2 {
             x_self: self.x_self,
             X_other: self.X_other,
+            TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
             r_self: r_self.clone(),
             R_other,
             y_self: y_self.clone(),
             Y_other,
-            proposed_balance,
-            time_lock,
+            TX_c,
+            TX_s,
+            encsig_TX_c_self,
+            sig_TX_s_self,
         };
 
-        let message = Message1 {
+        let message = ChannelUpdateAccept {
             R: r_self.public(),
             Y: y_self.public(),
         };
@@ -134,19 +178,28 @@ impl Party0 {
             ChannelBalance {
                 a: (ours, X_a),
                 b: (theirs, X_b),
-            } if X_a == self.x_self.public() && X_b == self.X_other => Ok(Balance { ours, theirs }),
+            } if X_a == self.x_self.public() && X_b == self.X_other => Ok(Balance {
+                alice: ours,
+                bob: theirs,
+            }),
             ChannelBalance {
                 a: (theirs, X_a),
                 b: (ours, X_b),
-            } if X_a == self.X_other && X_b == self.x_self.public() => Ok(Balance { ours, theirs }),
+            } if X_a == self.X_other && X_b == self.x_self.public() => Ok(Balance {
+                alice: ours,
+                bob: theirs,
+            }),
             _ => bail!("split transaction does not pay to X_self and X_other"),
         }
     }
 }
 
-pub struct Sender1 {
+/// A party who has sent a `ChannelUpdateProposal` and is waiting for
+/// confirmation.
+pub struct Alice1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
+    TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
     r_self: RevocationKeyPair,
@@ -155,36 +208,237 @@ pub struct Sender1 {
     time_lock: u32,
 }
 
-impl Sender1 {
+impl Alice1 {
     pub fn receive(
         self,
-        Message1 {
+        ChannelUpdateAccept {
             R: R_other,
             Y: Y_other,
-        }: Message1,
-    ) {
+        }: ChannelUpdateAccept,
+    ) -> anyhow::Result<Party2> {
+        let TX_c = CommitTransaction::new(
+            &self.TX_f,
+            (
+                self.x_self.public(),
+                self.r_self.public(),
+                self.y_self.public(),
+            ),
+            (self.X_other.clone(), R_other.clone(), Y_other.clone()),
+            self.time_lock,
+        )?;
+        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
+
+        let Balance {
+            alice: balance_self,
+            bob: balance_other,
+        } = self.proposed_balance;
+        let TX_s = SplitTransaction::new(
+            &TX_c,
+            ChannelBalance {
+                a: (balance_self, self.x_self.public()),
+                b: (balance_other, self.X_other.clone()),
+            },
+        )?;
+        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
+
+        Ok(Party2 {
+            x_self: self.x_self,
+            X_other: self.X_other,
+            TX_f: self.TX_f,
+            current_state: self.current_state,
+            revoked_states: self.revoked_states,
+            r_self: self.r_self,
+            R_other,
+            y_self: self.y_self,
+            Y_other,
+            TX_c,
+            TX_s,
+            encsig_TX_c_self,
+            sig_TX_s_self,
+        })
     }
 }
 
-pub struct Receiver1 {
+/// A party who has agreed on the terms of a channel update and is
+/// ready to start exchanging signatures.
+pub struct Party2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
+    TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
-    proposed_balance: Balance,
-    time_lock: u32,
+    TX_c: CommitTransaction,
+    TX_s: SplitTransaction,
+    encsig_TX_c_self: EncryptedSignature,
+    sig_TX_s_self: Signature,
 }
 
-#[derive(Clone, Copy)]
+impl Party2 {
+    pub fn next_message(&self) -> ShareSplitSignature {
+        ShareSplitSignature {
+            sig_TX_s: self.sig_TX_s_self.clone(),
+        }
+    }
+
+    pub fn receive(
+        self,
+        ShareSplitSignature {
+            sig_TX_s: sig_TX_s_other,
+        }: ShareSplitSignature,
+    ) -> anyhow::Result<Party3> {
+        verify_sig(self.X_other.clone(), &self.TX_s, &sig_TX_s_other)
+            .context("failed to verify sig_TX_s sent by counterparty")?;
+
+        // TODO: Use sig_TX_s_self and sig_TX_s_other to actually sign
+        // the SplitTransaction
+
+        Ok(Party3 {
+            x_self: self.x_self,
+            X_other: self.X_other,
+            TX_f: self.TX_f,
+            current_state: self.current_state,
+            revoked_states: self.revoked_states,
+            r_self: self.r_self,
+            R_other: self.R_other,
+            y_self: self.y_self,
+            Y_other: self.Y_other,
+            TX_c: self.TX_c,
+            TX_s: self.TX_s,
+            encsig_TX_c_self: self.encsig_TX_c_self,
+        })
+    }
+}
+
+/// A party who has exchanged signatures for the `SplitTransaction`
+/// and is ready to start exchanging encrypted signatures for the
+/// `CommitTransaction`.
+pub struct Party3 {
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
+    TX_f: FundingTransaction,
+    current_state: ChannelState,
+    revoked_states: Vec<RevokedState>,
+    r_self: RevocationKeyPair,
+    R_other: RevocationPublicKey,
+    y_self: PublishingKeyPair,
+    Y_other: PublishingPublicKey,
+    TX_c: CommitTransaction,
+    TX_s: SplitTransaction,
+    encsig_TX_c_self: EncryptedSignature,
+}
+
+impl Party3 {
+    pub fn next_message(&self) -> ShareCommitEncryptedSignature {
+        ShareCommitEncryptedSignature {
+            encsig_TX_c: self.encsig_TX_c_self.clone(),
+        }
+    }
+
+    pub fn receive(
+        self,
+        ShareCommitEncryptedSignature {
+            encsig_TX_c: encsig_TX_c_other,
+        }: ShareCommitEncryptedSignature,
+    ) -> anyhow::Result<Party4> {
+        verify_encsig(
+            self.X_other.clone(),
+            self.y_self.public(),
+            &self.TX_c,
+            &encsig_TX_c_other,
+        )
+        .context("failed to verify encsig_TX_c sent by counterparty")?;
+
+        Ok(Party4 {
+            x_self: self.x_self,
+            X_other: self.X_other,
+            TX_f: self.TX_f,
+            current_state: self.current_state,
+            revoked_states: self.revoked_states,
+            r_self: self.r_self,
+            R_other: self.R_other,
+            y_self: self.y_self,
+            Y_other: self.Y_other,
+            TX_c: self.TX_c,
+            TX_s: self.TX_s,
+            encsig_TX_c_self: self.encsig_TX_c_self,
+            encsig_TX_c_other,
+        })
+    }
+}
+
+/// A party who has exchanged all necessary signatures to complete a
+/// channel update and just needs to collaborate with the counterparty
+/// to revoke the previous `CommitTransaction`.
+pub struct Party4 {
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
+    TX_f: FundingTransaction,
+    current_state: ChannelState,
+    revoked_states: Vec<RevokedState>,
+    r_self: RevocationKeyPair,
+    R_other: RevocationPublicKey,
+    y_self: PublishingKeyPair,
+    Y_other: PublishingPublicKey,
+    TX_c: CommitTransaction,
+    TX_s: SplitTransaction,
+    encsig_TX_c_self: EncryptedSignature,
+    encsig_TX_c_other: EncryptedSignature,
+}
+
+impl Party4 {
+    pub fn next_message(&self) -> RevealRevocationSecretKey {
+        RevealRevocationSecretKey {
+            r: self.current_state.r_self.clone().into(),
+        }
+    }
+
+    pub fn receive(
+        self,
+        RevealRevocationSecretKey { r: r_other }: RevealRevocationSecretKey,
+    ) -> anyhow::Result<Party0> {
+        self.current_state
+            .R_other
+            .verify_revocation_secret_key(&r_other)?;
+
+        let revoked_state = RevokedState {
+            channel_state: self.current_state,
+            r_other,
+        };
+        let mut revoked_states = self.revoked_states;
+        revoked_states.push(revoked_state);
+
+        let current_state = ChannelState {
+            TX_c: self.TX_c,
+            encsig_TX_c_self: self.encsig_TX_c_other,
+            encsig_TX_c_other: self.encsig_TX_c_self,
+            r_self: self.r_self,
+            R_other: self.R_other,
+            y_self: self.y_self,
+            TX_s: self.TX_s,
+        };
+
+        Ok(Party0 {
+            x_self: self.x_self,
+            X_other: self.X_other,
+            TX_f: self.TX_f,
+            current_state,
+            revoked_states,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 struct Balance {
-    ours: Amount,
-    theirs: Amount,
+    alice: Amount,
+    bob: Amount,
 }
 
+// NOTE: The protocol proposed in the paper supports updates which add
+// new outputs. We exclude that possibility for simplicity.
 pub enum ChannelUpdate {
     Pay(Amount),
     Receive(Amount),
@@ -198,14 +452,14 @@ impl Balance {
     fn apply(self, update: ChannelUpdate) -> anyhow::Result<Balance> {
         let (new_ours, new_theirs) = match update {
             ChannelUpdate::Pay(amount) => {
-                let new_ours = self.ours.checked_sub(amount);
-                let new_theirs = self.theirs.checked_add(amount);
+                let new_ours = self.alice.checked_sub(amount);
+                let new_theirs = self.bob.checked_add(amount);
 
                 (new_ours, new_theirs)
             }
             ChannelUpdate::Receive(amount) => {
-                let new_ours = self.ours.checked_add(amount);
-                let new_theirs = self.theirs.checked_sub(amount);
+                let new_ours = self.alice.checked_add(amount);
+                let new_theirs = self.bob.checked_sub(amount);
 
                 (new_ours, new_theirs)
             }
@@ -213,9 +467,134 @@ impl Balance {
 
         match (new_ours, new_theirs) {
             (Some(ours), Some(theirs)) if ours >= Amount::ZERO && theirs >= Amount::ZERO => {
-                Ok(Balance { ours, theirs })
+                Ok(Balance {
+                    alice: ours,
+                    bob: theirs,
+                })
             }
             _ => bail!(InvalidChannelUpdate),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use bitcoin::{Transaction, TxIn, TxOut};
+
+    #[test]
+    fn channel_update() {
+        let x_alice = OwnershipKeyPair::new_random();
+        let x_bob = OwnershipKeyPair::new_random();
+
+        let r_alice = RevocationKeyPair::new_random();
+        let r_bob = RevocationKeyPair::new_random();
+
+        let y_alice = PublishingKeyPair::new_random();
+        let y_bob = PublishingKeyPair::new_random();
+
+        let current_balance = Balance {
+            alice: Amount::from_btc(1.0).unwrap(),
+            bob: Amount::from_btc(1.0).unwrap(),
+        };
+
+        let TX_f = FundingTransaction::new(
+            (x_alice.public(), (TxIn::default(), current_balance.alice)),
+            (x_bob.public(), (TxIn::default(), current_balance.bob)),
+        )
+        .unwrap();
+
+        let time_lock = 60 * 60;
+        let TX_c = CommitTransaction::new(
+            &TX_f,
+            (x_alice.public(), r_alice.public(), y_alice.public()),
+            (x_bob.public(), r_bob.public(), y_bob.public()),
+            time_lock,
+        )
+        .unwrap();
+
+        let TX_s = SplitTransaction::new(
+            &TX_c,
+            ChannelBalance {
+                a: (current_balance.alice, x_alice.public()),
+                b: (current_balance.bob, x_bob.public()),
+            },
+        )
+        .unwrap();
+
+        let alice_encsig = TX_c.encsign_once(x_alice.clone(), y_bob.public());
+        let bob_encsig = TX_c.encsign_once(x_bob.clone(), y_alice.public());
+
+        let alice0 = {
+            let current_state = ChannelState {
+                TX_c: TX_c.clone(),
+                encsig_TX_c_self: alice_encsig.clone(),
+                encsig_TX_c_other: bob_encsig.clone(),
+                r_self: r_alice.clone(),
+                R_other: r_bob.public(),
+                y_self: y_alice,
+                TX_s: TX_s.clone(),
+            };
+
+            Party0 {
+                x_self: x_alice.clone(),
+                X_other: x_bob.public(),
+                TX_f: TX_f.clone(),
+                current_state,
+                revoked_states: vec![],
+            }
+        };
+
+        let bob0 = {
+            let current_state = ChannelState {
+                TX_c,
+                encsig_TX_c_self: bob_encsig,
+                encsig_TX_c_other: alice_encsig,
+                r_self: r_bob,
+                R_other: r_alice.public(),
+                y_self: y_bob,
+                TX_s,
+            };
+
+            Party0 {
+                x_self: x_bob,
+                X_other: x_alice.public(),
+                TX_f,
+                current_state,
+                revoked_states: vec![],
+            }
+        };
+
+        let channel_update = ChannelUpdate::Pay(Amount::from_btc(0.5).unwrap());
+        let time_lock = 60 * 60;
+
+        let (alice1, message0) = alice0
+            .propose_channel_update(channel_update, time_lock)
+            .unwrap();
+
+        let (bob1, message1) = bob0.receive_channel_update(message0).unwrap();
+
+        let alice2 = alice1.receive(message1).unwrap();
+
+        let message2_alice = alice2.next_message();
+        let message2_bob = bob1.next_message();
+
+        let alice3 = alice2.receive(message2_bob).unwrap();
+        let bob2 = bob1.receive(message2_alice).unwrap();
+
+        let message3_alice = alice3.next_message();
+        let message3_bob = bob2.next_message();
+
+        let alice4 = alice3.receive(message3_bob).unwrap();
+        let bob3 = bob2.receive(message3_alice).unwrap();
+
+        let message4_alice = alice4.next_message();
+        let message4_bob = bob3.next_message();
+
+        let alice5 = alice4.receive(message4_bob).unwrap();
+        let bob4 = bob3.receive(message4_alice).unwrap();
+
+        println!("{:?}", alice5.balance().unwrap());
+        println!("{:?}", bob4.balance().unwrap());
     }
 }

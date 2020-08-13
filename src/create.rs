@@ -321,6 +321,9 @@ impl Party2 {
         verify_sig(self.X_other.clone(), &self.TX_s, &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
 
+        // TODO: Use sig_TX_s_self and sig_TX_s_other to actually sign
+        // the SplitTransaction
+
         Ok(Party3 {
             x_self: self.x_self,
             X_other: self.X_other,
@@ -332,8 +335,6 @@ impl Party2 {
             TX_c: self.TX_c,
             TX_s: self.TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
-            sig_TX_s_self: self.sig_TX_s_self,
-            sig_TX_s_other,
         })
     }
 }
@@ -349,8 +350,6 @@ pub struct Party3 {
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
-    sig_TX_s_self: Signature,
-    sig_TX_s_other: Signature,
 }
 
 impl Party3 {
@@ -372,7 +371,7 @@ impl Party3 {
             &self.TX_c,
             &encsig_TX_c_other,
         )
-        .context("failed to verify sig_TX_s sent by counterparty")?;
+        .context("failed to verify encsig_TX_c sent by counterparty")?;
 
         Ok(Party4 {
             x_self: self.x_self,
@@ -386,8 +385,6 @@ impl Party3 {
             TX_s: self.TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other,
-            sig_TX_s_self: self.sig_TX_s_self,
-            sig_TX_s_other: self.sig_TX_s_other,
         })
     }
 }
@@ -404,8 +401,6 @@ pub struct Party4 {
     TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
     encsig_TX_c_other: EncryptedSignature,
-    sig_TX_s_self: Signature,
-    sig_TX_s_other: Signature,
 }
 
 /// Sign one of the inputs of the `FundingTransaction`.
@@ -440,8 +435,6 @@ impl Party4 {
             TX_s: self.TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other: self.encsig_TX_c_other,
-            sig_TX_s_self: self.sig_TX_s_self,
-            sig_TX_s_other: self.sig_TX_s_other,
         })
     }
 }
@@ -460,8 +453,6 @@ pub struct Party5 {
     TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
     encsig_TX_c_other: EncryptedSignature,
-    sig_TX_s_self: Signature,
-    sig_TX_s_other: Signature,
 }
 
 #[derive(Debug, thiserror::Error)]

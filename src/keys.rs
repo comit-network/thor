@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use bitcoin::{hashes::Hash, SigHash};
 use conquer_once::Lazy;
 use ecdsa_fun::{
@@ -81,6 +81,7 @@ pub struct RevocationKeyPair {
 
 pub struct RevocationSecretKey(Scalar);
 
+#[derive(Clone)]
 pub struct RevocationPublicKey(Point);
 
 impl RevocationKeyPair {
@@ -98,6 +99,23 @@ impl RevocationKeyPair {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("revocation secret key does not match revocation public key")]
+pub struct WrongRevocationSecretKey;
+
+impl RevocationPublicKey {
+    pub fn verify_revocation_secret_key(
+        &self,
+        secret_key: &RevocationSecretKey,
+    ) -> anyhow::Result<()> {
+        if self.0 != public_key(&secret_key.0) {
+            bail!(WrongRevocationSecretKey)
+        }
+
+        Ok(())
+    }
+}
+
 impl From<Point> for RevocationPublicKey {
     fn from(public_key: Point) -> Self {
         Self(public_key)
@@ -107,6 +125,12 @@ impl From<Point> for RevocationPublicKey {
 impl From<RevocationPublicKey> for Point {
     fn from(public_key: RevocationPublicKey) -> Self {
         public_key.0
+    }
+}
+
+impl From<RevocationKeyPair> for RevocationSecretKey {
+    fn from(from: RevocationKeyPair) -> Self {
+        RevocationSecretKey(from.secret_key)
     }
 }
 

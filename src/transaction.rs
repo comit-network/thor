@@ -230,6 +230,7 @@ impl CommitTransaction {
     }
 }
 
+#[derive(Clone)]
 pub struct SplitTransaction {
     inner: Transaction,
     digest: SigHash,
