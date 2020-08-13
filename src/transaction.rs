@@ -3,10 +3,11 @@ use crate::{
     ChannelState,
 };
 use anyhow::Context;
-use bitcoin::hashes::Hash;
 use bitcoin::{
-    hashes::hash160, secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash,
-    Transaction, TxIn, TxOut,
+    hashes::{hash160, Hash},
+    secp256k1,
+    util::bip143::SighashComponents,
+    Amount, OutPoint, Script, SigHash, Transaction, TxIn, TxOut,
 };
 use ecdsa_fun::{self, adaptor::EncryptedSignature, Signature, ECDSA};
 use miniscript::{Descriptor, Segwitv0};
@@ -73,7 +74,8 @@ impl FundingTransaction {
         X_b: &secp256k1::PublicKey,
     ) -> miniscript::Descriptor<bitcoin::PublicKey> {
         // Describes the spending policy of the channel fund transaction T_f.
-        // For now we use `and(X_a, X_b)` - eventually we might want to replace this with a threshold signature.
+        // For now we use `and(X_a, X_b)` - eventually we might want to replace this
+        // with a threshold signature.
         const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_a),pk_k(X_b))";
 
         let X_a = hex::encode(X_a.serialize().to_vec());
@@ -202,11 +204,12 @@ impl CommitTransaction {
 
         // Describes the spending policy of the channel commit transaction T_c.
         // There are possible way to spend this transaction:
-        // 1. Channel state: It is correctly signed w.r.t pk_0, pk_1 and after relative timelock
-        // 2. Punish 0: It is correctly signed w.r.t pk_1, Y_0, R_0
+        // 1. Channel state: It is correctly signed w.r.t pk_0, pk_1 and after relative
+        // timelock 2. Punish 0: It is correctly signed w.r.t pk_1, Y_0, R_0
         // 3. Punish 1: It is correctly signed w.r.t pk_0, Y_1, R_1
 
-        // Policy is or(and(older(144),and(pk(X0),pk(X1))),or(and(pk(X1),and(pk(Y0),pk(R0))),and(pk(X0),and(pk(Y1),pk(R1)))))
+        // Policy is or(and(older(144),and(pk(X0),pk(X1))),or(and(pk(X1),and(pk(Y0),
+        // pk(R0))),and(pk(X0),and(pk(Y1),pk(R1)))))
 
         let channel_state_condition = format!(
             "and_v(v:older({}),and_v(v:pk({}),pk_k({})))",
