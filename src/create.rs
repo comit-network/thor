@@ -98,10 +98,9 @@ impl Wallet {
             self.funding_input_tx.txid(),
         )?;
 
-        // TODO use secpFun
-        let secp = Secp256k1::new();
-        let message_to_sign = Message::from_slice(&digest.into_inner()).unwrap();
-        let signature = secp.sign(&message_to_sign, &private_key.key);
+        let ecdsa = ECDSA::new(nonce::from_global_rng::<Sha256, ThreadRng>());
+        let secret_key = private_key.key.into();
+        let signature = ecdsa.sign(&secret_key, &digest.into_inner());
 
         // TODO put signature into transaction with miniscript
         let transaction = FundingTransaction::new(
