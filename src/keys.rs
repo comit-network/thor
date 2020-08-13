@@ -196,37 +196,22 @@ impl fmt::Display for PublishingPublicKey {
     }
 }
 
-impl TryFrom<OwnershipPublicKey> for bitcoin::secp256k1::PublicKey {
-    type Error = anyhow::Error;
-
-    fn try_from(value: OwnershipPublicKey) -> anyhow::Result<Self> {
-        point_to_bitcoin_pk(value.0)
+impl From<OwnershipPublicKey> for bitcoin::secp256k1::PublicKey {
+    fn from(value: OwnershipPublicKey) -> Self {
+        value.0.into()
     }
 }
 
-impl TryFrom<RevocationPublicKey> for bitcoin::secp256k1::PublicKey {
-    type Error = anyhow::Error;
-
-    fn try_from(value: RevocationPublicKey) -> anyhow::Result<Self> {
-        point_to_bitcoin_pk(value.0)
+impl From<RevocationPublicKey> for bitcoin::secp256k1::PublicKey {
+    fn from(value: RevocationPublicKey) -> Self {
+        value.0.into()
     }
 }
 
-impl TryFrom<PublishingPublicKey> for bitcoin::secp256k1::PublicKey {
-    type Error = anyhow::Error;
-
-    fn try_from(value: PublishingPublicKey) -> anyhow::Result<Self> {
-        point_to_bitcoin_pk(value.0)
+impl From<PublishingPublicKey> for bitcoin::secp256k1::PublicKey {
+    fn from(value: PublishingPublicKey) -> Self {
+        value.0.into()
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("point {0} is not a bitcoin::secp256k1::PublicKey")]
-pub struct NotBitcoinPublicKey(Point);
-
-fn point_to_bitcoin_pk(point: Point) -> anyhow::Result<bitcoin::secp256k1::PublicKey> {
-    bitcoin::secp256k1::PublicKey::from_slice(&point.to_bytes())
-        .map_err(|_| NotBitcoinPublicKey(point).into())
 }
 
 fn random_key_pair() -> (Scalar, Point) {

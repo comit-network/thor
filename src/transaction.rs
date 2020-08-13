@@ -10,10 +10,7 @@ use bitcoin::{
 };
 use ecdsa_fun::{self, adaptor::EncryptedSignature, Signature, ECDSA};
 use miniscript::{Descriptor, Segwitv0};
-use std::{
-    convert::{TryFrom, TryInto},
-    str::FromStr,
-};
+use std::str::FromStr;
 
 #[derive(Clone)]
 pub struct FundingTransaction {
@@ -32,8 +29,7 @@ impl FundingTransaction {
         (X_a, (tid_a, amount_a)): (OwnershipPublicKey, (TxIn, Amount)),
         (X_b, (tid_b, amount_b)): (OwnershipPublicKey, (TxIn, Amount)),
     ) -> anyhow::Result<Self> {
-        let output_descriptor =
-            FundingTransaction::build_descriptor(&X_a.try_into()?, &X_b.try_into()?);
+        let output_descriptor = FundingTransaction::build_descriptor(&X_a.into(), &X_b.into());
 
         let transaction = Transaction {
             version: 2,
@@ -181,13 +177,13 @@ impl CommitTransaction {
         (X_1, R_1, Y_1): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
         time_lock: u32,
     ) -> anyhow::Result<Descriptor<bitcoin::PublicKey>> {
-        let X_0 = bitcoin::secp256k1::PublicKey::try_from(X_0)?;
-        let R_0 = bitcoin::secp256k1::PublicKey::try_from(R_0)?;
-        let Y_0 = bitcoin::secp256k1::PublicKey::try_from(Y_0)?;
+        let X_0 = bitcoin::secp256k1::PublicKey::from(X_0);
+        let R_0 = bitcoin::secp256k1::PublicKey::from(R_0);
+        let Y_0 = bitcoin::secp256k1::PublicKey::from(Y_0);
 
-        let X_1 = bitcoin::secp256k1::PublicKey::try_from(X_1)?;
-        let R_1 = bitcoin::secp256k1::PublicKey::try_from(R_1)?;
-        let Y_1 = bitcoin::secp256k1::PublicKey::try_from(Y_1)?;
+        let X_1 = bitcoin::secp256k1::PublicKey::from(X_1);
+        let R_1 = bitcoin::secp256k1::PublicKey::from(R_1);
+        let Y_1 = bitcoin::secp256k1::PublicKey::from(Y_1);
 
         let X_0_hash = hash160::Hash::hash(&X_0.serialize()[..]);
         let X_0 = hex::encode(X_0.serialize().to_vec());
@@ -238,7 +234,7 @@ pub struct SplitTransaction {
 }
 
 impl SplitTransaction {
-    pub fn new(TX_c: &CommitTransaction, channel_balance: ChannelBalance) -> anyhow::Result<Self> {
+    pub fn new(TX_c: &CommitTransaction, channel_balance: ChannelBalance) -> Self {
         let ChannelBalance {
             a: (amount_a, X_a),
             b: (amount_b, X_b),
@@ -246,13 +242,13 @@ impl SplitTransaction {
 
         let input = TX_c.as_txin();
 
-        let descriptor = SplitTransaction::wpk_descriptor(X_a)?;
+        let descriptor = SplitTransaction::wpk_descriptor(X_a);
         let output_a = TxOut {
             value: amount_a.as_sat(),
             script_pubkey: descriptor.script_pubkey(),
         };
 
-        let descriptor = SplitTransaction::wpk_descriptor(X_b)?;
+        let descriptor = SplitTransaction::wpk_descriptor(X_b);
         let output_b = TxOut {
             value: amount_b.as_sat(),
             script_pubkey: descriptor.script_pubkey(),
@@ -274,11 +270,11 @@ impl SplitTransaction {
             TX_c.value().as_sat(),
         );
 
-        Ok(Self {
+        Self {
             inner: transaction,
             digest,
             balance: channel_balance,
-        })
+        }
     }
 
     pub fn sign_once(&self, x_self: OwnershipKeyPair) -> Signature {
@@ -289,15 +285,13 @@ impl SplitTransaction {
         self.balance.clone()
     }
 
-    fn wpk_descriptor(
-        key: OwnershipPublicKey,
-    ) -> anyhow::Result<miniscript::Descriptor<bitcoin::PublicKey>> {
+    fn wpk_descriptor(key: OwnershipPublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
         let pk = bitcoin::PublicKey {
-            key: key.try_into()?,
+            key: key.into(),
             compressed: true,
         };
 
-        Ok(miniscript::Descriptor::Wpkh(pk))
+        miniscript::Descriptor::Wpkh(pk)
     }
 
     pub fn digest(&self) -> SigHash {

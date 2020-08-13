@@ -209,7 +209,7 @@ impl Alice1 {
                 a: (self.tid_self.1, self.x_self.public()),
                 b: (self.tid_other.1, self.X_other.clone()),
             },
-        )?;
+        );
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {
@@ -272,7 +272,7 @@ impl Bob1 {
                 a: (self.tid_other.1, self.X_other.clone()),
                 b: (self.tid_self.1, self.x_self.public()),
             },
-        )?;
+        );
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {

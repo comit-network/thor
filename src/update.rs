@@ -144,7 +144,7 @@ impl Party0 {
                 a: (balance_other, self.X_other.clone()),
                 b: (balance_self, self.x_self.public()),
             },
-        )?;
+        );
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         let state = Party2 {
@@ -238,7 +238,7 @@ impl Alice1 {
                 a: (balance_self, self.x_self.public()),
                 b: (balance_other, self.X_other.clone()),
             },
-        )?;
+        );
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {
@@ -519,8 +519,7 @@ mod test {
                 a: (current_balance.alice, x_alice.public()),
                 b: (current_balance.bob, x_bob.public()),
             },
-        )
-        .unwrap();
+        );
 
         let alice_encsig = TX_c.encsign_once(x_alice.clone(), y_bob.public());
         let bob_encsig = TX_c.encsign_once(x_bob.clone(), y_alice.public());
