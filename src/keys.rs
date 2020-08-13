@@ -4,7 +4,6 @@ use conquer_once::Lazy;
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
     fun::{
-        g,
         marker::{Mark, Normal},
         Point, Scalar, G,
     },
@@ -223,7 +222,9 @@ fn random_key_pair() -> (Scalar, Point) {
 }
 
 fn public_key(secret_key: &Scalar) -> Point {
-    g!(secret_key * G).mark::<Normal>()
+    let ecdsa = ECDSA::<()>::default();
+
+    ecdsa.verification_key_for(&secret_key)
 }
 
 #[cfg(test)]
