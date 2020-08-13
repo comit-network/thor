@@ -5,7 +5,8 @@ use crate::{
 use bitcoin::{hashes::Hash, SigHash};
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
-    nonce, Signature, ECDSA,
+    nonce::{self, Deterministic},
+    Signature, ECDSA,
 };
 use rand::prelude::ThreadRng;
 use sha2::Sha256;
@@ -42,7 +43,7 @@ pub fn verify_encsig(
     TX_c: &CommitTransaction,
     encsig: &EncryptedSignature,
 ) -> Result<(), InvalidEncryptedSignature> {
-    let adaptor = Adaptor::<Sha256, _>::new(nonce::from_global_rng::<Sha256, ThreadRng>());
+    let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
     if adaptor.verify_encrypted_signature(
         &verification_key.into(),

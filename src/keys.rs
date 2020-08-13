@@ -8,7 +8,8 @@ use ecdsa_fun::{
         marker::{Mark, Normal},
         Point, Scalar, G,
     },
-    nonce, Signature, ECDSA,
+    nonce::{self, Deterministic},
+    Signature, ECDSA,
 };
 use rand::prelude::ThreadRng;
 use sha2::Sha256;
@@ -38,13 +39,13 @@ impl OwnershipKeyPair {
     }
 
     pub fn sign(&self, digest: SigHash) -> Signature {
-        let ecdsa = ECDSA::new(nonce::from_global_rng::<Sha256, ThreadRng>());
+        let ecdsa = ECDSA::<Deterministic<Sha256>>::default();
 
         ecdsa.sign(&self.secret_key, &digest.into_inner())
     }
 
     pub fn encsign(&self, Y: PublishingPublicKey, digest: SigHash) -> EncryptedSignature {
-        let adaptor = Adaptor::<Sha256, _>::new(nonce::from_global_rng::<Sha256, ThreadRng>());
+        let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
         adaptor.encrypted_sign(&self.secret_key, &Y.0, &digest.into_inner())
     }
