@@ -1,16 +1,24 @@
 use crate::{
-    keys::{OwnershipKeyPair, OwnershipPublicKey, PublishingPublicKey, RevocationPublicKey},
+    keys::{
+        OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
+        RevocationKeyPair, RevocationPublicKey,
+    },
     ChannelBalance,
 };
-use anyhow::Context;
-use bitcoin::hashes::Hash;
+use anyhow::bail;
 use bitcoin::{
-    hashes::hash160, secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash,
-    Transaction, TxIn, TxOut,
+    hashes::{hash160, Hash},
+    secp256k1, Amount, OutPoint, Script, SigHash, Transaction, TxIn, TxOut, Txid,
 };
-use ecdsa_fun::{self, adaptor::EncryptedSignature, Signature, ECDSA};
+use ecdsa_fun::{
+    self,
+    adaptor::{Adaptor, EncryptedSignature},
+    nonce::Deterministic,
+    Signature,
+};
 use miniscript::{Descriptor, Segwitv0};
-use std::str::FromStr;
+use sha2::Sha256;
+use std::{collections::HashMap, str::FromStr};
 
 #[derive(Clone)]
 pub struct FundingTransaction {
@@ -90,6 +98,8 @@ impl FundingTransaction {
 #[derive(Clone)]
 pub struct CommitTransaction {
     inner: Transaction,
+    input_descriptor: Descriptor<bitcoin::PublicKey>,
+    output_descriptor: Descriptor<bitcoin::PublicKey>,
     digest: SigHash,
 }
 
@@ -100,7 +110,8 @@ impl CommitTransaction {
         (X_b, R_b, Y_b): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
         time_lock: u32,
     ) -> anyhow::Result<Self> {
-        let descriptor = Self::descriptor((X_a, R_a, Y_a), (X_b, R_b, Y_b), time_lock)?;
+        let output_descriptor =
+            Self::build_descriptor((X_a, R_a, Y_a), (X_b, R_b, Y_b), time_lock)?;
 
         let input = TX_f.as_txin();
         let transaction = Transaction {
@@ -111,15 +122,19 @@ impl CommitTransaction {
             // spending conditions
             output: vec![TxOut {
                 value: TX_f.value().as_sat(),
-                script_pubkey: descriptor.script_pubkey(),
+                script_pubkey: output_descriptor.script_pubkey(),
             }],
         };
 
         let digest = Self::compute_digest(&transaction, TX_f);
 
+        let input_descriptor = TX_f.output_descriptor();
+
         Ok(Self {
             inner: transaction,
             digest,
+            output_descriptor,
+            input_descriptor,
         })
     }
 
@@ -134,12 +149,33 @@ impl CommitTransaction {
     /// Add signatures to CommitTransaction.
     pub fn add_signatures(
         self,
-        (_X_a, _sig_a): (OwnershipPublicKey, Signature),
-        (_X_b, _sig_b): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Self> {
-        // NOTE: Could return a `SignedCommitTransaction` for extra type
-        // safety.
-        todo!("Use Miniscript's `satisfy` API")
+        (X_a, sig_a): (OwnershipPublicKey, Signature),
+        (X_b, sig_b): (OwnershipPublicKey, Signature),
+    ) -> anyhow::Result<Transaction> {
+        let satisfier = {
+            let mut satisfier = HashMap::with_capacity(2);
+
+            let X_a = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_a.into(),
+            };
+            let X_b = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_b.into(),
+            };
+
+            // NOTE: The order hopefully doesn't matter
+            satisfier.insert(X_a, (sig_a.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_b, (sig_b.into(), ::bitcoin::SigHashType::All));
+
+            satisfier
+        };
+
+        let mut TX_c = self.inner;
+        self.input_descriptor
+            .satisfy(&mut TX_c.input[0], satisfier)?;
+
+        Ok(TX_c)
     }
 
     pub fn as_txin(&self) -> TxIn {
@@ -155,8 +191,16 @@ impl CommitTransaction {
         Amount::from_sat(self.inner.output[0].value)
     }
 
+    pub fn output_descriptor(&self) -> Descriptor<bitcoin::PublicKey> {
+        self.output_descriptor.clone()
+    }
+
     pub fn digest(&self) -> SigHash {
         self.digest
+    }
+
+    pub fn txid(&self) -> Txid {
+        self.inner.txid()
     }
 
     fn compute_digest(
@@ -172,7 +216,7 @@ impl CommitTransaction {
         )
     }
 
-    fn descriptor(
+    fn build_descriptor(
         (X_0, R_0, Y_0): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
         (X_1, R_1, Y_1): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
         time_lock: u32,
@@ -257,18 +301,11 @@ impl SplitTransaction {
         let transaction = Transaction {
             version: 2,
             lock_time: 0,
-            input: vec![input.clone()],
+            input: vec![input],
             output: vec![output_a, output_b],
         };
 
-        let digest = SighashComponents::new(&transaction).sighash_all(
-            &input,
-            // TODO: May need to instead call `.witness_script()` on the
-            // descriptor used to produce the `CommitTransaction`'s output
-            // `script_pubkey`
-            &input.script_sig,
-            TX_c.value().as_sat(),
-        );
+        let digest = Self::compute_digest(&transaction, TX_c);
 
         Self {
             inner: transaction,
@@ -285,6 +322,10 @@ impl SplitTransaction {
         self.balance.clone()
     }
 
+    pub fn digest(&self) -> SigHash {
+        self.digest
+    }
+
     fn wpk_descriptor(key: OwnershipPublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
         let pk = bitcoin::PublicKey {
             key: key.into(),
@@ -294,8 +335,143 @@ impl SplitTransaction {
         miniscript::Descriptor::Wpkh(pk)
     }
 
-    pub fn digest(&self) -> SigHash {
-        self.digest
+    fn compute_digest(TX_s: &Transaction, TX_c: &CommitTransaction) -> SigHash {
+        let input_index = 0;
+        let sighash_all = 1;
+        TX_s.signature_hash(
+            input_index,
+            &TX_c.output_descriptor().witness_script(),
+            sighash_all,
+        )
+    }
+}
+
+pub struct PunishTransaction(Transaction);
+
+#[derive(Debug, thiserror::Error)]
+pub enum PunishError {
+    #[error("no signatures found in witness stack")]
+    NoSignatures,
+    #[error("could not recover PublishingSecretKey from signatures in transaction")]
+    RecoveryFailure,
+}
+
+impl PunishTransaction {
+    pub fn new(
+        revoked_TX_c_candidate: Transaction,
+        TX_c: CommitTransaction,
+        Y_other: PublishingPublicKey,
+        encsig_TX_c_self: EncryptedSignature,
+        r_other: RevocationKeyPair,
+        x_self: OwnershipKeyPair,
+    ) -> anyhow::Result<Self> {
+        let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
+
+        // CommitTransaction's only have one input
+        let input = revoked_TX_c_candidate.input[0].clone();
+
+        // Extract all signatures from witness stack
+        let mut sigs = Vec::new();
+        for witness in input.witness.iter() {
+            let witness = witness.as_slice();
+
+            let res = bitcoin::secp256k1::Signature::from_der(&witness[..witness.len() - 1]);
+            match res {
+                Ok(sig) => sigs.push(sig),
+                Err(_) => {
+                    continue;
+                }
+            }
+        }
+
+        if sigs.is_empty() {
+            bail!(PunishError::NoSignatures)
+        }
+
+        // Attempt to extract y_other from every signature
+        let y_other = sigs
+            .into_iter()
+            .find_map(|sig| {
+                adaptor
+                    .recover_decryption_key(&Y_other.clone().into(), &sig.into(), &encsig_TX_c_self)
+                    .map(PublishingKeyPair::from)
+            })
+            .ok_or_else(|| PunishError::RecoveryFailure)?;
+
+        let mut TX_p = {
+            let output_descriptor = SplitTransaction::wpk_descriptor(x_self.public());
+            let output = TxOut {
+                value: TX_c.value().as_sat(),
+                script_pubkey: output_descriptor.script_pubkey(),
+            };
+            Transaction {
+                version: 2,
+                lock_time: 0,
+                input: vec![TX_c.as_txin()],
+                output: vec![output],
+            }
+        };
+
+        let digest = Self::compute_digest(&TX_p, &TX_c);
+
+        let satisfier = {
+            let mut satisfier = HashMap::with_capacity(3);
+
+            let X_self = bitcoin::secp256k1::PublicKey::from(x_self.public());
+            let X_self_hash = hash160::Hash::hash(&X_self.serialize()[..]);
+            let X_self = bitcoin::PublicKey {
+                compressed: true,
+                key: X_self,
+            };
+            let sig_x_self = x_self.sign(digest);
+
+            let Y_other = bitcoin::secp256k1::PublicKey::from(Y_other);
+            let Y_other_hash = hash160::Hash::hash(&Y_other.serialize()[..]);
+            let Y_other = bitcoin::PublicKey {
+                compressed: true,
+                key: Y_other,
+            };
+            let sig_y_other = y_other.sign(digest);
+
+            let R_other = bitcoin::secp256k1::PublicKey::from(r_other.public());
+            let R_other_hash = hash160::Hash::hash(&R_other.serialize()[..]);
+            let R_other = bitcoin::PublicKey {
+                compressed: true,
+                key: R_other,
+            };
+            let sig_r_other = r_other.sign(digest);
+
+            // NOTE: The order hopefully doesn't matter
+            satisfier.insert(
+                X_self_hash,
+                (X_self, (sig_x_self.into(), ::bitcoin::SigHashType::All)),
+            );
+            satisfier.insert(
+                Y_other_hash,
+                (Y_other, (sig_y_other.into(), ::bitcoin::SigHashType::All)),
+            );
+            satisfier.insert(
+                R_other_hash,
+                (R_other, (sig_r_other.into(), ::bitcoin::SigHashType::All)),
+            );
+
+            satisfier
+        };
+
+        TX_c.output_descriptor()
+            .satisfy(&mut TX_p.input[0], satisfier)?;
+
+        Ok(Self(TX_p))
+    }
+
+    fn compute_digest(TX_p: &Transaction, TX_c: &CommitTransaction) -> SigHash {
+        let input_index = 0;
+        let sighash_all = 1;
+        TX_p.signature_hash(
+            input_index,
+            &TX_c.output_descriptor().witness_script(),
+            sighash_all,
+        )
     }
 }
 
@@ -311,7 +487,6 @@ pub enum Error {
 mod tests {
     use super::*;
     use crate::keys::point_from_str;
-    use ecdsa_fun::fun::Point;
     use miniscript::Miniscript;
 
     #[test]
@@ -372,7 +547,8 @@ mod tests {
         let time_lock = 144;
 
         let descriptor =
-            CommitTransaction::descriptor((X_0, R_0, Y_0), (X_1, R_1, Y_1), time_lock).unwrap();
+            CommitTransaction::build_descriptor((X_0, R_0, Y_0), (X_1, R_1, Y_1), time_lock)
+                .unwrap();
 
         let witness_script = format!("{}", descriptor.witness_script());
         assert_eq!(witness_script, "Script(OP_IF OP_IF OP_DUP OP_HASH160 OP_PUSHBYTES_20 635de934904ad5406559beebcc3ca0d119721323 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 be60bbce0058cb25f268d70559e1a3433d75f557 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 4c8a3449333f92f386b4b8a202353719016261e8 OP_EQUALVERIFY OP_ELSE OP_DUP OP_HASH160 OP_PUSHBYTES_20 1b08ea4a2fbbe0121205f63068f78564ff204995 OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 ea92d4bb15b4babd0c216c12f61fe7083ed06e3b OP_EQUALVERIFY OP_CHECKSIGVERIFY OP_DUP OP_HASH160 OP_PUSHBYTES_20 565dd1650db6ffae1c2dd67d83a5709aa0ddd2e9 OP_EQUALVERIFY OP_ENDIF OP_ELSE OP_PUSHBYTES_2 9000 OP_CSV OP_VERIFY OP_PUSHBYTES_33 032a34617a9141231baa27bcadf622322eed1e16b6036fdf15f42a85f7250c4823 OP_CHECKSIGVERIFY OP_PUSHBYTES_33 03437a3813f17a264e2c8fc41fb0895634d34c7c9cb9147c553cc67ff37293b1cd OP_ENDIF OP_CHECKSIG)");
