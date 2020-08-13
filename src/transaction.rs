@@ -1,6 +1,5 @@
 use crate::{
-    create::AdaptorSignature,
-    keys::{KeyPair, PublicKey, PublishingPublicKey, RevocationPublicKey},
+    keys::{OwnershipKeyPair, OwnershipPublicKey, PublishingPublicKey, RevocationPublicKey},
     ChannelState,
 };
 use anyhow::Context;
@@ -9,10 +8,12 @@ use bitcoin::{
     hashes::hash160, secp256k1, util::bip143::SighashComponents, Amount, OutPoint, Script, SigHash,
     Transaction, TxIn, TxOut,
 };
+use ecdsa_fun::{self, adaptor::EncryptedSignature, Signature, ECDSA};
 use miniscript::{Descriptor, Segwitv0};
-use std::str::FromStr;
-
-pub type Result<T> = std::result::Result<T, Error>;
+use std::{
+    convert::{TryFrom, TryInto},
+    str::FromStr,
+};
 
 #[derive(Clone)]
 pub struct FundingTransaction {
@@ -28,11 +29,12 @@ impl FundingTransaction {
     // references the `previous_output`'s `TxId` and `vout`. There may
     // be a better way of modelling each input than `(TxIn, Amount)`.
     pub fn new(
-        (X_a, (tid_a, amount_a)): (PublicKey, (TxIn, Amount)),
-        (X_b, (tid_b, amount_b)): (PublicKey, (TxIn, Amount)),
+        (X_a, (tid_a, amount_a)): (OwnershipPublicKey, (TxIn, Amount)),
+        (X_b, (tid_b, amount_b)): (OwnershipPublicKey, (TxIn, Amount)),
     ) -> anyhow::Result<Self> {
-        let output_descriptor = FundingTransaction::build_descriptor(&X_a, &X_b)
-            .context("failed to build descriptor")?;
+        let output_descriptor =
+            FundingTransaction::build_descriptor(&X_a.try_into()?, &X_b.try_into()?);
+
         let transaction = Transaction {
             version: 2,
             lock_time: 0,
@@ -69,7 +71,7 @@ impl FundingTransaction {
     fn build_descriptor(
         X_a: &secp256k1::PublicKey,
         X_b: &secp256k1::PublicKey,
-    ) -> Result<miniscript::Descriptor<bitcoin::PublicKey>> {
+    ) -> miniscript::Descriptor<bitcoin::PublicKey> {
         // Describes the spending policy of the channel fund transaction T_f.
         // For now we use `and(X_a, X_b)` - eventually we might want to replace this with a threshold signature.
         const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_a),pk_k(X_b))";
@@ -85,7 +87,7 @@ impl FundingTransaction {
             miniscript::Miniscript::<bitcoin::PublicKey, Segwitv0>::from_str(&miniscript)
                 .expect("a valid miniscript");
 
-        Ok(miniscript::Descriptor::Wsh(miniscript))
+        miniscript::Descriptor::Wsh(miniscript)
     }
 }
 
@@ -98,10 +100,10 @@ pub struct CommitTransaction {
 impl CommitTransaction {
     pub fn new(
         TX_f: &FundingTransaction,
-        (X_a, R_a, Y_a): (PublicKey, RevocationPublicKey, PublishingPublicKey),
-        (X_b, R_b, Y_b): (PublicKey, RevocationPublicKey, PublishingPublicKey),
+        (X_a, R_a, Y_a): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
+        (X_b, R_b, Y_b): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
         time_lock: u32,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let descriptor = Self::descriptor((X_a, R_a, Y_a), (X_b, R_b, Y_b), time_lock)?;
 
         let input = TX_f.as_txin();
@@ -125,21 +127,19 @@ impl CommitTransaction {
         })
     }
 
-    pub fn sign_once(
+    pub fn encsign_once(
         &self,
-        _x_self: KeyPair,
-        _Y_other: PublishingPublicKey,
-    ) -> anyhow::Result<AdaptorSignature> {
-        let sig = todo!("pSign self.digest with x_self and Y_other");
-
-        Ok(sig)
+        x_self: OwnershipKeyPair,
+        Y_other: PublishingPublicKey,
+    ) -> EncryptedSignature {
+        x_self.encsign(Y_other, self.digest)
     }
 
     /// Add signatures to CommitTransaction.
     pub fn add_signatures(
         self,
-        (_X_a, _sig_a): (PublicKey, secp256k1::Signature),
-        (_X_b, _sig_b): (PublicKey, secp256k1::Signature),
+        (_X_a, _sig_a): (OwnershipPublicKey, Signature),
+        (_X_b, _sig_b): (OwnershipPublicKey, Signature),
     ) -> anyhow::Result<Self> {
         // NOTE: Could return a `SignedCommitTransaction` for extra type
         // safety.
@@ -177,23 +177,27 @@ impl CommitTransaction {
     }
 
     fn descriptor(
-        (X_0, R_0, Y_0): (PublicKey, RevocationPublicKey, PublishingPublicKey),
-        (X_1, R_1, Y_1): (PublicKey, RevocationPublicKey, PublishingPublicKey),
+        (X_0, R_0, Y_0): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
+        (X_1, R_1, Y_1): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
         time_lock: u32,
-    ) -> Result<Descriptor<bitcoin::PublicKey>> {
+    ) -> anyhow::Result<Descriptor<bitcoin::PublicKey>> {
+        let X_0 = bitcoin::secp256k1::PublicKey::try_from(X_0)?;
+        let R_0 = bitcoin::secp256k1::PublicKey::try_from(R_0)?;
+        let Y_0 = bitcoin::secp256k1::PublicKey::try_from(Y_0)?;
+
+        let X_1 = bitcoin::secp256k1::PublicKey::try_from(X_1)?;
+        let R_1 = bitcoin::secp256k1::PublicKey::try_from(R_1)?;
+        let Y_1 = bitcoin::secp256k1::PublicKey::try_from(Y_1)?;
+
         let X_0_hash = hash160::Hash::hash(&X_0.serialize()[..]);
         let X_0 = hex::encode(X_0.serialize().to_vec());
         let X_1_hash = hash160::Hash::hash(&X_1.serialize()[..]);
         let X_1 = hex::encode(X_1.serialize().to_vec());
 
-        let R_0: PublicKey = R_0.into();
         let R_0_hash = hash160::Hash::hash(&R_0.serialize()[..]);
-        let R_1: PublicKey = R_1.into();
         let R_1_hash = hash160::Hash::hash(&R_1.serialize()[..]);
 
-        let Y_0: PublicKey = Y_0.into();
         let Y_0_hash = hash160::Hash::hash(&Y_0.serialize()[..]);
-        let Y_1: PublicKey = Y_1.into();
         let Y_1_hash = hash160::Hash::hash(&Y_1.serialize()[..]);
 
         // Describes the spending policy of the channel commit transaction T_c.
@@ -238,16 +242,16 @@ impl SplitTransaction {
             a: (amount_a, X_a),
             b: (amount_b, X_b),
         }: ChannelState,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let input = TX_c.as_txin();
 
-        let descriptor = SplitTransaction::wpk_descriptor(X_a);
+        let descriptor = SplitTransaction::wpk_descriptor(X_a)?;
         let output_a = TxOut {
             value: amount_a.as_sat(),
             script_pubkey: descriptor.script_pubkey(),
         };
 
-        let descriptor = SplitTransaction::wpk_descriptor(X_b);
+        let descriptor = SplitTransaction::wpk_descriptor(X_b)?;
         let output_b = TxOut {
             value: amount_b.as_sat(),
             script_pubkey: descriptor.script_pubkey(),
@@ -269,24 +273,25 @@ impl SplitTransaction {
             TX_c.value().as_sat(),
         );
 
-        Self {
+        Ok(Self {
             inner: transaction,
             digest,
-        }
+        })
     }
 
-    pub fn sign_once(&self, _x_self: KeyPair) -> anyhow::Result<secp256k1::Signature> {
-        let sig = todo!("Sign self.digest with x_self");
-
-        Ok(sig)
+    pub fn sign_once(&self, x_self: OwnershipKeyPair) -> Signature {
+        x_self.sign(self.digest)
     }
 
-    fn wpk_descriptor(key: PublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
+    fn wpk_descriptor(
+        key: OwnershipPublicKey,
+    ) -> anyhow::Result<miniscript::Descriptor<bitcoin::PublicKey>> {
         let pk = bitcoin::PublicKey {
-            key,
+            key: key.try_into()?,
             compressed: true,
         };
-        miniscript::Descriptor::Wpkh(pk)
+
+        Ok(miniscript::Descriptor::Wpkh(pk))
     }
 
     pub fn digest(&self) -> SigHash {
@@ -305,6 +310,8 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keys::point_from_str;
+    use ecdsa_fun::fun::Point;
     use miniscript::Miniscript;
 
     #[test]
@@ -330,7 +337,7 @@ mod tests {
             "022222222222222222222222222222222222222222222222222222222222222222",
         )
         .expect("key 1");
-        let descriptor = FundingTransaction::build_descriptor(&X_0, &X_1).unwrap();
+        let descriptor = FundingTransaction::build_descriptor(&X_0, &X_1);
 
         let witness_script = format!("{}", descriptor.witness_script());
         assert_eq!(witness_script, "Script(OP_PUSHBYTES_33 0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166 OP_CHECKSIGVERIFY OP_PUSHBYTES_33 022222222222222222222222222222222222222222222222222222222222222222 OP_CHECKSIG)");
@@ -338,34 +345,30 @@ mod tests {
 
     #[test]
     fn commitment_descriptor_to_witness_script() {
-        let X_0 = secp256k1::PublicKey::from_str(
-            "032a34617a9141231baa27bcadf622322eed1e16b6036fdf15f42a85f7250c4823",
-        )
-        .unwrap();
-        let R_0 = secp256k1::PublicKey::from_str(
-            "03ff65a7fedd9dc637bbaf3cbe4c5971de853e0c359195f19c57211fe0b96ab39e",
-        )
-        .unwrap()
-        .into();
-        let Y_0 = secp256k1::PublicKey::from_str(
-            "03b3ee07bb851fec17e6cdb2dc235523555dc3193c2ff6399ef28ce941bc57b2b4",
-        )
-        .unwrap()
-        .into();
-        let X_1 = secp256k1::PublicKey::from_str(
-            "03437a3813f17a264e2c8fc41fb0895634d34c7c9cb9147c553cc67ff37293b1cd",
-        )
-        .unwrap();
-        let R_1 = secp256k1::PublicKey::from_str(
-            "02b637ba109a2a844b27d31c9ffac41bfe080d2f0256eeb03839d66442c4ce0deb",
-        )
-        .unwrap()
-        .into();
-        let Y_1 = secp256k1::PublicKey::from_str(
-            "03851562dd136d68ff0911b4aa6b1ec95850144ddb939a1070159f0a4163d20895",
-        )
-        .unwrap()
-        .into();
+        let X_0 =
+            point_from_str("032a34617a9141231baa27bcadf622322eed1e16b6036fdf15f42a85f7250c4823")
+                .unwrap()
+                .into();
+        let R_0 =
+            point_from_str("03ff65a7fedd9dc637bbaf3cbe4c5971de853e0c359195f19c57211fe0b96ab39e")
+                .unwrap()
+                .into();
+        let Y_0 =
+            point_from_str("03b3ee07bb851fec17e6cdb2dc235523555dc3193c2ff6399ef28ce941bc57b2b4")
+                .unwrap()
+                .into();
+        let X_1 =
+            point_from_str("03437a3813f17a264e2c8fc41fb0895634d34c7c9cb9147c553cc67ff37293b1cd")
+                .unwrap()
+                .into();
+        let R_1 =
+            point_from_str("02b637ba109a2a844b27d31c9ffac41bfe080d2f0256eeb03839d66442c4ce0deb")
+                .unwrap()
+                .into();
+        let Y_1 =
+            point_from_str("03851562dd136d68ff0911b4aa6b1ec95850144ddb939a1070159f0a4163d20895")
+                .unwrap()
+                .into();
         let time_lock = 144;
 
         let descriptor =

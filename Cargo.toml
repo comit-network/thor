@@ -9,6 +9,9 @@ anyhow = "1"
 async-trait = "0.1"
 bitcoin = { version = "0.23.0", features = ["rand", "use-serde"] }
 conquer-once = "0.2"
+ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", branch = "ecdsa_adaptor_love" }
 hex = "0.4.2"
 miniscript = { version = "1.0.0", features = ["compiler"] }
+rand = "0.7"
+sha2 = "0.9"
 thiserror = "1"
