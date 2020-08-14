@@ -1,14 +1,14 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use bitcoin::{hashes::Hash, SigHash};
 use conquer_once::Lazy;
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
     fun::{
-        g,
         marker::{Mark, Normal},
         Point, Scalar, G,
     },
-    nonce, Signature, ECDSA,
+    nonce::{self, Deterministic},
+    Signature, ECDSA,
 };
 use rand::prelude::ThreadRng;
 use sha2::Sha256;
@@ -20,7 +20,7 @@ pub struct OwnershipKeyPair {
     public_key: Point,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct OwnershipPublicKey(Point);
 
 impl OwnershipKeyPair {
@@ -38,13 +38,13 @@ impl OwnershipKeyPair {
     }
 
     pub fn sign(&self, digest: SigHash) -> Signature {
-        let ecdsa = ECDSA::new(nonce::from_global_rng::<Sha256, ThreadRng>());
+        let ecdsa = ECDSA::<Deterministic<Sha256>>::default();
 
         ecdsa.sign(&self.secret_key, &digest.into_inner())
     }
 
     pub fn encsign(&self, Y: PublishingPublicKey, digest: SigHash) -> EncryptedSignature {
-        let adaptor = Adaptor::<Sha256, _>::new(nonce::from_global_rng::<Sha256, ThreadRng>());
+        let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
         adaptor.encrypted_sign(&self.secret_key, &Y.0, &digest.into_inner())
     }
@@ -73,11 +73,15 @@ impl From<Scalar> for OwnershipKeyPair {
     }
 }
 
+#[derive(Clone)]
 pub struct RevocationKeyPair {
     secret_key: Scalar,
     public_key: Point,
 }
 
+pub struct RevocationSecretKey(Scalar);
+
+#[derive(Clone)]
 pub struct RevocationPublicKey(Point);
 
 impl RevocationKeyPair {
@@ -95,6 +99,23 @@ impl RevocationKeyPair {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("revocation secret key does not match revocation public key")]
+pub struct WrongRevocationSecretKey;
+
+impl RevocationPublicKey {
+    pub fn verify_revocation_secret_key(
+        &self,
+        secret_key: &RevocationSecretKey,
+    ) -> anyhow::Result<()> {
+        if self.0 != public_key(&secret_key.0) {
+            bail!(WrongRevocationSecretKey)
+        }
+
+        Ok(())
+    }
+}
+
 impl From<Point> for RevocationPublicKey {
     fn from(public_key: Point) -> Self {
         Self(public_key)
@@ -107,6 +128,13 @@ impl From<RevocationPublicKey> for Point {
     }
 }
 
+impl From<RevocationKeyPair> for RevocationSecretKey {
+    fn from(from: RevocationKeyPair) -> Self {
+        RevocationSecretKey(from.secret_key)
+    }
+}
+
+#[derive(Clone)]
 pub struct PublishingKeyPair {
     secret_key: Scalar,
     public_key: Point,
@@ -168,37 +196,22 @@ impl fmt::Display for PublishingPublicKey {
     }
 }
 
-impl TryFrom<OwnershipPublicKey> for bitcoin::secp256k1::PublicKey {
-    type Error = anyhow::Error;
-
-    fn try_from(value: OwnershipPublicKey) -> anyhow::Result<Self> {
-        point_to_bitcoin_pk(value.0)
+impl From<OwnershipPublicKey> for bitcoin::secp256k1::PublicKey {
+    fn from(value: OwnershipPublicKey) -> Self {
+        value.0.into()
     }
 }
 
-impl TryFrom<RevocationPublicKey> for bitcoin::secp256k1::PublicKey {
-    type Error = anyhow::Error;
-
-    fn try_from(value: RevocationPublicKey) -> anyhow::Result<Self> {
-        point_to_bitcoin_pk(value.0)
+impl From<RevocationPublicKey> for bitcoin::secp256k1::PublicKey {
+    fn from(value: RevocationPublicKey) -> Self {
+        value.0.into()
     }
 }
 
-impl TryFrom<PublishingPublicKey> for bitcoin::secp256k1::PublicKey {
-    type Error = anyhow::Error;
-
-    fn try_from(value: PublishingPublicKey) -> anyhow::Result<Self> {
-        point_to_bitcoin_pk(value.0)
+impl From<PublishingPublicKey> for bitcoin::secp256k1::PublicKey {
+    fn from(value: PublishingPublicKey) -> Self {
+        value.0.into()
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("point {0} is not a bitcoin::secp256k1::PublicKey")]
-pub struct NotBitcoinPublicKey(Point);
-
-fn point_to_bitcoin_pk(point: Point) -> anyhow::Result<bitcoin::secp256k1::PublicKey> {
-    bitcoin::secp256k1::PublicKey::from_slice(&point.to_bytes())
-        .map_err(|_| NotBitcoinPublicKey(point).into())
 }
 
 fn random_key_pair() -> (Scalar, Point) {
@@ -209,7 +222,9 @@ fn random_key_pair() -> (Scalar, Point) {
 }
 
 fn public_key(secret_key: &Scalar) -> Point {
-    g!(secret_key * G).mark::<Normal>()
+    let ecdsa = ECDSA::<()>::default();
+
+    ecdsa.verification_key_for(&secret_key)
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    ChannelState,
+    ChannelBalance,
 };
 use anyhow::{bail, Context};
 use bitcoin::{secp256k1, Amount, TxIn};
@@ -69,7 +69,8 @@ impl Alice0 {
         }: Message0,
     ) -> anyhow::Result<Alice1> {
         // NOTE: A real application would also verify that the amount
-        // provided by the other party is satisfactory
+        // provided by the other party is satisfactory, together with
+        // the time_lock
         check_timelocks(self.time_lock, time_lock_other)?;
 
         let TX_f = FundingTransaction::new(
@@ -80,6 +81,7 @@ impl Alice0 {
 
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
+
         Ok(Alice1 {
             x_self: self.x_self,
             X_other,
@@ -203,11 +205,11 @@ impl Alice1 {
 
         let TX_s = SplitTransaction::new(
             &TX_c,
-            ChannelState {
+            ChannelBalance {
                 a: (self.tid_self.1, self.x_self.public()),
                 b: (self.tid_other.1, self.X_other.clone()),
             },
-        )?;
+        );
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {
@@ -266,11 +268,11 @@ impl Bob1 {
 
         let TX_s = SplitTransaction::new(
             &TX_c,
-            ChannelState {
+            ChannelBalance {
                 a: (self.tid_other.1, self.X_other.clone()),
                 b: (self.tid_self.1, self.x_self.public()),
             },
-        )?;
+        );
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {
@@ -319,6 +321,9 @@ impl Party2 {
         verify_sig(self.X_other.clone(), &self.TX_s, &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
 
+        // TODO: Use sig_TX_s_self and sig_TX_s_other to actually sign
+        // the SplitTransaction
+
         Ok(Party3 {
             x_self: self.x_self,
             X_other: self.X_other,
@@ -330,8 +335,6 @@ impl Party2 {
             TX_c: self.TX_c,
             TX_s: self.TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
-            sig_TX_s_self: self.sig_TX_s_self,
-            sig_TX_s_other,
         })
     }
 }
@@ -347,8 +350,6 @@ pub struct Party3 {
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
-    sig_TX_s_self: Signature,
-    sig_TX_s_other: Signature,
 }
 
 impl Party3 {
@@ -370,7 +371,7 @@ impl Party3 {
             &self.TX_c,
             &encsig_TX_c_other,
         )
-        .context("failed to verify sig_TX_s sent by counterparty")?;
+        .context("failed to verify encsig_TX_c sent by counterparty")?;
 
         Ok(Party4 {
             x_self: self.x_self,
@@ -384,8 +385,6 @@ impl Party3 {
             TX_s: self.TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other,
-            sig_TX_s_self: self.sig_TX_s_self,
-            sig_TX_s_other: self.sig_TX_s_other,
         })
     }
 }
@@ -402,8 +401,6 @@ pub struct Party4 {
     TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
     encsig_TX_c_other: EncryptedSignature,
-    sig_TX_s_self: Signature,
-    sig_TX_s_other: Signature,
 }
 
 /// Sign one of the inputs of the `FundingTransaction`.
@@ -438,8 +435,6 @@ impl Party4 {
             TX_s: self.TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other: self.encsig_TX_c_other,
-            sig_TX_s_self: self.sig_TX_s_self,
-            sig_TX_s_other: self.sig_TX_s_other,
         })
     }
 }
@@ -458,8 +453,6 @@ pub struct Party5 {
     TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
     encsig_TX_c_other: EncryptedSignature,
-    sig_TX_s_self: Signature,
-    sig_TX_s_other: Signature,
 }
 
 #[derive(Debug, thiserror::Error)]
