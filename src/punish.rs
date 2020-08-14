@@ -47,10 +47,10 @@ mod test {
     use crate::{
         keys::{PublishingKeyPair, RevocationKeyPair},
         signature::decrypt,
-        transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
+        transaction::{input_psbt, CommitTransaction, FundingTransaction, SplitTransaction},
         ChannelBalance,
     };
-    use bitcoin::{Amount, TxIn};
+    use bitcoin::Amount;
 
     #[test]
     fn punish_publication_of_revoked_commit_transaction() {
@@ -63,11 +63,14 @@ mod test {
         let y_alice = PublishingKeyPair::new_random();
         let y_bob = PublishingKeyPair::new_random();
 
-        let one_btc = Amount::from_btc(1.0).unwrap();
+        let (channel_balance_alice, channel_balance_bob) = { (Amount::ONE_BTC, Amount::ONE_BTC) };
+
+        let alice_input_psbt = input_psbt(channel_balance_alice, x_alice.public(), x_bob.public());
+        let bob_input_psbt = input_psbt(channel_balance_bob, x_alice.public(), x_bob.public());
 
         let TX_f = FundingTransaction::new(
-            (x_alice.public(), (TxIn::default(), one_btc)),
-            (x_bob.public(), (TxIn::default(), one_btc)),
+            (x_alice.public(), alice_input_psbt, channel_balance_alice),
+            (x_bob.public(), bob_input_psbt, channel_balance_bob),
         )
         .unwrap();
 
@@ -80,13 +83,10 @@ mod test {
         )
         .unwrap();
 
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            ChannelBalance {
-                a: (one_btc, x_alice.public()),
-                b: (one_btc, x_bob.public()),
-            },
-        );
+        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+            a: (channel_balance_alice, x_alice.public()),
+            b: (channel_balance_bob, x_bob.public()),
+        });
 
         let alice_encsig = TX_c.encsign_once(x_alice.clone(), y_bob.public());
         let bob_encsig = TX_c.encsign_once(x_bob.clone(), y_alice.public());
@@ -100,7 +100,7 @@ mod test {
                 R_other: r_bob.public(),
                 y_self: y_alice.clone(),
                 Y_other: y_bob.public(),
-                TX_s,
+                signed_TX_s: TX_s,
             },
             r_other: r_bob.into(),
         };

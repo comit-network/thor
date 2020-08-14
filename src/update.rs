@@ -112,13 +112,10 @@ impl Party0 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            ChannelBalance {
-                a: (balance_other, self.X_other.clone()),
-                b: (balance_self, self.x_self.public()),
-            },
-        );
+        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+            a: (balance_other, self.X_other.clone()),
+            b: (balance_self, self.x_self.public()),
+        });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         let state = Party2 {
@@ -146,7 +143,7 @@ impl Party0 {
     }
 
     fn balance(&self) -> anyhow::Result<Balance> {
-        let channel_balance = self.current_state.TX_s.balance();
+        let channel_balance = self.current_state.signed_TX_s.balance();
 
         match channel_balance {
             ChannelBalance {
@@ -206,13 +203,10 @@ impl Alice1 {
             alice: balance_self,
             bob: balance_other,
         } = self.proposed_balance;
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            ChannelBalance {
-                a: (balance_self, self.x_self.public()),
-                b: (balance_other, self.X_other.clone()),
-            },
-        );
+        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+            a: (balance_self, self.x_self.public()),
+            b: (balance_other, self.X_other.clone()),
+        });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party2 {
@@ -259,7 +253,7 @@ impl Party2 {
     }
 
     pub fn receive(
-        self,
+        mut self,
         ShareSplitSignature {
             sig_TX_s: sig_TX_s_other,
         }: ShareSplitSignature,
@@ -267,8 +261,10 @@ impl Party2 {
         verify_sig(self.X_other.clone(), &self.TX_s, &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
 
-        // TODO: Use sig_TX_s_self and sig_TX_s_other to actually sign
-        // the SplitTransaction
+        self.TX_s.add_signatures(
+            (self.x_self.public(), self.sig_TX_s_self),
+            (self.X_other.clone(), sig_TX_s_other),
+        )?;
 
         Ok(Party3 {
             x_self: self.x_self,
@@ -281,7 +277,7 @@ impl Party2 {
             y_self: self.y_self,
             Y_other: self.Y_other,
             TX_c: self.TX_c,
-            TX_s: self.TX_s,
+            signed_TX_s: self.TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
         })
     }
@@ -301,7 +297,7 @@ pub struct Party3 {
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
     TX_c: CommitTransaction,
-    TX_s: SplitTransaction,
+    signed_TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
 }
 
@@ -337,7 +333,7 @@ impl Party3 {
             y_self: self.y_self,
             Y_other: self.Y_other,
             TX_c: self.TX_c,
-            TX_s: self.TX_s,
+            signed_TX_s: self.signed_TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other,
         })
@@ -358,7 +354,7 @@ pub struct Party4 {
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
     TX_c: CommitTransaction,
-    TX_s: SplitTransaction,
+    signed_TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
     encsig_TX_c_other: EncryptedSignature,
 }
@@ -393,7 +389,7 @@ impl Party4 {
             R_other: self.R_other,
             y_self: self.y_self,
             Y_other: self.Y_other,
-            TX_s: self.TX_s,
+            signed_TX_s: self.signed_TX_s,
         };
 
         Ok(Party0 {
@@ -455,7 +451,7 @@ impl Balance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use bitcoin::TxIn;
+    use crate::transaction::input_psbt;
 
     #[test]
     fn channel_update() {
@@ -473,9 +469,12 @@ mod test {
             bob: Amount::from_btc(1.0).unwrap(),
         };
 
+        let alice_input_psbt = input_psbt(current_balance.alice, x_alice.public(), x_bob.public());
+        let bob_input_psbt = input_psbt(current_balance.bob, x_alice.public(), x_bob.public());
+
         let TX_f = FundingTransaction::new(
-            (x_alice.public(), (TxIn::default(), current_balance.alice)),
-            (x_bob.public(), (TxIn::default(), current_balance.bob)),
+            (x_alice.public(), alice_input_psbt, current_balance.alice),
+            (x_bob.public(), bob_input_psbt, current_balance.bob),
         )
         .unwrap();
 
@@ -488,13 +487,10 @@ mod test {
         )
         .unwrap();
 
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            ChannelBalance {
-                a: (current_balance.alice, x_alice.public()),
-                b: (current_balance.bob, x_bob.public()),
-            },
-        );
+        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+            a: (current_balance.alice, x_alice.public()),
+            b: (current_balance.bob, x_bob.public()),
+        });
 
         let alice_encsig = TX_c.encsign_once(x_alice.clone(), y_bob.public());
         let bob_encsig = TX_c.encsign_once(x_bob.clone(), y_alice.public());
@@ -508,7 +504,7 @@ mod test {
                 R_other: r_bob.public(),
                 y_self: y_alice.clone(),
                 Y_other: y_bob.public(),
-                TX_s: TX_s.clone(),
+                signed_TX_s: TX_s.clone(),
             };
 
             Party0 {
@@ -529,7 +525,7 @@ mod test {
                 R_other: r_alice.public(),
                 y_self: y_bob,
                 Y_other: y_alice.public(),
-                TX_s,
+                signed_TX_s: TX_s,
             };
 
             Party0 {
