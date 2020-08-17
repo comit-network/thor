@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-base64 = "0.12.3"
+base64 = "0.12"
 bitcoin = { version = "0.23.0", features = ["rand", "use-serde"] }
 conquer-once = "0.2"
 ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", branch = "thor", features = ["libsecp_compat"] }
