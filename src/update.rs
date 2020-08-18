@@ -14,12 +14,13 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
+    punish,
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
     ChannelBalance, ChannelState, RevokedState,
 };
 use anyhow::{bail, Context};
-use bitcoin::Amount;
+use bitcoin::{Amount, Transaction};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 /// First message of the channel update protocol.
@@ -194,6 +195,15 @@ impl Party0 {
             }
             _ => bail!("split transaction does not pay to X_self and X_other"),
         }
+    }
+
+    /// Retrieve the signed `CommitTransaction` of the state that was revoked
+    /// during the last channel update.
+    pub fn latest_revoked_signed_TX_c(&self) -> anyhow::Result<Option<Transaction>> {
+        self.revoked_states
+            .last()
+            .map(|state| state.signed_TX_c(self.x_self.clone(), self.X_other.clone()))
+            .transpose()
     }
 }
 
@@ -485,6 +495,12 @@ impl GlobalBalance {
             }
             _ => bail!(InvalidChannelUpdate),
         }
+    }
+}
+
+impl From<Party0> for punish::Party0 {
+    fn from(from: Party0) -> Self {
+        Self::new(from.x_self, from.revoked_states)
     }
 }
 
