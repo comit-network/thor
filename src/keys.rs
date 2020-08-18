@@ -15,7 +15,7 @@ pub struct OwnershipKeyPair {
     public_key: Point,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OwnershipPublicKey(Point);
 
 impl OwnershipKeyPair {

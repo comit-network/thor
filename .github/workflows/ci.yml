@@ -10,18 +10,15 @@ on:
 
 jobs:
   static_analysis:
-    env:
-      RUST_TOOLCHAIN: nightly
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install ${{ env.RUST_TOOLCHAIN }} toolchain
+      - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: ${{ env.RUST_TOOLCHAIN }}
           override: true
           components: rustfmt, clippy
 
@@ -44,26 +41,15 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
 
   build_test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
-        rust_toolchain: [nightly ]
-        continue_on_error: [false]
-        include:
-          - os: ubuntu-latest
-            rust_toolchain: nightly
-            continue_on_error: true
-    continue-on-error: ${{ matrix.continue_on_error }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
 
-      - name: Install ${{ matrix.rust_toolchain }} toolchain
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: ${{ matrix.rust_toolchain }}
           override: true
 
       - name: Cache target directory

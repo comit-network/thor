@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+base64 = "0.12"
 bitcoin = { version = "0.23.0", features = ["rand", "use-serde"] }
 conquer-once = "0.2"
 ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", branch = "thor", features = ["libsecp_compat"] }
@@ -15,3 +16,9 @@ miniscript = { version = "1.0.0", features = ["compiler"] }
 rand = "0.7"
 sha2 = "0.9"
 thiserror = "1"
+
+[dev-dependencies]
+bitcoin-harness = { git = "https://github.com/coblox/bitcoin-harness-rs.git", rev = "a695ddc435f5522d7bc35847caf09df85257cc6b" }
+reqwest = { version = "0.10", default-features = false }
+testcontainers = "0.9"
+tokio = { version = "0.2", default-features = false, features = ["blocking", "macros", "rt-core", "time"] }

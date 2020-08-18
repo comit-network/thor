@@ -8,7 +8,9 @@ use crate::{
 use anyhow::bail;
 use bitcoin::{
     hashes::{hash160, Hash},
-    secp256k1, Amount, OutPoint, Script, SigHash, Transaction, TxIn, TxOut, Txid,
+    secp256k1,
+    util::{bip143::SighashComponents, psbt::PartiallySignedTransaction},
+    Address, Amount, Network, OutPoint, Script, SigHash, Transaction, TxIn, TxOut, Txid,
 };
 use ecdsa_fun::{
     self,
@@ -16,68 +18,128 @@ use ecdsa_fun::{
     nonce::Deterministic,
     Signature,
 };
-use miniscript::{Descriptor, Segwitv0};
+use miniscript::{self, Descriptor, Segwitv0};
 use sha2::Sha256;
 use std::{collections::HashMap, str::FromStr};
+
+#[derive(Debug, Clone)]
+pub struct FundOutput(Address);
+
+impl FundOutput {
+    pub fn new(X_a: OwnershipPublicKey, X_b: OwnershipPublicKey) -> Self {
+        let descriptor = FundingTransaction::build_output_descriptor(&X_a.into(), &X_b.into());
+        let address = descriptor.address(Network::Regtest).expect("cannot fail");
+
+        Self(address)
+    }
+
+    pub fn address(&self) -> Address {
+        self.0.clone()
+    }
+}
 
 #[derive(Clone)]
 pub struct FundingTransaction {
     inner: Transaction,
-    output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+    fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+    amount_a: Amount,
+    amount_b: Amount,
 }
 
-// TODO: We assume that the FundingTransaction only has one output,
-// but this is probably not true as both parties will likely include
-// change outputs
 impl FundingTransaction {
-    // A `bitcoin::TxIn` does not include the amount, it just
-    // references the `previous_output`'s `TxId` and `vout`. There may
-    // be a better way of modelling each input than `(TxIn, Amount)`.
     pub fn new(
-        (X_a, (tid_a, amount_a)): (OwnershipPublicKey, (TxIn, Amount)),
-        (X_b, (tid_b, amount_b)): (OwnershipPublicKey, (TxIn, Amount)),
+        (X_a, tid_a, amount_a): (OwnershipPublicKey, PartiallySignedTransaction, Amount),
+        (X_b, tid_b, amount_b): (OwnershipPublicKey, PartiallySignedTransaction, Amount),
     ) -> anyhow::Result<Self> {
-        let output_descriptor = FundingTransaction::build_descriptor(&X_a.into(), &X_b.into());
+        let fund_output_descriptor =
+            FundingTransaction::build_output_descriptor(&X_a.into(), &X_b.into());
 
-        let transaction = Transaction {
+        let Transaction {
+            input: input_a,
+            output,
+            ..
+        } = tid_a.extract_tx();
+
+        let change_outputs_a = output
+            .into_iter()
+            .filter(|output| output.script_pubkey != fund_output_descriptor.script_pubkey())
+            .collect();
+
+        let Transaction {
+            input: input_b,
+            output,
+            ..
+        } = tid_b.extract_tx();
+
+        let change_outputs_b = output
+            .into_iter()
+            .filter(|output| output.script_pubkey != fund_output_descriptor.script_pubkey())
+            .collect();
+
+        let fund_output = TxOut {
+            value: (amount_a + amount_b).as_sat(),
+            script_pubkey: fund_output_descriptor.script_pubkey(),
+        };
+
+        let TX_f = Transaction {
             version: 2,
             lock_time: 0,
-            input: vec![tid_a, tid_b],
-            output: vec![TxOut {
-                value: (amount_a + amount_b).as_sat(),
-                script_pubkey: output_descriptor.script_pubkey(),
-            }],
+            input: vec![input_a, input_b].concat(),
+            output: vec![vec![fund_output], change_outputs_a, change_outputs_b].concat(),
         };
 
         Ok(Self {
-            inner: transaction,
-            output_descriptor,
+            inner: TX_f,
+            fund_output_descriptor,
+            amount_a,
+            amount_b,
         })
     }
 
     pub fn as_txin(&self) -> TxIn {
+        let fund_output_index = self
+            .inner
+            .output
+            .iter()
+            .position(|output| output.script_pubkey == self.fund_output_descriptor.script_pubkey())
+            .expect("cannot fail");
+
         TxIn {
-            previous_output: OutPoint::new(self.inner.txid(), 0),
+            previous_output: OutPoint::new(self.inner.txid(), fund_output_index as u32),
             script_sig: Script::new(),
             sequence: 0xFFFF_FFFF,
             witness: Vec::new(),
         }
     }
 
+    pub fn amount_a(&self) -> Amount {
+        self.amount_a
+    }
+
+    pub fn amount_b(&self) -> Amount {
+        self.amount_b
+    }
+
     pub fn value(&self) -> Amount {
-        Amount::from_sat(self.inner.output[0].value)
+        self.amount_a + self.amount_b
     }
 
-    pub fn output_descriptor(&self) -> miniscript::Descriptor<bitcoin::PublicKey> {
-        self.output_descriptor.clone()
+    pub fn fund_output_descriptor(&self) -> miniscript::Descriptor<bitcoin::PublicKey> {
+        self.fund_output_descriptor.clone()
     }
 
-    fn build_descriptor(
+    pub fn into_psbt(self) -> anyhow::Result<PartiallySignedTransaction> {
+        PartiallySignedTransaction::from_unsigned_tx(self.inner)
+            .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
+    }
+
+    fn build_output_descriptor(
         X_a: &secp256k1::PublicKey,
         X_b: &secp256k1::PublicKey,
     ) -> miniscript::Descriptor<bitcoin::PublicKey> {
-        // Describes the spending policy of the channel fund transaction T_f.
-        // For now we use `and(X_a, X_b)` - eventually we might want to replace this with a threshold signature.
+        // Describes the spending policy of the channel fund transaction TX_f.
+        // For now we use `and(X_a, X_b)` - eventually we might want to replace this
+        // with a threshold signature.
         const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_a),pk_k(X_b))";
 
         let X_a = hex::encode(X_a.serialize().to_vec());
@@ -95,11 +157,12 @@ impl FundingTransaction {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CommitTransaction {
     inner: Transaction,
     input_descriptor: Descriptor<bitcoin::PublicKey>,
     output_descriptor: Descriptor<bitcoin::PublicKey>,
+    time_lock: u32,
     digest: SigHash,
 }
 
@@ -114,27 +177,28 @@ impl CommitTransaction {
             Self::build_descriptor((X_a, R_a, Y_a), (X_b, R_b, Y_b), time_lock)?;
 
         let input = TX_f.as_txin();
-        let transaction = Transaction {
+        let TX_c = Transaction {
             version: 2,
             lock_time: 0,
             input: vec![input],
             // This output is the same as the input, except for the
             // spending conditions
             output: vec![TxOut {
-                value: TX_f.value().as_sat(),
+                value: TX_f.value().as_sat() - 10_000, // TODO: Handle fees properly?
                 script_pubkey: output_descriptor.script_pubkey(),
             }],
         };
 
-        let digest = Self::compute_digest(&transaction, TX_f);
+        let digest = Self::compute_digest(&TX_c, TX_f);
 
-        let input_descriptor = TX_f.output_descriptor();
+        let input_descriptor = TX_f.fund_output_descriptor();
 
         Ok(Self {
-            inner: transaction,
-            digest,
-            output_descriptor,
+            inner: TX_c,
             input_descriptor,
+            output_descriptor,
+            time_lock,
+            digest,
         })
     }
 
@@ -144,6 +208,10 @@ impl CommitTransaction {
         Y_other: PublishingPublicKey,
     ) -> EncryptedSignature {
         x_self.encsign(Y_other, self.digest)
+    }
+
+    pub fn sign(&self, x_self: &OwnershipKeyPair) -> Signature {
+        x_self.sign(self.digest)
     }
 
     /// Add signatures to CommitTransaction.
@@ -182,7 +250,7 @@ impl CommitTransaction {
         TxIn {
             previous_output: OutPoint::new(self.inner.txid(), 0),
             script_sig: Script::new(),
-            sequence: 0xFFFF_FFFF,
+            sequence: self.time_lock,
             witness: Vec::new(),
         }
     }
@@ -203,16 +271,11 @@ impl CommitTransaction {
         self.inner.txid()
     }
 
-    fn compute_digest(
-        commit_transaction: &Transaction,
-        funding_transaction: &FundingTransaction,
-    ) -> SigHash {
-        let input_index = 0;
-        let sighash_all = 1;
-        commit_transaction.signature_hash(
-            input_index,
-            &funding_transaction.output_descriptor().witness_script(),
-            sighash_all,
+    fn compute_digest(TX_c: &Transaction, TX_f: &FundingTransaction) -> SigHash {
+        SighashComponents::new(&TX_c).sighash_all(
+            &TX_f.as_txin(),
+            &TX_f.fund_output_descriptor().witness_script(),
+            TX_f.value().as_sat(),
         )
     }
 
@@ -242,11 +305,13 @@ impl CommitTransaction {
 
         // Describes the spending policy of the channel commit transaction T_c.
         // There are possible way to spend this transaction:
-        // 1. Channel state: It is correctly signed w.r.t pk_0, pk_1 and after relative timelock
+        // 1. Channel state: It is correctly signed w.r.t pk_0, pk_1 and after relative
+        // timelock
         // 2. Punish 0: It is correctly signed w.r.t pk_1, Y_0, R_0
         // 3. Punish 1: It is correctly signed w.r.t pk_0, Y_1, R_1
 
-        // Policy is or(and(older(144),and(pk(X0),pk(X1))),or(and(pk(X1),and(pk(Y0),pk(R0))),and(pk(X0),and(pk(Y1),pk(R1)))))
+        // Policy is or(and(older(144),and(pk(X0),pk(X1))),or(and(pk(X1),and(pk(Y0),
+        // pk(R0))),and(pk(X0),and(pk(Y1),pk(R1)))))
 
         let channel_state_condition = format!(
             "and_v(v:older({}),and_v(v:pk({}),pk_k({})))",
@@ -270,9 +335,13 @@ impl CommitTransaction {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SplitTransaction {
+    #[cfg(test)]
+    pub inner: Transaction,
+    #[cfg(not(test))]
     inner: Transaction,
+    input_descriptor: Descriptor<bitcoin::PublicKey>,
     digest: SigHash,
     balance: ChannelBalance,
 }
@@ -286,29 +355,34 @@ impl SplitTransaction {
 
         let input = TX_c.as_txin();
 
+        // TODO: Maybe we should spend directly to an address owned by the wallet
+
         let descriptor = SplitTransaction::wpk_descriptor(X_a);
         let output_a = TxOut {
-            value: amount_a.as_sat(),
+            value: amount_a.as_sat() - 10_000,
             script_pubkey: descriptor.script_pubkey(),
         };
 
         let descriptor = SplitTransaction::wpk_descriptor(X_b);
         let output_b = TxOut {
-            value: amount_b.as_sat(),
+            value: amount_b.as_sat() - 10_000,
             script_pubkey: descriptor.script_pubkey(),
         };
 
-        let transaction = Transaction {
+        let TX_s = Transaction {
             version: 2,
             lock_time: 0,
             input: vec![input],
             output: vec![output_a, output_b],
         };
 
-        let digest = Self::compute_digest(&transaction, TX_c);
+        let digest = Self::compute_digest(&TX_s, TX_c);
+
+        let input_descriptor = TX_c.output_descriptor();
 
         Self {
-            inner: transaction,
+            inner: TX_s,
+            input_descriptor,
             digest,
             balance: channel_balance,
         }
@@ -326,6 +400,55 @@ impl SplitTransaction {
         self.digest
     }
 
+    /// Add signatures to SplitTransaction.
+    pub fn add_signatures(
+        &mut self,
+        (X_a, sig_a): (OwnershipPublicKey, Signature),
+        (X_b, sig_b): (OwnershipPublicKey, Signature),
+    ) -> anyhow::Result<()> {
+        struct Satisfier {
+            a: (bitcoin::PublicKey, bitcoin::secp256k1::Signature),
+            b: (bitcoin::PublicKey, bitcoin::secp256k1::Signature),
+        }
+
+        impl miniscript::Satisfier<bitcoin::PublicKey> for Satisfier {
+            fn lookup_sig(&self, pk: &bitcoin::PublicKey) -> Option<miniscript::BitcoinSig> {
+                if &self.a.0 == pk {
+                    return Some((self.a.1, bitcoin::SigHashType::All));
+                }
+
+                if &self.b.0 == pk {
+                    return Some((self.b.1, bitcoin::SigHashType::All));
+                }
+
+                None
+            }
+
+            fn check_older(&self, _: u32) -> bool {
+                true
+            }
+        }
+
+        let X_a = ::bitcoin::PublicKey {
+            compressed: true,
+            key: X_a.into(),
+        };
+        let X_b = ::bitcoin::PublicKey {
+            compressed: true,
+            key: X_b.into(),
+        };
+
+        let satisfier = Satisfier {
+            a: (X_a, sig_a.into()),
+            b: (X_b, sig_b.into()),
+        };
+
+        self.input_descriptor
+            .satisfy(&mut self.inner.input[0], satisfier)?;
+
+        Ok(())
+    }
+
     fn wpk_descriptor(key: OwnershipPublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
         let pk = bitcoin::PublicKey {
             key: key.into(),
@@ -336,12 +459,10 @@ impl SplitTransaction {
     }
 
     fn compute_digest(TX_s: &Transaction, TX_c: &CommitTransaction) -> SigHash {
-        let input_index = 0;
-        let sighash_all = 1;
-        TX_s.signature_hash(
-            input_index,
+        SighashComponents::new(&TX_s).sighash_all(
+            &TX_c.as_txin(),
             &TX_c.output_descriptor().witness_script(),
-            sighash_all,
+            TX_c.value().as_sat(),
         )
     }
 }
@@ -484,6 +605,31 @@ pub enum Error {
 }
 
 #[cfg(test)]
+pub fn input_psbt(
+    output_amount: Amount,
+    X_alice: OwnershipPublicKey,
+    X_bob: OwnershipPublicKey,
+) -> PartiallySignedTransaction {
+    let output = FundOutput::new(X_alice, X_bob);
+    let transaction = Transaction {
+        version: 2,
+        lock_time: 0,
+        input: vec![TxIn {
+            previous_output: OutPoint::default(),
+            script_sig: Script::new(),
+            sequence: 0xFFFF_FFFF,
+            witness: Vec::new(),
+        }],
+        output: vec![TxOut {
+            value: output_amount.as_sat(),
+            script_pubkey: output.address().script_pubkey(),
+        }],
+    };
+
+    PartiallySignedTransaction::from_unsigned_tx(transaction).unwrap()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::keys::point_from_str;
@@ -512,7 +658,7 @@ mod tests {
             "022222222222222222222222222222222222222222222222222222222222222222",
         )
         .expect("key 1");
-        let descriptor = FundingTransaction::build_descriptor(&X_0, &X_1);
+        let descriptor = FundingTransaction::build_output_descriptor(&X_0, &X_1);
 
         let witness_script = format!("{}", descriptor.witness_script());
         assert_eq!(witness_script, "Script(OP_PUSHBYTES_33 0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166 OP_CHECKSIGVERIFY OP_PUSHBYTES_33 022222222222222222222222222222222222222222222222222222222222222222 OP_CHECKSIG)");

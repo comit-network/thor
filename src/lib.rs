@@ -1,4 +1,4 @@
-#![allow(non_snake_case, unreachable_code)]
+#![allow(non_snake_case)]
 
 pub mod create;
 mod keys;
@@ -35,7 +35,7 @@ pub struct ChannelState {
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
     /// Signed split transaction.
-    TX_s: SplitTransaction,
+    signed_TX_s: SplitTransaction,
 }
 
 #[derive(Clone)]
@@ -44,7 +44,7 @@ pub struct RevokedState {
     r_other: RevocationSecretKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ChannelBalance {
     a: (Amount, OwnershipPublicKey),
     b: (Amount, OwnershipPublicKey),
