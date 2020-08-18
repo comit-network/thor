@@ -1,18 +1,13 @@
-use anyhow::{anyhow, bail};
+use anyhow::bail;
 use bitcoin::{hashes::Hash, SigHash};
-use conquer_once::Lazy;
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
-    fun::{
-        marker::{Mark, Normal},
-        Point, Scalar, G,
-    },
-    nonce::{self, Deterministic},
+    fun::{Point, Scalar},
+    nonce::Deterministic,
     Signature, ECDSA,
 };
-use rand::prelude::ThreadRng;
 use sha2::Sha256;
-use std::{convert::TryFrom, fmt};
+use std::fmt;
 
 #[derive(Clone)]
 pub struct OwnershipKeyPair {
@@ -38,9 +33,7 @@ impl OwnershipKeyPair {
     }
 
     pub fn sign(&self, digest: SigHash) -> Signature {
-        let ecdsa = ECDSA::<Deterministic<Sha256>>::default();
-
-        ecdsa.sign(&self.secret_key, &digest.into_inner())
+        sign(&self.secret_key, digest)
     }
 
     pub fn encsign(&self, Y: PublishingPublicKey, digest: SigHash) -> EncryptedSignature {
@@ -79,6 +72,7 @@ pub struct RevocationKeyPair {
     public_key: Point,
 }
 
+#[derive(Clone)]
 pub struct RevocationSecretKey(Scalar);
 
 #[derive(Clone)]
@@ -96,6 +90,10 @@ impl RevocationKeyPair {
 
     pub fn public(&self) -> RevocationPublicKey {
         RevocationPublicKey(self.public_key.clone())
+    }
+
+    pub fn sign(&self, digest: SigHash) -> Signature {
+        sign(&self.secret_key, digest)
     }
 }
 
@@ -134,7 +132,19 @@ impl From<RevocationKeyPair> for RevocationSecretKey {
     }
 }
 
-#[derive(Clone)]
+impl From<RevocationSecretKey> for RevocationKeyPair {
+    fn from(secret_key: RevocationSecretKey) -> Self {
+        let secret_key = secret_key.0;
+        let public_key = public_key(&secret_key);
+
+        Self {
+            secret_key,
+            public_key,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct PublishingKeyPair {
     secret_key: Scalar,
     public_key: Point,
@@ -159,6 +169,16 @@ impl PublishingKeyPair {
     pub fn public(&self) -> PublishingPublicKey {
         PublishingPublicKey(self.public_key.clone())
     }
+
+    pub fn sign(&self, digest: SigHash) -> Signature {
+        sign(&self.secret_key, digest)
+    }
+}
+
+impl From<PublishingKeyPair> for PublishingSecretKey {
+    fn from(from: PublishingKeyPair) -> Self {
+        PublishingSecretKey(from.secret_key)
+    }
 }
 
 impl From<Scalar> for PublishingKeyPair {
@@ -175,6 +195,12 @@ impl From<Scalar> for PublishingKeyPair {
 impl From<Point> for PublishingPublicKey {
     fn from(public_key: Point) -> Self {
         Self(public_key)
+    }
+}
+
+impl From<PublishingSecretKey> for Scalar {
+    fn from(secret_key: PublishingSecretKey) -> Self {
+        secret_key.0
     }
 }
 
@@ -227,6 +253,12 @@ fn public_key(secret_key: &Scalar) -> Point {
     ecdsa.verification_key_for(&secret_key)
 }
 
+fn sign(secret_key: &Scalar, digest: SigHash) -> Signature {
+    let ecdsa = ECDSA::<Deterministic<Sha256>>::default();
+
+    ecdsa.sign(&secret_key, &digest.into_inner())
+}
+
 #[cfg(test)]
 pub fn point_from_str(from: &str) -> anyhow::Result<Point> {
     let point = hex::decode(from)?;
@@ -234,7 +266,8 @@ pub fn point_from_str(from: &str) -> anyhow::Result<Point> {
     let mut bytes = [0u8; 33];
     bytes.copy_from_slice(point.as_slice());
 
-    let point = Point::from_bytes(bytes).ok_or_else(|| anyhow!("string slice is not a Point"))?;
+    let point =
+        Point::from_bytes(bytes).ok_or_else(|| anyhow::anyhow!("string slice is not a Point"))?;
 
     Ok(point)
 }

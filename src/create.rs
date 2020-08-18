@@ -7,10 +7,9 @@ use crate::{
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
     ChannelBalance,
 };
-use anyhow::{bail, Context};
-use bitcoin::{secp256k1, Amount, TxIn};
+use anyhow::Context;
+use bitcoin::{Amount, TxIn};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
-use std::marker::PhantomData;
 
 pub struct Message0 {
     X: OwnershipPublicKey,
@@ -441,6 +440,7 @@ impl Party4 {
 
 /// A party which has reached this state is now able to safely
 /// broadcast the `FundingTransaction` in order to open the channel.
+#[allow(dead_code)]
 pub struct Party5 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -504,7 +504,7 @@ mod test {
         let message3_alice = alice3.next_message();
         let message3_bob = bob3.next_message();
 
-        let alice4 = alice3.receive(message3_bob).unwrap();
-        let bob4 = bob3.receive(message3_alice).unwrap();
+        let _alice4 = alice3.receive(message3_bob).unwrap();
+        let _bob4 = bob3.receive(message3_alice).unwrap();
     }
 }
