@@ -11,6 +11,13 @@ pub struct Party0 {
 pub struct NotOldCommitTransaction;
 
 impl Party0 {
+    pub fn new(x_self: OwnershipKeyPair, revoked_states: Vec<RevokedState>) -> Self {
+        Self {
+            x_self,
+            revoked_states,
+        }
+    }
+
     pub fn punish(&self, transaction: Transaction) -> anyhow::Result<PunishTransaction> {
         let RevokedState {
             channel_state:
