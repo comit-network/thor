@@ -1,14 +1,14 @@
 use crate::{
-    keys::{OwnershipPublicKey, PublishingPublicKey},
+    keys::{OwnershipPublicKey, PublishingPublicKey, PublishingSecretKey},
     transaction::{CommitTransaction, SplitTransaction},
 };
-use bitcoin::{hashes::Hash, SigHash};
+use bitcoin::hashes::Hash;
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
-    nonce::{self, Deterministic},
+    nonce::Deterministic,
     Signature, ECDSA,
 };
-use rand::prelude::ThreadRng;
+
 use sha2::Sha256;
 
 #[derive(Debug, thiserror::Error)]
@@ -55,4 +55,11 @@ pub fn verify_encsig(
     } else {
         Err(InvalidEncryptedSignature)
     }
+}
+
+#[allow(dead_code)]
+pub fn decrypt(decryption_key: PublishingSecretKey, encsig: EncryptedSignature) -> Signature {
+    let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
+
+    adaptor.decrypt_signature(&decryption_key.into(), encsig)
 }

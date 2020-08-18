@@ -5,10 +5,10 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    ChannelBalance,
+    ChannelBalance, ChannelState, RevokedState,
 };
 use anyhow::{bail, Context};
-use bitcoin::{Amount, Txid};
+use bitcoin::Amount;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 /// First message of the channel update protocol.
@@ -46,32 +46,6 @@ pub struct Party0 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-}
-
-pub struct RevokedState {
-    channel_state: ChannelState,
-    r_other: RevocationSecretKey,
-}
-
-pub struct ChannelState {
-    TX_c: CommitTransaction,
-    /// Encrypted signature sent to the counterparty. If the
-    /// counterparty decrypts it with their own `PublishingSecretKey`
-    /// and uses it to sign and broadcast `TX_c`, we will be able to
-    /// extract their `PublishingSecretKey` by using
-    /// `recover_decryption_key`. If said `TX_c` was already revoked,
-    /// we can use it with the `RevocationSecretKey` to punish them.
-    encsig_TX_c_self: EncryptedSignature,
-    /// Encrypted signature received from the counterparty. It can be
-    /// decrypted using our `PublishingSecretkey` and used to sign
-    /// `TX_c`. Keep in mind, that publishing a revoked `TX_c` will
-    /// allow the counterparty to punish us.
-    encsig_TX_c_other: EncryptedSignature,
-    r_self: RevocationKeyPair,
-    R_other: RevocationPublicKey,
-    y_self: PublishingKeyPair,
-    /// Signed split transaction.
-    TX_s: SplitTransaction,
 }
 
 impl Party0 {
@@ -418,6 +392,7 @@ impl Party4 {
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
+            Y_other: self.Y_other,
             TX_s: self.TX_s,
         };
 
@@ -480,7 +455,7 @@ impl Balance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use bitcoin::{Transaction, TxIn, TxOut};
+    use bitcoin::TxIn;
 
     #[test]
     fn channel_update() {
@@ -531,7 +506,8 @@ mod test {
                 encsig_TX_c_other: bob_encsig.clone(),
                 r_self: r_alice.clone(),
                 R_other: r_bob.public(),
-                y_self: y_alice,
+                y_self: y_alice.clone(),
+                Y_other: y_bob.public(),
                 TX_s: TX_s.clone(),
             };
 
@@ -552,6 +528,7 @@ mod test {
                 r_self: r_bob,
                 R_other: r_alice.public(),
                 y_self: y_bob,
+                Y_other: y_alice.public(),
                 TX_s,
             };
 
