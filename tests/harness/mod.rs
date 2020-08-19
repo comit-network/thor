@@ -1,5 +1,3 @@
-pub mod update;
-
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::bitcoind_rpc::PsbtBase64;
 use reqwest::Url;

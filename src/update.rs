@@ -14,22 +14,13 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Channel, ChannelState, RevokedState, SplitOutputs,
+    Balance, Channel, ChannelState, RevokedState, SplitOutputs,
 };
-use anyhow::{bail, Context};
-use bitcoin::Amount;
+use anyhow::Context;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 /// First message of the channel update protocol.
-pub struct ChannelUpdateProposal {
-    proposed_balance: Balance,
-    time_lock: u32,
-    R: RevocationPublicKey,
-    Y: PublishingPublicKey,
-}
-
-/// Second message of the channel update protocol.
-pub struct ChannelUpdateAccept {
+pub struct ShareKeys {
     R: RevocationPublicKey,
     Y: PublishingPublicKey,
 }
@@ -49,141 +40,52 @@ pub struct RevealRevocationSecretKey {
     r: RevocationSecretKey,
 }
 
-pub struct State0(Channel);
-
-impl From<Channel> for State0 {
-    fn from(channel: Channel) -> Self {
-        State0(channel)
-    }
-}
-
-impl State0 {
-    pub fn compose(
-        self,
-        update: ChannelUpdate,
-        time_lock: u32,
-    ) -> anyhow::Result<(AliceState0, ChannelUpdateProposal)> {
-        let channel = self.0;
-
-        let crate::Balance { ours, theirs } = channel.balance()?;
-        let proposed_balance = Balance {
-            alice: ours,
-            bob: theirs,
-        }
-        .apply(update)?;
-
-        let r_self = RevocationKeyPair::new_random();
-        let y_self = PublishingKeyPair::new_random();
-
-        let state = AliceState0 {
-            x_self: channel.x_self,
-            X_other: channel.X_other,
-            TX_f: channel.TX_f_body,
-            current_state: channel.current_state,
-            revoked_states: channel.revoked_states,
-            r_self: r_self.clone(),
-            y_self: y_self.clone(),
-            proposed_balance,
-            time_lock,
-        };
-
-        let message = ChannelUpdateProposal {
-            proposed_balance,
-            time_lock,
-            R: r_self.public(),
-            Y: y_self.public(),
-        };
-
-        Ok((state, message))
-    }
-
-    // QUESTION: Should we verify that the channel state is the same
-    // for both parties?
-    pub fn interpret(
-        self,
-        ChannelUpdateProposal {
-            proposed_balance:
-                Balance {
-                    alice: balance_other,
-                    bob: balance_self,
-                },
-            time_lock,
-            R: R_other,
-            Y: Y_other,
-        }: ChannelUpdateProposal,
-    ) -> anyhow::Result<(State1, ChannelUpdateAccept)> {
-        // NOTE: A real application would verify that the amount
-        // provided by the other party is satisfactory, together with
-        // the time_lock
-
-        let channel = self.0;
-
-        let r_self = RevocationKeyPair::new_random();
-        let y_self = PublishingKeyPair::new_random();
-
-        let TX_c = CommitTransaction::new(
-            &channel.TX_f_body,
-            (channel.X_other.clone(), R_other.clone(), Y_other.clone()),
-            (channel.x_self.public(), r_self.public(), y_self.public()),
-            time_lock,
-        )?;
-        let encsig_TX_c_self = TX_c.encsign_once(channel.x_self.clone(), Y_other.clone());
-
-        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (balance_other, channel.X_other.clone()),
-            b: (balance_self, channel.x_self.public()),
-        });
-        let sig_TX_s_self = TX_s.sign_once(channel.x_self.clone());
-
-        let state = State1 {
-            x_self: channel.x_self,
-            X_other: channel.X_other,
-            TX_f: channel.TX_f_body,
-            current_state: channel.current_state,
-            revoked_states: channel.revoked_states,
-            r_self: r_self.clone(),
-            R_other,
-            y_self: y_self.clone(),
-            Y_other,
-            TX_c,
-            TX_s,
-            encsig_TX_c_self,
-            sig_TX_s_self,
-        };
-
-        let message = ChannelUpdateAccept {
-            R: r_self.public(),
-            Y: y_self.public(),
-        };
-
-        Ok((state, message))
-    }
-}
-
-/// A party who has sent a `ChannelUpdateProposal` and is waiting for
-/// confirmation.
-pub struct AliceState0 {
+pub struct Alice0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
-    TX_f: FundingTransaction,
+    TX_f_body: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
+    updated_balance: Balance,
+    time_lock: u32,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
-    proposed_balance: Balance,
-    time_lock: u32,
 }
 
-impl AliceState0 {
+impl Alice0 {
+    pub fn new(channel: Channel, updated_balance: Balance, time_lock: u32) -> Self {
+        let r_self = RevocationKeyPair::new_random();
+        let y_self = PublishingKeyPair::new_random();
+
+        Self {
+            x_self: channel.x_self,
+            X_other: channel.X_other,
+            TX_f_body: channel.TX_f_body,
+            current_state: channel.current_state,
+            revoked_states: channel.revoked_states,
+            updated_balance,
+            time_lock,
+            r_self,
+            y_self,
+        }
+    }
+
+    pub fn compose(&self) -> ShareKeys {
+        ShareKeys {
+            R: self.r_self.public(),
+            Y: self.y_self.public(),
+        }
+    }
+
     pub fn interpret(
         self,
-        ChannelUpdateAccept {
+        ShareKeys {
             R: R_other,
             Y: Y_other,
-        }: ChannelUpdateAccept,
+        }: ShareKeys,
     ) -> anyhow::Result<State1> {
         let TX_c = CommitTransaction::new(
-            &self.TX_f,
+            &self.TX_f_body,
             (
                 self.x_self.public(),
                 self.r_self.public(),
@@ -194,20 +96,96 @@ impl AliceState0 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let Balance {
-            alice: balance_self,
-            bob: balance_other,
-        } = self.proposed_balance;
         let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (balance_self, self.x_self.public()),
-            b: (balance_other, self.X_other.clone()),
+            a: (self.updated_balance.ours, self.x_self.public()),
+            b: (self.updated_balance.theirs, self.X_other.clone()),
         });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(State1 {
             x_self: self.x_self,
             X_other: self.X_other,
-            TX_f: self.TX_f,
+            TX_f: self.TX_f_body,
+            current_state: self.current_state,
+            revoked_states: self.revoked_states,
+            r_self: self.r_self,
+            R_other,
+            y_self: self.y_self,
+            Y_other,
+            TX_c,
+            TX_s,
+            encsig_TX_c_self,
+            sig_TX_s_self,
+        })
+    }
+}
+
+pub struct Bob0 {
+    x_self: OwnershipKeyPair,
+    X_other: OwnershipPublicKey,
+    TX_f_body: FundingTransaction,
+    current_state: ChannelState,
+    revoked_states: Vec<RevokedState>,
+    updated_balance: Balance,
+    time_lock: u32,
+    r_self: RevocationKeyPair,
+    y_self: PublishingKeyPair,
+}
+
+impl Bob0 {
+    pub fn new(channel: Channel, updated_balance: Balance, time_lock: u32) -> Self {
+        let r_self = RevocationKeyPair::new_random();
+        let y_self = PublishingKeyPair::new_random();
+
+        Self {
+            x_self: channel.x_self,
+            X_other: channel.X_other,
+            TX_f_body: channel.TX_f_body,
+            current_state: channel.current_state,
+            revoked_states: channel.revoked_states,
+            updated_balance,
+            time_lock,
+            r_self,
+            y_self,
+        }
+    }
+
+    pub fn compose(&self) -> ShareKeys {
+        ShareKeys {
+            R: self.r_self.public(),
+            Y: self.y_self.public(),
+        }
+    }
+
+    pub fn interpret(
+        self,
+        ShareKeys {
+            R: R_other,
+            Y: Y_other,
+        }: ShareKeys,
+    ) -> anyhow::Result<State1> {
+        let TX_c = CommitTransaction::new(
+            &self.TX_f_body,
+            (self.X_other.clone(), R_other.clone(), Y_other.clone()),
+            (
+                self.x_self.public(),
+                self.r_self.public(),
+                self.y_self.public(),
+            ),
+            self.time_lock,
+        )?;
+        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
+
+        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
+            a: (self.updated_balance.theirs, self.X_other.clone()),
+            b: (self.updated_balance.ours, self.x_self.public()),
+        });
+        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
+
+        Ok(State1 {
+            x_self: self.x_self,
+            X_other: self.X_other,
+            TX_f: self.TX_f_body,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
             r_self: self.r_self,
@@ -394,180 +372,5 @@ impl State3 {
             current_state,
             revoked_states,
         })
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Balance {
-    alice: Amount,
-    bob: Amount,
-}
-
-// NOTE: The protocol proposed in the paper supports updates which add
-// new outputs. We exclude that possibility for simplicity.
-pub enum ChannelUpdate {
-    Pay(Amount),
-    Receive(Amount),
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("invalid channel update")]
-pub struct InvalidChannelUpdate;
-
-impl Balance {
-    /// Apply a `ChannelUpdate` to the current `Balance`. This is called
-    /// to complete a `ChannelUpdateProposal` so we assume the role of the
-    /// Alice.
-    fn apply(self, update: ChannelUpdate) -> anyhow::Result<Balance> {
-        let (new_alice_balance, new_bob_balance) = match update {
-            ChannelUpdate::Pay(amount) => {
-                let new_sender = self.alice.checked_sub(amount);
-                let new_receiver = self.bob.checked_add(amount);
-
-                (new_sender, new_receiver)
-            }
-            ChannelUpdate::Receive(amount) => {
-                let new_sender = self.alice.checked_add(amount);
-                let new_receiver = self.bob.checked_sub(amount);
-
-                (new_sender, new_receiver)
-            }
-        };
-
-        match (new_alice_balance, new_bob_balance) {
-            (Some(alice_balance), Some(bob_balance))
-                if alice_balance >= Amount::ZERO && bob_balance >= Amount::ZERO =>
-            {
-                Ok(Balance {
-                    alice: alice_balance,
-                    bob: bob_balance,
-                })
-            }
-            _ => bail!(InvalidChannelUpdate),
-        }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::transaction::input_psbt;
-
-    #[test]
-    fn channel_update() {
-        let x_alice = OwnershipKeyPair::new_random();
-        let x_bob = OwnershipKeyPair::new_random();
-
-        let r_alice = RevocationKeyPair::new_random();
-        let r_bob = RevocationKeyPair::new_random();
-
-        let y_alice = PublishingKeyPair::new_random();
-        let y_bob = PublishingKeyPair::new_random();
-
-        let current_balance = Balance {
-            alice: Amount::from_btc(1.0).unwrap(),
-            bob: Amount::from_btc(1.0).unwrap(),
-        };
-
-        let alice_input_psbt = input_psbt(current_balance.alice, x_alice.public(), x_bob.public());
-        let bob_input_psbt = input_psbt(current_balance.bob, x_alice.public(), x_bob.public());
-
-        let TX_f = FundingTransaction::new(
-            (x_alice.public(), alice_input_psbt, current_balance.alice),
-            (x_bob.public(), bob_input_psbt, current_balance.bob),
-        )
-        .unwrap();
-
-        let time_lock = 60 * 60;
-        let TX_c = CommitTransaction::new(
-            &TX_f,
-            (x_alice.public(), r_alice.public(), y_alice.public()),
-            (x_bob.public(), r_bob.public(), y_bob.public()),
-            time_lock,
-        )
-        .unwrap();
-
-        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (current_balance.alice, x_alice.public()),
-            b: (current_balance.bob, x_bob.public()),
-        });
-
-        let alice_encsig = TX_c.encsign_once(x_alice.clone(), y_bob.public());
-        let bob_encsig = TX_c.encsign_once(x_bob.clone(), y_alice.public());
-
-        let alice_channel = {
-            let current_state = ChannelState {
-                TX_c: TX_c.clone(),
-                encsig_TX_c_self: alice_encsig.clone(),
-                encsig_TX_c_other: bob_encsig.clone(),
-                r_self: r_alice.clone(),
-                R_other: r_bob.public(),
-                y_self: y_alice.clone(),
-                Y_other: y_bob.public(),
-                signed_TX_s: TX_s.clone(),
-            };
-
-            Channel {
-                x_self: x_alice.clone(),
-                X_other: x_bob.public(),
-                TX_f_body: TX_f.clone(),
-                current_state,
-                revoked_states: vec![],
-            }
-        };
-
-        let bob_channel = {
-            let current_state = ChannelState {
-                TX_c,
-                encsig_TX_c_self: bob_encsig,
-                encsig_TX_c_other: alice_encsig,
-                r_self: r_bob,
-                R_other: r_alice.public(),
-                y_self: y_bob,
-                Y_other: y_alice.public(),
-                signed_TX_s: TX_s,
-            };
-
-            Channel {
-                x_self: x_bob,
-                X_other: x_alice.public(),
-                TX_f_body: TX_f,
-                current_state,
-                revoked_states: vec![],
-            }
-        };
-
-        let channel_update = ChannelUpdate::Pay(Amount::from_btc(0.5).unwrap());
-        let time_lock = 60 * 60;
-
-        let alice0: State0 = alice_channel.into();
-        let bob0: State0 = bob_channel.into();
-
-        let (alice1, message0) = alice0.compose(channel_update, time_lock).unwrap();
-
-        let (bob1, message1) = bob0.interpret(message0).unwrap();
-
-        let alice2 = alice1.interpret(message1).unwrap();
-
-        let message2_alice = alice2.compose();
-        let message2_bob = bob1.compose();
-
-        let alice3 = alice2.interpret(message2_bob).unwrap();
-        let bob2 = bob1.interpret(message2_alice).unwrap();
-
-        let message3_alice = alice3.compose();
-        let message3_bob = bob2.compose();
-
-        let alice4 = alice3.interpret(message3_bob).unwrap();
-        let bob3 = bob2.interpret(message3_alice).unwrap();
-
-        let message4_alice = alice4.compose();
-        let message4_bob = bob3.compose();
-
-        let alice5 = alice4.interpret(message4_bob).unwrap();
-        let bob4 = bob3.interpret(message4_alice).unwrap();
-
-        println!("{:?}", alice5.balance().unwrap());
-        println!("{:?}", bob4.balance().unwrap());
     }
 }

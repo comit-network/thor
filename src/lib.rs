@@ -19,6 +19,7 @@ use anyhow::bail;
 use bitcoin::{Amount, Transaction};
 use ecdsa_fun::adaptor::EncryptedSignature;
 
+#[derive(Clone)]
 pub struct Channel {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -157,13 +158,13 @@ impl Channel {
     async fn create<W, T>(
         transport: &mut T,
         wallet: &W,
-        party3: create::Party3,
+        state3: create::Party3,
     ) -> anyhow::Result<Self>
     where
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction,
         T: SendMessage + ReceiveMessage,
     {
-        let message3_self = party3.next_message();
+        let message3_self = state3.next_message();
         transport
             .send_message(Message::CreateMessage3(message3_self))
             .await?;
@@ -172,9 +173,9 @@ impl Channel {
             Message::CreateMessage3(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
-        let party4 = party3.receive(message3_other).unwrap();
+        let state_4 = state3.receive(message3_other).unwrap();
 
-        let message4_self = party4.next_message();
+        let message4_self = state_4.next_message();
         transport
             .send_message(Message::CreateMessage4(message4_self))
             .await?;
@@ -183,9 +184,9 @@ impl Channel {
             Message::CreateMessage4(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
-        let party5 = party4.receive(message4_other).unwrap();
+        let state5 = state_4.receive(message4_other).unwrap();
 
-        let message5_self = party5.next_message(wallet).await.unwrap();
+        let message5_self = state5.next_message(wallet).await.unwrap();
         transport
             .send_message(Message::CreateMessage5(message5_self))
             .await?;
@@ -194,11 +195,107 @@ impl Channel {
             _ => anyhow::bail!("wrong message"),
         };
 
-        let (channel, transaction) = party5.receive(message5_other, wallet).await.unwrap();
+        let (channel, transaction) = state5.receive(message5_other, wallet).await.unwrap();
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
         Ok(channel)
+    }
+
+    pub async fn update_alice<T>(
+        &mut self,
+        transport: &mut T,
+        new_balance: Balance,
+        time_lock: u32,
+    ) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+    {
+        let alice0 = update::Alice0::new(self.clone(), new_balance, time_lock);
+
+        let message0_alice = alice0.compose();
+        transport
+            .send_message(Message::UpdateMessage0(message0_alice))
+            .await?;
+
+        let message0_bob = match transport.receive_message().await? {
+            Message::UpdateMessage0(message) => message,
+            _ => anyhow::bail!("wrong message"),
+        };
+        let alice1 = alice0.interpret(message0_bob)?;
+
+        self.update(transport, alice1).await
+    }
+
+    pub async fn update_bob<T>(
+        &mut self,
+        transport: &mut T,
+        new_balance: Balance,
+        time_lock: u32,
+    ) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+    {
+        let bob0 = update::Bob0::new(self.clone(), new_balance, time_lock);
+
+        let message0_bob = bob0.compose();
+        transport
+            .send_message(Message::UpdateMessage0(message0_bob))
+            .await?;
+
+        let message0_alice = match transport.receive_message().await? {
+            Message::UpdateMessage0(message) => message,
+            _ => anyhow::bail!("wrong message"),
+        };
+        let bob1 = bob0.interpret(message0_alice)?;
+
+        self.update(transport, bob1).await
+    }
+
+    pub async fn update<T>(
+        &mut self,
+        transport: &mut T,
+        state1: update::State1,
+    ) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+    {
+        let message1_self = state1.compose();
+        transport
+            .send_message(Message::UpdateMessage1(message1_self))
+            .await?;
+
+        let message1_other = match transport.receive_message().await? {
+            Message::UpdateMessage1(message) => message,
+            _ => anyhow::bail!("wrong message"),
+        };
+        let state2 = state1.interpret(message1_other)?;
+
+        let message2_self = state2.compose();
+        transport
+            .send_message(Message::UpdateMessage2(message2_self))
+            .await?;
+
+        let message2_other = match transport.receive_message().await? {
+            Message::UpdateMessage2(message) => message,
+            _ => anyhow::bail!("wrong message"),
+        };
+        let state3 = state2.interpret(message2_other)?;
+
+        let message3_self = state3.compose();
+        transport
+            .send_message(Message::UpdateMessage3(message3_self))
+            .await?;
+
+        let message3_other = match transport.receive_message().await? {
+            Message::UpdateMessage3(message) => message,
+            _ => anyhow::bail!("wrong message"),
+        };
+        let updated_channel = state3.interpret(message3_other)?;
+
+        *self = updated_channel;
+
+        Ok(())
     }
 
     pub fn balance(&self) -> anyhow::Result<Balance> {
@@ -303,4 +400,8 @@ pub enum Message {
     CreateMessage3(create::Message3),
     CreateMessage4(create::Message4),
     CreateMessage5(create::Message5),
+    UpdateMessage0(update::ShareKeys),
+    UpdateMessage1(update::ShareSplitSignature),
+    UpdateMessage2(update::ShareCommitEncryptedSignature),
+    UpdateMessage3(update::RevealRevocationSecretKey),
 }

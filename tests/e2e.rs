@@ -8,8 +8,8 @@ use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
 };
-use harness::{update, Wallet};
-use thor::{punish, update::ChannelUpdate, Channel, Message, ReceiveMessage, SendMessage};
+use harness::Wallet;
+use thor::{punish, Balance, Channel, Message, ReceiveMessage, SendMessage};
 
 struct Transport {
     sender: Sender<Message>,
@@ -84,23 +84,26 @@ async fn e2e_channel_creation() {
         Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
     let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
-    let (alice, bob) = futures::future::try_join(alice_create, bob_create)
+    let (alice_channel, bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
         .unwrap();
 
-    assert_eq!(alice.TX_f_body, bob.TX_f_body);
-    assert_eq!(alice.current_state.TX_c, bob.current_state.TX_c);
+    assert_eq!(alice_channel.TX_f_body, bob_channel.TX_f_body);
     assert_eq!(
-        alice.current_state.encsig_TX_c_self,
-        bob.current_state.encsig_TX_c_other
+        alice_channel.current_state.TX_c,
+        bob_channel.current_state.TX_c
     );
     assert_eq!(
-        alice.current_state.encsig_TX_c_other,
-        bob.current_state.encsig_TX_c_self
+        alice_channel.current_state.encsig_TX_c_self,
+        bob_channel.current_state.encsig_TX_c_other
     );
     assert_eq!(
-        alice.current_state.signed_TX_s,
-        bob.current_state.signed_TX_s
+        alice_channel.current_state.encsig_TX_c_other,
+        bob_channel.current_state.encsig_TX_c_self
+    );
+    assert_eq!(
+        alice_channel.current_state.signed_TX_s,
+        bob_channel.current_state.signed_TX_s
     );
 }
 
@@ -152,29 +155,61 @@ async fn e2e_channel_update() {
         Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
     let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
-    let (alice_channel, bob_channel) = futures::future::try_join(alice_create, bob_create)
+    let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
         .unwrap();
 
-    let channel_update = ChannelUpdate::Pay(Amount::from_btc(0.5).unwrap());
-    let time_lock = 1;
+    // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
+    let payment = Amount::from_btc(0.5).unwrap();
+    let alice_balance = fund_amount - payment;
+    let bob_balance = fund_amount + payment;
 
-    let update::Final { alice, bob } =
-        update::run(alice_channel, bob_channel, channel_update, time_lock);
+    let alice_update = alice_channel.update_alice(
+        &mut alice_transport,
+        Balance {
+            ours: alice_balance,
+            theirs: bob_balance,
+        },
+        time_lock,
+    );
+    let bob_update = bob_channel.update_bob(
+        &mut bob_transport,
+        Balance {
+            ours: bob_balance,
+            theirs: alice_balance,
+        },
+        time_lock,
+    );
+
+    futures::future::try_join(alice_update, bob_update)
+        .await
+        .unwrap();
+
+    // Assert expected balance changes
+
+    assert_eq!(alice_channel.balance().unwrap().ours, alice_balance);
+    assert_eq!(alice_channel.balance().unwrap().theirs, bob_balance);
+
+    assert_eq!(bob_channel.balance().unwrap().ours, bob_balance);
+    assert_eq!(bob_channel.balance().unwrap().theirs, alice_balance);
+
+    // Assert new channel states match between parties
 
     assert_eq!(
-        alice.balance().unwrap().ours,
-        Amount::from_btc(0.5).unwrap()
+        alice_channel.current_state.TX_c,
+        bob_channel.current_state.TX_c
     );
     assert_eq!(
-        alice.balance().unwrap().theirs,
-        Amount::from_btc(1.5).unwrap()
+        alice_channel.current_state.encsig_TX_c_self,
+        bob_channel.current_state.encsig_TX_c_other
     );
-
-    assert_eq!(bob.balance().unwrap().ours, Amount::from_btc(1.5).unwrap());
     assert_eq!(
-        bob.balance().unwrap().theirs,
-        Amount::from_btc(0.5).unwrap()
+        alice_channel.current_state.encsig_TX_c_other,
+        bob_channel.current_state.encsig_TX_c_self
+    );
+    assert_eq!(
+        alice_channel.current_state.signed_TX_s,
+        bob_channel.current_state.signed_TX_s
     );
 }
 
@@ -226,19 +261,39 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
         Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
     let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
-    let (alice_channel, bob_channel) = futures::future::try_join(alice_create, bob_create)
+    let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
         .unwrap();
 
-    let channel_update = ChannelUpdate::Pay(Amount::from_btc(0.5).unwrap());
-    let time_lock = 1;
+    // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
+    let payment = Amount::from_btc(0.5).unwrap();
+    let alice_balance = fund_amount - payment;
+    let bob_balance = fund_amount + payment;
 
-    let update::Final { alice, bob } =
-        update::run(alice_channel, bob_channel, channel_update, time_lock);
+    let alice_update = alice_channel.update_alice(
+        &mut alice_transport,
+        Balance {
+            ours: alice_balance,
+            theirs: bob_balance,
+        },
+        time_lock,
+    );
+    let bob_update = bob_channel.update_bob(
+        &mut bob_transport,
+        Balance {
+            ours: bob_balance,
+            theirs: alice_balance,
+        },
+        time_lock,
+    );
+
+    futures::future::try_join(alice_update, bob_update)
+        .await
+        .unwrap();
 
     // Alice attempts to cheat by publishing a revoked commit transaction
 
-    let signed_revoked_TX_c = alice.latest_revoked_signed_TX_c().unwrap().unwrap();
+    let signed_revoked_TX_c = alice_channel.latest_revoked_signed_TX_c().unwrap().unwrap();
     alice_wallet
         .0
         .send_raw_transaction(signed_revoked_TX_c.clone())
@@ -247,7 +302,7 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
 
     // Bob sees the transaction and punishes Alice
 
-    let bob = punish::State0::from(bob);
+    let bob = punish::State0::from(bob_channel);
     let TX_p = bob.punish(signed_revoked_TX_c).unwrap();
 
     bob_wallet
