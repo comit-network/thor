@@ -19,7 +19,6 @@ use anyhow::bail;
 use bitcoin::{Amount, Transaction};
 use ecdsa_fun::adaptor::EncryptedSignature;
 
-#[allow(dead_code)]
 pub struct Channel {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
