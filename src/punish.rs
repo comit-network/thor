@@ -1,9 +1,20 @@
-use crate::{keys::OwnershipKeyPair, transaction::PunishTransaction, ChannelState, RevokedState};
+use crate::{
+    keys::OwnershipKeyPair, transaction::PunishTransaction, Channel, ChannelState, RevokedState,
+};
 use bitcoin::Transaction;
 
 pub struct State0 {
     our_x: OwnershipKeyPair,
     revoked_states: Vec<RevokedState>,
+}
+
+impl From<Channel> for State0 {
+    fn from(channel: Channel) -> Self {
+        State0 {
+            our_x: channel.x_self,
+            revoked_states: channel.revoked_states,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
