@@ -60,7 +60,7 @@ pub struct Channel {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct LocalBalance {
+pub struct Balance {
     pub ours: Amount,
     pub theirs: Amount,
 }
@@ -85,22 +85,18 @@ impl Channel {
         }
     }
 
-    pub fn balance(&self) -> anyhow::Result<LocalBalance> {
+    pub fn balance(&self) -> anyhow::Result<Balance> {
         let outputs = self.current_state.signed_TX_s.outputs();
 
         match outputs {
             SplitOutputs {
                 a: (ours, X_a),
                 b: (theirs, X_b),
-            } if X_a == self.x_self.public() && X_b == self.X_other => {
-                Ok(LocalBalance { ours, theirs })
-            }
+            } if X_a == self.x_self.public() && X_b == self.X_other => Ok(Balance { ours, theirs }),
             SplitOutputs {
                 a: (theirs, X_a),
                 b: (ours, X_b),
-            } if X_a == self.X_other && X_b == self.x_self.public() => {
-                Ok(LocalBalance { ours, theirs })
-            }
+            } if X_a == self.X_other && X_b == self.x_self.public() => Ok(Balance { ours, theirs }),
             _ => bail!("split transaction does not pay to X_self and X_other"),
         }
     }

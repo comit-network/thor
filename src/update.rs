@@ -14,7 +14,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Channel, ChannelState, LocalBalance, RevokedState, SplitOutputs,
+    Channel, ChannelState, RevokedState, SplitOutputs,
 };
 use anyhow::{bail, Context};
 use bitcoin::Amount;
@@ -65,7 +65,7 @@ impl State0 {
     ) -> anyhow::Result<(AliceState0, ChannelUpdateProposal)> {
         let channel = self.0;
 
-        let LocalBalance { ours, theirs } = channel.balance()?;
+        let crate::Balance { ours, theirs } = channel.balance()?;
         let proposed_balance = Balance {
             alice: ours,
             bob: theirs,
