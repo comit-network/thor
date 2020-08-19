@@ -1,4 +1,15 @@
+//! # Channel update protocol
+//!
+//! Alice proposes a channel update to the counterparty.
+//!
+//! Alice: CommonState0 --> AliceState1 --> CommonState2 --> CommonState3 -->
+//! CommonState4 --> CommonState0
+//!
+//! Counterparty: CommonState0 --> CommonState2 --> CommonState3 -->
+//! CommonState4 --> CommonState0
+
 use crate::{
+    create,
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
@@ -13,7 +24,7 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 /// First message of the channel update protocol.
 pub struct ChannelUpdateProposal {
-    proposed_balance: Balance,
+    proposed_balance: GlobalBalance,
     time_lock: u32,
     R: RevocationPublicKey,
     Y: PublishingPublicKey,
@@ -43,19 +54,42 @@ pub struct RevealRevocationSecretKey {
 pub struct Party0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
-    TX_f: FundingTransaction,
+    TX_f_body: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
 }
 
 impl Party0 {
+    pub fn new(party: create::Party6) -> Self {
+        Self {
+            x_self: party.x_self,
+            X_other: party.X_other,
+            TX_f_body: party.TX_f_body,
+            current_state: ChannelState {
+                TX_c: party.TX_c,
+                encsig_TX_c_self: party.encsig_TX_c_self,
+                encsig_TX_c_other: party.encsig_TX_c_other,
+                r_self: party.r_self,
+                R_other: party.R_other,
+                y_self: party.y_self,
+                Y_other: party.Y_other,
+                signed_TX_s: party.signed_TX_s,
+            },
+            revoked_states: Vec::new(),
+        }
+    }
+
     pub fn propose_channel_update(
         self,
         update: ChannelUpdate,
         time_lock: u32,
     ) -> anyhow::Result<(Alice1, ChannelUpdateProposal)> {
-        let current_balance = self.balance()?;
-        let proposed_balance = current_balance.apply(update)?;
+        let LocalBalance { ours, theirs } = self.balance()?;
+        let proposed_balance = GlobalBalance {
+            sender: ours,
+            receiver: theirs,
+        }
+        .apply(update)?;
 
         let r_self = RevocationKeyPair::new_random();
         let y_self = PublishingKeyPair::new_random();
@@ -63,7 +97,7 @@ impl Party0 {
         let state = Alice1 {
             x_self: self.x_self,
             X_other: self.X_other,
-            TX_f: self.TX_f,
+            TX_f: self.TX_f_body,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
             r_self: r_self.clone(),
@@ -88,9 +122,9 @@ impl Party0 {
         self,
         ChannelUpdateProposal {
             proposed_balance:
-                Balance {
-                    alice: balance_other,
-                    bob: balance_self,
+                GlobalBalance {
+                    sender: balance_other,
+                    receiver: balance_self,
                 },
             time_lock,
             R: R_other,
@@ -105,7 +139,7 @@ impl Party0 {
         let y_self = PublishingKeyPair::new_random();
 
         let TX_c = CommitTransaction::new(
-            &self.TX_f,
+            &self.TX_f_body,
             (self.X_other.clone(), R_other.clone(), Y_other.clone()),
             (self.x_self.public(), r_self.public(), y_self.public()),
             time_lock,
@@ -121,7 +155,7 @@ impl Party0 {
         let state = Party2 {
             x_self: self.x_self,
             X_other: self.X_other,
-            TX_f: self.TX_f,
+            TX_f: self.TX_f_body,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
             r_self: r_self.clone(),
@@ -142,24 +176,22 @@ impl Party0 {
         Ok((state, message))
     }
 
-    fn balance(&self) -> anyhow::Result<Balance> {
+    pub fn balance(&self) -> anyhow::Result<LocalBalance> {
         let channel_balance = self.current_state.signed_TX_s.balance();
 
         match channel_balance {
             ChannelBalance {
                 a: (ours, X_a),
                 b: (theirs, X_b),
-            } if X_a == self.x_self.public() && X_b == self.X_other => Ok(Balance {
-                alice: ours,
-                bob: theirs,
-            }),
+            } if X_a == self.x_self.public() && X_b == self.X_other => {
+                Ok(LocalBalance { ours, theirs })
+            }
             ChannelBalance {
                 a: (theirs, X_a),
                 b: (ours, X_b),
-            } if X_a == self.X_other && X_b == self.x_self.public() => Ok(Balance {
-                alice: ours,
-                bob: theirs,
-            }),
+            } if X_a == self.X_other && X_b == self.x_self.public() => {
+                Ok(LocalBalance { ours, theirs })
+            }
             _ => bail!("split transaction does not pay to X_self and X_other"),
         }
     }
@@ -175,7 +207,7 @@ pub struct Alice1 {
     revoked_states: Vec<RevokedState>,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
-    proposed_balance: Balance,
+    proposed_balance: GlobalBalance,
     time_lock: u32,
 }
 
@@ -199,9 +231,9 @@ impl Alice1 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let Balance {
-            alice: balance_self,
-            bob: balance_other,
+        let GlobalBalance {
+            sender: balance_self,
+            receiver: balance_other,
         } = self.proposed_balance;
         let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
             a: (balance_self, self.x_self.public()),
@@ -395,17 +427,23 @@ impl Party4 {
         Ok(Party0 {
             x_self: self.x_self,
             X_other: self.X_other,
-            TX_f: self.TX_f,
+            TX_f_body: self.TX_f,
             current_state,
             revoked_states,
         })
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct Balance {
-    alice: Amount,
-    bob: Amount,
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GlobalBalance {
+    sender: Amount,
+    receiver: Amount,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LocalBalance {
+    pub ours: Amount,
+    pub theirs: Amount,
 }
 
 // NOTE: The protocol proposed in the paper supports updates which add
@@ -419,29 +457,31 @@ pub enum ChannelUpdate {
 #[error("invalid channel update")]
 pub struct InvalidChannelUpdate;
 
-impl Balance {
-    fn apply(self, update: ChannelUpdate) -> anyhow::Result<Balance> {
-        let (new_ours, new_theirs) = match update {
+impl GlobalBalance {
+    /// Apply a `ChannelUpdate` to the current `GlobalBalance`. This is called
+    /// to complete a `ChannelUpdateProposal` so we assume the role of the
+    /// sender.
+    fn apply(self, update: ChannelUpdate) -> anyhow::Result<GlobalBalance> {
+        let (new_sender, new_receiver) = match update {
             ChannelUpdate::Pay(amount) => {
-                let new_ours = self.alice.checked_sub(amount);
-                let new_theirs = self.bob.checked_add(amount);
+                let new_sender = self.sender.checked_sub(amount);
+                let new_receiver = self.receiver.checked_add(amount);
 
-                (new_ours, new_theirs)
+                (new_sender, new_receiver)
             }
             ChannelUpdate::Receive(amount) => {
-                let new_ours = self.alice.checked_add(amount);
-                let new_theirs = self.bob.checked_sub(amount);
+                let new_sender = self.sender.checked_add(amount);
+                let new_receiver = self.receiver.checked_sub(amount);
 
-                (new_ours, new_theirs)
+                (new_sender, new_receiver)
             }
         };
 
-        match (new_ours, new_theirs) {
-            (Some(ours), Some(theirs)) if ours >= Amount::ZERO && theirs >= Amount::ZERO => {
-                Ok(Balance {
-                    alice: ours,
-                    bob: theirs,
-                })
+        match (new_sender, new_receiver) {
+            (Some(sender), Some(receiver))
+                if sender >= Amount::ZERO && receiver >= Amount::ZERO =>
+            {
+                Ok(GlobalBalance { sender, receiver })
             }
             _ => bail!(InvalidChannelUpdate),
         }
@@ -464,17 +504,17 @@ mod test {
         let y_alice = PublishingKeyPair::new_random();
         let y_bob = PublishingKeyPair::new_random();
 
-        let current_balance = Balance {
-            alice: Amount::from_btc(1.0).unwrap(),
-            bob: Amount::from_btc(1.0).unwrap(),
+        let current_balance = GlobalBalance {
+            sender: Amount::from_btc(1.0).unwrap(),
+            receiver: Amount::from_btc(1.0).unwrap(),
         };
 
-        let alice_input_psbt = input_psbt(current_balance.alice, x_alice.public(), x_bob.public());
-        let bob_input_psbt = input_psbt(current_balance.bob, x_alice.public(), x_bob.public());
+        let alice_input_psbt = input_psbt(current_balance.sender, x_alice.public(), x_bob.public());
+        let bob_input_psbt = input_psbt(current_balance.receiver, x_alice.public(), x_bob.public());
 
         let TX_f = FundingTransaction::new(
-            (x_alice.public(), alice_input_psbt, current_balance.alice),
-            (x_bob.public(), bob_input_psbt, current_balance.bob),
+            (x_alice.public(), alice_input_psbt, current_balance.sender),
+            (x_bob.public(), bob_input_psbt, current_balance.receiver),
         )
         .unwrap();
 
@@ -488,8 +528,8 @@ mod test {
         .unwrap();
 
         let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
-            a: (current_balance.alice, x_alice.public()),
-            b: (current_balance.bob, x_bob.public()),
+            a: (current_balance.sender, x_alice.public()),
+            b: (current_balance.receiver, x_bob.public()),
         });
 
         let alice_encsig = TX_c.encsign_once(x_alice.clone(), y_bob.public());
@@ -510,7 +550,7 @@ mod test {
             Party0 {
                 x_self: x_alice.clone(),
                 X_other: x_bob.public(),
-                TX_f: TX_f.clone(),
+                TX_f_body: TX_f.clone(),
                 current_state,
                 revoked_states: vec![],
             }
@@ -531,7 +571,7 @@ mod test {
             Party0 {
                 x_self: x_bob,
                 X_other: x_alice.public(),
-                TX_f,
+                TX_f_body: TX_f,
                 current_state,
                 revoked_states: vec![],
             }

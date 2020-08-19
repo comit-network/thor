@@ -284,10 +284,10 @@ impl Alice2 {
                 self.r_self.public(),
                 self.y_self.public(),
             ),
-            (self.X_other.clone(), R_other, Y_other.clone()),
+            (self.X_other.clone(), R_other.clone(), Y_other.clone()),
             self.time_lock,
         )?;
-        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other);
+        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
             a: (self.TX_f.amount_a(), self.x_self.public()),
@@ -299,7 +299,9 @@ impl Alice2 {
             x_self: self.x_self,
             X_other: self.X_other,
             r_self: self.r_self,
+            R_other,
             y_self: self.y_self,
+            Y_other,
             TX_f: self.TX_f,
             TX_c,
             TX_s,
@@ -335,7 +337,7 @@ impl Bob2 {
     ) -> anyhow::Result<Party3> {
         let TX_c = CommitTransaction::new(
             &self.TX_f,
-            (self.X_other.clone(), R_other, Y_other.clone()),
+            (self.X_other.clone(), R_other.clone(), Y_other.clone()),
             (
                 self.x_self.public(),
                 self.r_self.public(),
@@ -343,7 +345,7 @@ impl Bob2 {
             ),
             self.time_lock,
         )?;
-        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other);
+        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
             a: (self.TX_f.amount_a(), self.X_other.clone()),
@@ -356,7 +358,9 @@ impl Bob2 {
             x_self: self.x_self,
             X_other: self.X_other,
             r_self: self.r_self,
+            R_other,
             y_self: self.y_self,
+            Y_other,
             TX_f: self.TX_f,
             TX_c,
             TX_s,
@@ -370,7 +374,9 @@ pub struct Party3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     r_self: RevocationKeyPair,
+    R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
+    Y_other: PublishingPublicKey,
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
@@ -403,7 +409,9 @@ impl Party3 {
             x_self: self.x_self,
             X_other: self.X_other,
             r_self: self.r_self,
+            R_other: self.R_other,
             y_self: self.y_self,
+            Y_other: self.Y_other,
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             signed_TX_s: self.TX_s,
@@ -416,7 +424,9 @@ pub struct Party4 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     r_self: RevocationKeyPair,
+    R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
+    Y_other: PublishingPublicKey,
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     signed_TX_s: SplitTransaction,
@@ -448,7 +458,9 @@ impl Party4 {
             x_self: self.x_self,
             X_other: self.X_other,
             r_self: self.r_self,
+            R_other: self.R_other,
             y_self: self.y_self,
+            Y_other: self.Y_other,
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             signed_TX_s: self.signed_TX_s,
@@ -462,7 +474,9 @@ pub struct Party5 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     r_self: RevocationKeyPair,
+    R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
+    Y_other: PublishingPublicKey,
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     signed_TX_s: SplitTransaction,
@@ -475,7 +489,7 @@ pub struct Party5 {
 pub trait SignFundingPSBT {
     async fn sign_funding_psbt(
         &self,
-        transaction: PartiallySignedTransaction,
+        psbt: PartiallySignedTransaction,
     ) -> anyhow::Result<PartiallySignedTransaction>;
 }
 
@@ -500,7 +514,10 @@ impl Party5 {
             x_self: self.x_self,
             X_other: self.X_other,
             r_self: self.r_self,
+            R_other: self.R_other,
             y_self: self.y_self,
+            Y_other: self.Y_other,
+            TX_f_body: self.TX_f,
             signed_TX_f,
             TX_c: self.TX_c,
             signed_TX_s: self.signed_TX_s,
@@ -517,10 +534,13 @@ pub struct Party6 {
     pub x_self: OwnershipKeyPair,
     pub X_other: OwnershipPublicKey,
     pub r_self: RevocationKeyPair,
+    pub R_other: RevocationPublicKey,
     pub y_self: PublishingKeyPair,
+    pub Y_other: PublishingPublicKey,
     // TODO: Use `FundingTransaction` or introduce `SignedFundingTransaction` type. This is
     // necessary because other protocols will still need functionality defined on
     // `FundingTransaction` even after the channel has been created
+    pub TX_f_body: FundingTransaction,
     pub signed_TX_f: Transaction,
     pub TX_c: CommitTransaction,
     pub signed_TX_s: SplitTransaction,
