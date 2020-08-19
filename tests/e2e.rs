@@ -4,10 +4,7 @@ mod harness;
 
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
-use harness::{
-    make_create_actors, make_update_actors, run_create_protocol, run_update_protocol, CreateActors,
-    Created, UpdateActors, Updated,
-};
+use harness::{create, make_update_actors, run_update_protocol, UpdateActors, Updated};
 use thor::update::ChannelUpdate;
 
 #[tokio::test]
@@ -18,14 +15,14 @@ async fn e2e_channel_creation() {
     let time_lock = 1;
     let (alice_balance, bob_balance) = (Amount::ONE_BTC, Amount::ONE_BTC);
 
-    let CreateActors {
+    let create::Init {
         alice,
         alice_wallet,
         bob,
         bob_wallet,
-    } = make_create_actors(&bitcoind, alice_balance, bob_balance, time_lock).await;
+    } = create::Init::new(&bitcoind, alice_balance, bob_balance, time_lock).await;
 
-    let Created { alice, bob } = run_create_protocol(&alice_wallet, alice, &bob_wallet, bob).await;
+    let create::Final { alice, bob } = create::run(&alice_wallet, alice, &bob_wallet, bob).await;
 
     assert_eq!(alice.signed_TX_f, bob.signed_TX_f);
 
@@ -38,22 +35,20 @@ async fn e2e_channel_creation() {
 
 #[tokio::test]
 async fn e2e_channel_update() {
-    use Amount::from_btc;
-
     let tc_client = testcontainers::clients::Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
 
     let time_lock = 1;
     let (alice_balance, bob_balance) = (Amount::ONE_BTC, Amount::ONE_BTC);
 
-    let CreateActors {
+    let create::Init {
         alice,
         alice_wallet,
         bob,
         bob_wallet,
-    } = make_create_actors(&bitcoind, alice_balance, bob_balance, time_lock).await;
+    } = create::Init::new(&bitcoind, alice_balance, bob_balance, time_lock).await;
 
-    let Created { alice, bob } = run_create_protocol(&alice_wallet, alice, &bob_wallet, bob).await;
+    let create::Final { alice, bob } = create::run(&alice_wallet, alice, &bob_wallet, bob).await;
 
     assert_eq!(alice.signed_TX_f, bob.signed_TX_f);
 
@@ -70,9 +65,18 @@ async fn e2e_channel_update() {
 
     let Updated { alice, bob } = run_update_protocol(alice, bob, channel_update, time_lock);
 
-    assert_eq!(alice.balance().unwrap().ours, from_btc(0.5).unwrap());
-    assert_eq!(alice.balance().unwrap().theirs, from_btc(1.5).unwrap());
+    assert_eq!(
+        alice.balance().unwrap().ours,
+        Amount::from_btc(0.5).unwrap()
+    );
+    assert_eq!(
+        alice.balance().unwrap().theirs,
+        Amount::from_btc(1.5).unwrap()
+    );
 
-    assert_eq!(bob.balance().unwrap().ours, from_btc(1.5).unwrap());
-    assert_eq!(bob.balance().unwrap().theirs, from_btc(0.5).unwrap());
+    assert_eq!(bob.balance().unwrap().ours, Amount::from_btc(1.5).unwrap());
+    assert_eq!(
+        bob.balance().unwrap().theirs,
+        Amount::from_btc(0.5).unwrap()
+    );
 }
