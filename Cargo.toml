@@ -11,7 +11,7 @@ base64 = "0.12"
 bitcoin = { version = "0.23.0", features = ["rand", "use-serde"] }
 conquer-once = "0.2"
 ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", branch = "thor", features = ["libsecp_compat"] }
-futures = "0.3.5"
+futures = "0.3"
 hex = "0.4.2"
 miniscript = { version = "1.0.0", features = ["compiler"] }
 rand = "0.7"
