@@ -18,7 +18,7 @@ use crate::{
     Channel, ChannelState, RevokedState, SplitOutputs,
 };
 use anyhow::{bail, Context};
-use bitcoin::{Amount, Transaction};
+use bitcoin::Amount;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 /// First message of the channel update protocol.
@@ -158,15 +158,6 @@ impl State0 {
         };
 
         Ok((state, message))
-    }
-
-    /// Retrieve the signed `CommitTransaction` of the state that was revoked
-    /// during the last channel update.
-    pub fn latest_revoked_signed_TX_c(&self) -> anyhow::Result<Option<Transaction>> {
-        self.revoked_states
-            .last()
-            .map(|state| state.signed_TX_c(self.x_self.clone(), self.X_other.clone()))
-            .transpose()
     }
 }
 
@@ -458,8 +449,8 @@ impl Balance {
     }
 }
 
-impl From<Party0> for punish::Party0 {
-    fn from(from: Party0) -> Self {
+impl From<Channel> for punish::Party0 {
+    fn from(from: Channel) -> Self {
         Self::new(from.x_self, from.revoked_states)
     }
 }
