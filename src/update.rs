@@ -1,10 +1,11 @@
 //! # Channel update protocol
 //!
-//! Alice proposes a channel update to the counterparty.
+//! Alice proposes a channel update to Bob.
 //!
-//! Alice: State0 --> AliceState0 --> State1 --> State2 --> State3 --> Channel
+//! Alice: State0(Channel) --> AliceState0 --> State1 --> State2 --> State3 -->
+//! Channel
 //!
-//! Counterparty: State0 --> State1 --> State2 --> State3 --> Channel
+//! Bob: State0(Channel) --> State1 --> State2 --> State3 --> Channel
 
 use crate::{
     keys::{
@@ -21,7 +22,7 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 /// First message of the channel update protocol.
 pub struct ChannelUpdateProposal {
-    proposed_balance: GlobalBalance,
+    proposed_balance: Balance,
     time_lock: u32,
     R: RevocationPublicKey,
     Y: PublishingPublicKey,
@@ -65,9 +66,9 @@ impl State0 {
         let channel = self.0;
 
         let LocalBalance { ours, theirs } = channel.balance()?;
-        let proposed_balance = GlobalBalance {
-            sender: ours,
-            receiver: theirs,
+        let proposed_balance = Balance {
+            alice: ours,
+            bob: theirs,
         }
         .apply(update)?;
 
@@ -102,9 +103,9 @@ impl State0 {
         self,
         ChannelUpdateProposal {
             proposed_balance:
-                GlobalBalance {
-                    sender: balance_other,
-                    receiver: balance_self,
+                Balance {
+                    alice: balance_other,
+                    bob: balance_self,
                 },
             time_lock,
             R: R_other,
@@ -169,7 +170,7 @@ pub struct AliceState0 {
     revoked_states: Vec<RevokedState>,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
-    proposed_balance: GlobalBalance,
+    proposed_balance: Balance,
     time_lock: u32,
 }
 
@@ -193,9 +194,9 @@ impl AliceState0 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let GlobalBalance {
-            sender: balance_self,
-            receiver: balance_other,
+        let Balance {
+            alice: balance_self,
+            bob: balance_other,
         } = self.proposed_balance;
         let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
             a: (balance_self, self.x_self.public()),
@@ -397,9 +398,9 @@ impl State3 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct GlobalBalance {
-    sender: Amount,
-    receiver: Amount,
+struct Balance {
+    alice: Amount,
+    bob: Amount,
 }
 
 // NOTE: The protocol proposed in the paper supports updates which add
@@ -413,31 +414,34 @@ pub enum ChannelUpdate {
 #[error("invalid channel update")]
 pub struct InvalidChannelUpdate;
 
-impl GlobalBalance {
-    /// Apply a `ChannelUpdate` to the current `GlobalBalance`. This is called
+impl Balance {
+    /// Apply a `ChannelUpdate` to the current `Balance`. This is called
     /// to complete a `ChannelUpdateProposal` so we assume the role of the
-    /// sender.
-    fn apply(self, update: ChannelUpdate) -> anyhow::Result<GlobalBalance> {
-        let (new_sender, new_receiver) = match update {
+    /// Alice.
+    fn apply(self, update: ChannelUpdate) -> anyhow::Result<Balance> {
+        let (new_alice_balance, new_bob_balance) = match update {
             ChannelUpdate::Pay(amount) => {
-                let new_sender = self.sender.checked_sub(amount);
-                let new_receiver = self.receiver.checked_add(amount);
+                let new_sender = self.alice.checked_sub(amount);
+                let new_receiver = self.bob.checked_add(amount);
 
                 (new_sender, new_receiver)
             }
             ChannelUpdate::Receive(amount) => {
-                let new_sender = self.sender.checked_add(amount);
-                let new_receiver = self.receiver.checked_sub(amount);
+                let new_sender = self.alice.checked_add(amount);
+                let new_receiver = self.bob.checked_sub(amount);
 
                 (new_sender, new_receiver)
             }
         };
 
-        match (new_sender, new_receiver) {
-            (Some(sender), Some(receiver))
-                if sender >= Amount::ZERO && receiver >= Amount::ZERO =>
+        match (new_alice_balance, new_bob_balance) {
+            (Some(alice_balance), Some(bob_balance))
+                if alice_balance >= Amount::ZERO && bob_balance >= Amount::ZERO =>
             {
-                Ok(GlobalBalance { sender, receiver })
+                Ok(Balance {
+                    alice: alice_balance,
+                    bob: bob_balance,
+                })
             }
             _ => bail!(InvalidChannelUpdate),
         }
@@ -460,17 +464,17 @@ mod test {
         let y_alice = PublishingKeyPair::new_random();
         let y_bob = PublishingKeyPair::new_random();
 
-        let current_balance = GlobalBalance {
-            sender: Amount::from_btc(1.0).unwrap(),
-            receiver: Amount::from_btc(1.0).unwrap(),
+        let current_balance = Balance {
+            alice: Amount::from_btc(1.0).unwrap(),
+            bob: Amount::from_btc(1.0).unwrap(),
         };
 
-        let alice_input_psbt = input_psbt(current_balance.sender, x_alice.public(), x_bob.public());
-        let bob_input_psbt = input_psbt(current_balance.receiver, x_alice.public(), x_bob.public());
+        let alice_input_psbt = input_psbt(current_balance.alice, x_alice.public(), x_bob.public());
+        let bob_input_psbt = input_psbt(current_balance.bob, x_alice.public(), x_bob.public());
 
         let TX_f = FundingTransaction::new(
-            (x_alice.public(), alice_input_psbt, current_balance.sender),
-            (x_bob.public(), bob_input_psbt, current_balance.receiver),
+            (x_alice.public(), alice_input_psbt, current_balance.alice),
+            (x_bob.public(), bob_input_psbt, current_balance.bob),
         )
         .unwrap();
 
@@ -484,8 +488,8 @@ mod test {
         .unwrap();
 
         let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
-            a: (current_balance.sender, x_alice.public()),
-            b: (current_balance.receiver, x_bob.public()),
+            a: (current_balance.alice, x_alice.public()),
+            b: (current_balance.bob, x_bob.public()),
         });
 
         let alice_encsig = TX_c.encsign_once(x_alice.clone(), y_bob.public());
