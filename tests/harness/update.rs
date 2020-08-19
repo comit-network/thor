@@ -6,10 +6,7 @@ pub struct Init {
 }
 
 impl Init {
-    pub fn new(alice: thor::create::Party6, bob: thor::create::Party6) -> Self {
-        let alice = Channel::new(alice);
-        let bob = Channel::new(bob);
-
+    pub fn new(alice: thor::Channel, bob: thor::Channel) -> Self {
         Self { alice, bob }
     }
 }

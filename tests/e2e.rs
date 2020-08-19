@@ -24,11 +24,11 @@ async fn e2e_channel_creation() {
 
     let create::Final { alice, bob } = create::run(&alice_wallet, alice, &bob_wallet, bob).await;
 
-    assert_eq!(alice.signed_TX_f, bob.signed_TX_f);
+    assert_eq!(alice.1, bob.1);
 
     alice_wallet
         .0
-        .send_raw_transaction(alice.signed_TX_f.clone())
+        .send_raw_transaction(alice.1.clone())
         .await
         .unwrap();
 }
@@ -50,15 +50,15 @@ async fn e2e_channel_update() {
 
     let create::Final { alice, bob } = create::run(&alice_wallet, alice, &bob_wallet, bob).await;
 
-    assert_eq!(alice.signed_TX_f, bob.signed_TX_f);
+    assert_eq!(alice.1, bob.1);
 
     alice_wallet
         .0
-        .send_raw_transaction(alice.signed_TX_f.clone())
+        .send_raw_transaction(alice.1.clone())
         .await
         .unwrap();
 
-    let update::Init { alice, bob } = update::Init::new(alice, bob);
+    let update::Init { alice, bob } = update::Init::new(alice.0, bob.0);
 
     let channel_update = ChannelUpdate::Pay(Amount::from_btc(0.5).unwrap());
     let time_lock = 1;
