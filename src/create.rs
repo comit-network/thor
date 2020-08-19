@@ -5,7 +5,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundOutput, SplitTransaction},
-    ChannelBalance,
+    SplitOutputs,
 };
 use anyhow::Context;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
@@ -289,7 +289,7 @@ impl Alice2 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
             a: (self.TX_f.amount_a(), self.x_self.public()),
             b: (self.TX_f.amount_b(), self.X_other.clone()),
         });
@@ -347,7 +347,7 @@ impl Bob2 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
             a: (self.TX_f.amount_a(), self.X_other.clone()),
             b: (self.TX_f.amount_b(), self.x_self.public()),
         });

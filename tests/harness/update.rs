@@ -1,55 +1,56 @@
-use thor::{update, update::ChannelUpdate};
+use thor::{update, update::ChannelUpdate, Channel};
 
 pub struct Init {
-    pub alice: update::Party0,
-    pub bob: update::Party0,
+    pub alice: Channel,
+    pub bob: Channel,
 }
 
 impl Init {
     pub fn new(alice: thor::create::Party6, bob: thor::create::Party6) -> Self {
-        let alice = update::Party0::new(alice);
-        let bob = update::Party0::new(bob);
+        let alice = Channel::new(alice);
+        let bob = Channel::new(bob);
 
         Self { alice, bob }
     }
 }
 
 pub struct Final {
-    pub alice: update::Party0,
-    pub bob: update::Party0,
+    pub alice: Channel,
+    pub bob: Channel,
 }
 
 pub fn run(
-    alice0: update::Party0,
-    bob0: update::Party0,
+    alice_channel: Channel,
+    bob_channel: Channel,
     channel_update: ChannelUpdate,
     time_lock: u32,
 ) -> Final {
-    let (alice1, message0) = alice0
-        .propose_channel_update(channel_update, time_lock)
-        .unwrap();
+    let alice0: update::State0 = alice_channel.into();
+    let bob0: update::State0 = bob_channel.into();
 
-    let (bob1, message1) = bob0.receive_channel_update(message0).unwrap();
+    let (alice1, message0) = alice0.compose(channel_update, time_lock).unwrap();
 
-    let alice2 = alice1.receive(message1).unwrap();
+    let (bob1, message1) = bob0.interpret(message0).unwrap();
 
-    let message2_alice = alice2.next_message();
-    let message2_bob = bob1.next_message();
+    let alice2 = alice1.interpret(message1).unwrap();
 
-    let alice3 = alice2.receive(message2_bob).unwrap();
-    let bob2 = bob1.receive(message2_alice).unwrap();
+    let message2_alice = alice2.compose();
+    let message2_bob = bob1.compose();
 
-    let message3_alice = alice3.next_message();
-    let message3_bob = bob2.next_message();
+    let alice3 = alice2.interpret(message2_bob).unwrap();
+    let bob2 = bob1.interpret(message2_alice).unwrap();
 
-    let alice4 = alice3.receive(message3_bob).unwrap();
-    let bob3 = bob2.receive(message3_alice).unwrap();
+    let message3_alice = alice3.compose();
+    let message3_bob = bob2.compose();
 
-    let message4_alice = alice4.next_message();
-    let message4_bob = bob3.next_message();
+    let alice4 = alice3.interpret(message3_bob).unwrap();
+    let bob3 = bob2.interpret(message3_alice).unwrap();
 
-    let alice5 = alice4.receive(message4_bob).unwrap();
-    let bob4 = bob3.receive(message4_alice).unwrap();
+    let message4_alice = alice4.compose();
+    let message4_bob = bob3.compose();
+
+    let alice5 = alice4.interpret(message4_bob).unwrap();
+    let bob4 = bob3.interpret(message4_alice).unwrap();
 
     Final {
         alice: alice5,
