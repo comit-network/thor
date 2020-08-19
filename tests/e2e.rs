@@ -4,7 +4,7 @@ mod harness;
 
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
-use harness::{create, make_update_actors, run_update_protocol, UpdateActors, Updated};
+use harness::{create, update};
 use thor::update::ChannelUpdate;
 
 #[tokio::test]
@@ -58,12 +58,12 @@ async fn e2e_channel_update() {
         .await
         .unwrap();
 
-    let UpdateActors { alice, bob } = make_update_actors(alice, bob);
+    let update::Init { alice, bob } = update::Init::new(alice, bob);
 
     let channel_update = ChannelUpdate::Pay(Amount::from_btc(0.5).unwrap());
     let time_lock = 1;
 
-    let Updated { alice, bob } = run_update_protocol(alice, bob, channel_update, time_lock);
+    let update::Final { alice, bob } = update::run(alice, bob, channel_update, time_lock);
 
     assert_eq!(
         alice.balance().unwrap().ours,
