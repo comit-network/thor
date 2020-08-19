@@ -2,11 +2,9 @@
 //!
 //! Alice proposes a channel update to the counterparty.
 //!
-//! Alice: CommonState0 --> AliceState1 --> CommonState2 --> CommonState3 -->
-//! CommonState4 --> CommonState0
+//! Alice: Channel --> AliceState0 --> State1 --> State2 --> State3 --> Channel
 //!
-//! Counterparty: CommonState0 --> CommonState2 --> CommonState3 -->
-//! CommonState4 --> CommonState0
+//! Counterparty: Channel --> State1 --> State2 --> State3 --> Channel
 
 use crate::{
     create,
@@ -51,7 +49,7 @@ pub struct RevealRevocationSecretKey {
     r: RevocationSecretKey,
 }
 
-pub struct Party0 {
+pub struct Channel {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     TX_f_body: FundingTransaction,
@@ -59,7 +57,7 @@ pub struct Party0 {
     revoked_states: Vec<RevokedState>,
 }
 
-impl Party0 {
+impl Channel {
     pub fn new(party: create::Party6) -> Self {
         Self {
             x_self: party.x_self,
@@ -79,11 +77,11 @@ impl Party0 {
         }
     }
 
-    pub fn propose_channel_update(
+    pub fn compose(
         self,
         update: ChannelUpdate,
         time_lock: u32,
-    ) -> anyhow::Result<(Alice1, ChannelUpdateProposal)> {
+    ) -> anyhow::Result<(AliceState0, ChannelUpdateProposal)> {
         let LocalBalance { ours, theirs } = self.balance()?;
         let proposed_balance = GlobalBalance {
             sender: ours,
@@ -94,7 +92,7 @@ impl Party0 {
         let r_self = RevocationKeyPair::new_random();
         let y_self = PublishingKeyPair::new_random();
 
-        let state = Alice1 {
+        let state = AliceState0 {
             x_self: self.x_self,
             X_other: self.X_other,
             TX_f: self.TX_f_body,
@@ -118,7 +116,7 @@ impl Party0 {
 
     // QUESTION: Should we verify that the channel state is the same
     // for both parties?
-    pub fn receive_channel_update(
+    pub fn interpret(
         self,
         ChannelUpdateProposal {
             proposed_balance:
@@ -130,7 +128,7 @@ impl Party0 {
             R: R_other,
             Y: Y_other,
         }: ChannelUpdateProposal,
-    ) -> anyhow::Result<(Party2, ChannelUpdateAccept)> {
+    ) -> anyhow::Result<(State1, ChannelUpdateAccept)> {
         // NOTE: A real application would verify that the amount
         // provided by the other party is satisfactory, together with
         // the time_lock
@@ -152,7 +150,7 @@ impl Party0 {
         });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
-        let state = Party2 {
+        let state = State1 {
             x_self: self.x_self,
             X_other: self.X_other,
             TX_f: self.TX_f_body,
@@ -199,7 +197,7 @@ impl Party0 {
 
 /// A party who has sent a `ChannelUpdateProposal` and is waiting for
 /// confirmation.
-pub struct Alice1 {
+pub struct AliceState0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     TX_f: FundingTransaction,
@@ -211,14 +209,14 @@ pub struct Alice1 {
     time_lock: u32,
 }
 
-impl Alice1 {
-    pub fn receive(
+impl AliceState0 {
+    pub fn interpret(
         self,
         ChannelUpdateAccept {
             R: R_other,
             Y: Y_other,
         }: ChannelUpdateAccept,
-    ) -> anyhow::Result<Party2> {
+    ) -> anyhow::Result<State1> {
         let TX_c = CommitTransaction::new(
             &self.TX_f,
             (
@@ -241,7 +239,7 @@ impl Alice1 {
         });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
-        Ok(Party2 {
+        Ok(State1 {
             x_self: self.x_self,
             X_other: self.X_other,
             TX_f: self.TX_f,
@@ -261,7 +259,7 @@ impl Alice1 {
 
 /// A party who has agreed on the terms of a channel update and is
 /// ready to start exchanging signatures.
-pub struct Party2 {
+pub struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     TX_f: FundingTransaction,
@@ -277,19 +275,19 @@ pub struct Party2 {
     sig_TX_s_self: Signature,
 }
 
-impl Party2 {
-    pub fn next_message(&self) -> ShareSplitSignature {
+impl State1 {
+    pub fn compose(&self) -> ShareSplitSignature {
         ShareSplitSignature {
             sig_TX_s: self.sig_TX_s_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub fn interpret(
         mut self,
         ShareSplitSignature {
             sig_TX_s: sig_TX_s_other,
         }: ShareSplitSignature,
-    ) -> anyhow::Result<Party3> {
+    ) -> anyhow::Result<State2> {
         verify_sig(self.X_other.clone(), &self.TX_s, &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
 
@@ -298,7 +296,7 @@ impl Party2 {
             (self.X_other.clone(), sig_TX_s_other),
         )?;
 
-        Ok(Party3 {
+        Ok(State2 {
             x_self: self.x_self,
             X_other: self.X_other,
             TX_f: self.TX_f,
@@ -318,7 +316,7 @@ impl Party2 {
 /// A party who has exchanged signatures for the `SplitTransaction`
 /// and is ready to start exchanging encrypted signatures for the
 /// `CommitTransaction`.
-pub struct Party3 {
+pub struct State2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     TX_f: FundingTransaction,
@@ -333,19 +331,19 @@ pub struct Party3 {
     encsig_TX_c_self: EncryptedSignature,
 }
 
-impl Party3 {
-    pub fn next_message(&self) -> ShareCommitEncryptedSignature {
+impl State2 {
+    pub fn compose(&self) -> ShareCommitEncryptedSignature {
         ShareCommitEncryptedSignature {
             encsig_TX_c: self.encsig_TX_c_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub fn interpret(
         self,
         ShareCommitEncryptedSignature {
             encsig_TX_c: encsig_TX_c_other,
         }: ShareCommitEncryptedSignature,
-    ) -> anyhow::Result<Party4> {
+    ) -> anyhow::Result<State3> {
         verify_encsig(
             self.X_other.clone(),
             self.y_self.public(),
@@ -354,7 +352,7 @@ impl Party3 {
         )
         .context("failed to verify encsig_TX_c sent by counterparty")?;
 
-        Ok(Party4 {
+        Ok(State3 {
             x_self: self.x_self,
             X_other: self.X_other,
             TX_f: self.TX_f,
@@ -375,7 +373,7 @@ impl Party3 {
 /// A party who has exchanged all necessary signatures to complete a
 /// channel update and just needs to collaborate with the counterparty
 /// to revoke the previous `CommitTransaction`.
-pub struct Party4 {
+pub struct State3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     TX_f: FundingTransaction,
@@ -391,17 +389,17 @@ pub struct Party4 {
     encsig_TX_c_other: EncryptedSignature,
 }
 
-impl Party4 {
-    pub fn next_message(&self) -> RevealRevocationSecretKey {
+impl State3 {
+    pub fn compose(&self) -> RevealRevocationSecretKey {
         RevealRevocationSecretKey {
             r: self.current_state.r_self.clone().into(),
         }
     }
 
-    pub fn receive(
+    pub fn interpret(
         self,
         RevealRevocationSecretKey { r: r_other }: RevealRevocationSecretKey,
-    ) -> anyhow::Result<Party0> {
+    ) -> anyhow::Result<Channel> {
         self.current_state
             .R_other
             .verify_revocation_secret_key(&r_other)?;
@@ -424,7 +422,7 @@ impl Party4 {
             signed_TX_s: self.signed_TX_s,
         };
 
-        Ok(Party0 {
+        Ok(Channel {
             x_self: self.x_self,
             X_other: self.X_other,
             TX_f_body: self.TX_f,
@@ -547,7 +545,7 @@ mod test {
                 signed_TX_s: TX_s.clone(),
             };
 
-            Party0 {
+            Channel {
                 x_self: x_alice.clone(),
                 X_other: x_bob.public(),
                 TX_f_body: TX_f.clone(),
@@ -568,7 +566,7 @@ mod test {
                 signed_TX_s: TX_s,
             };
 
-            Party0 {
+            Channel {
                 x_self: x_bob,
                 X_other: x_alice.public(),
                 TX_f_body: TX_f,
@@ -580,31 +578,29 @@ mod test {
         let channel_update = ChannelUpdate::Pay(Amount::from_btc(0.5).unwrap());
         let time_lock = 60 * 60;
 
-        let (alice1, message0) = alice0
-            .propose_channel_update(channel_update, time_lock)
-            .unwrap();
+        let (alice1, message0) = alice0.compose(channel_update, time_lock).unwrap();
 
-        let (bob1, message1) = bob0.receive_channel_update(message0).unwrap();
+        let (bob1, message1) = bob0.interpret(message0).unwrap();
 
-        let alice2 = alice1.receive(message1).unwrap();
+        let alice2 = alice1.interpret(message1).unwrap();
 
-        let message2_alice = alice2.next_message();
-        let message2_bob = bob1.next_message();
+        let message2_alice = alice2.compose();
+        let message2_bob = bob1.compose();
 
-        let alice3 = alice2.receive(message2_bob).unwrap();
-        let bob2 = bob1.receive(message2_alice).unwrap();
+        let alice3 = alice2.interpret(message2_bob).unwrap();
+        let bob2 = bob1.interpret(message2_alice).unwrap();
 
-        let message3_alice = alice3.next_message();
-        let message3_bob = bob2.next_message();
+        let message3_alice = alice3.compose();
+        let message3_bob = bob2.compose();
 
-        let alice4 = alice3.receive(message3_bob).unwrap();
-        let bob3 = bob2.receive(message3_alice).unwrap();
+        let alice4 = alice3.interpret(message3_bob).unwrap();
+        let bob3 = bob2.interpret(message3_alice).unwrap();
 
-        let message4_alice = alice4.next_message();
-        let message4_bob = bob3.next_message();
+        let message4_alice = alice4.compose();
+        let message4_bob = bob3.compose();
 
-        let alice5 = alice4.receive(message4_bob).unwrap();
-        let bob4 = bob3.receive(message4_alice).unwrap();
+        let alice5 = alice4.interpret(message4_bob).unwrap();
+        let bob4 = bob3.interpret(message4_alice).unwrap();
 
         println!("{:?}", alice5.balance().unwrap());
         println!("{:?}", bob4.balance().unwrap());
