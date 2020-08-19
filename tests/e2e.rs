@@ -38,6 +38,8 @@ async fn e2e_channel_creation() {
 
 #[tokio::test]
 async fn e2e_channel_update() {
+    use Amount::from_btc;
+
     let tc_client = testcontainers::clients::Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
 
@@ -68,6 +70,9 @@ async fn e2e_channel_update() {
 
     let Updated { alice, bob } = run_update_protocol(alice, bob, channel_update, time_lock);
 
-    assert_eq!(alice.balance().unwrap().ours, bob.balance().unwrap().theirs);
-    assert_eq!(alice.balance().unwrap().theirs, bob.balance().unwrap().ours);
+    assert_eq!(alice.balance().unwrap().ours, from_btc(0.5).unwrap());
+    assert_eq!(alice.balance().unwrap().theirs, from_btc(1.5).unwrap());
+
+    assert_eq!(bob.balance().unwrap().ours, from_btc(1.5).unwrap());
+    assert_eq!(bob.balance().unwrap().theirs, from_btc(0.5).unwrap());
 }
