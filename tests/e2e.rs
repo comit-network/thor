@@ -58,12 +58,13 @@ async fn e2e_channel_update() {
         .await
         .unwrap();
 
-    let update::Init { alice, bob } = update::Init::new(alice.0, bob.0);
+    let (alice_channel, bob_channel) = (alice.0, bob.0);
 
     let channel_update = ChannelUpdate::Pay(Amount::from_btc(0.5).unwrap());
     let time_lock = 1;
 
-    let update::Final { alice, bob } = update::run(alice, bob, channel_update, time_lock);
+    let update::Final { alice, bob } =
+        update::run(alice_channel, bob_channel, channel_update, time_lock);
 
     assert_eq!(
         alice.balance().unwrap().ours,

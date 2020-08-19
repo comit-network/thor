@@ -1,16 +1,5 @@
 use thor::{update, update::ChannelUpdate, Channel};
 
-pub struct Init {
-    pub alice: Channel,
-    pub bob: Channel,
-}
-
-impl Init {
-    pub fn new(alice: thor::Channel, bob: thor::Channel) -> Self {
-        Self { alice, bob }
-    }
-}
-
 pub struct Final {
     pub alice: Channel,
     pub bob: Channel,
