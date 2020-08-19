@@ -14,7 +14,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Channel, ChannelBalance, ChannelState, LocalBalance, RevokedState,
+    Channel, ChannelState, LocalBalance, RevokedState, SplitOutputs,
 };
 use anyhow::{bail, Context};
 use bitcoin::Amount;
@@ -129,7 +129,7 @@ impl State0 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(channel.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
             a: (balance_other, channel.X_other.clone()),
             b: (balance_self, channel.x_self.public()),
         });
@@ -198,7 +198,7 @@ impl AliceState0 {
             alice: balance_self,
             bob: balance_other,
         } = self.proposed_balance;
-        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
             a: (balance_self, self.x_self.public()),
             b: (balance_other, self.X_other.clone()),
         });
@@ -487,7 +487,7 @@ mod test {
         )
         .unwrap();
 
-        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
             a: (current_balance.alice, x_alice.public()),
             b: (current_balance.bob, x_bob.public()),
         });

@@ -46,7 +46,7 @@ pub struct RevokedState {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ChannelBalance {
+pub struct SplitOutputs {
     a: (Amount, OwnershipPublicKey),
     b: (Amount, OwnershipPublicKey),
 }
@@ -86,16 +86,16 @@ impl Channel {
     }
 
     pub fn balance(&self) -> anyhow::Result<LocalBalance> {
-        let channel_balance = self.current_state.signed_TX_s.balance();
+        let outputs = self.current_state.signed_TX_s.outputs();
 
-        match channel_balance {
-            ChannelBalance {
+        match outputs {
+            SplitOutputs {
                 a: (ours, X_a),
                 b: (theirs, X_b),
             } if X_a == self.x_self.public() && X_b == self.X_other => {
                 Ok(LocalBalance { ours, theirs })
             }
-            ChannelBalance {
+            SplitOutputs {
                 a: (theirs, X_a),
                 b: (ours, X_b),
             } if X_a == self.X_other && X_b == self.x_self.public() => {

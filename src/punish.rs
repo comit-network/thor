@@ -48,7 +48,7 @@ mod test {
         keys::{PublishingKeyPair, RevocationKeyPair},
         signature::decrypt,
         transaction::{input_psbt, CommitTransaction, FundingTransaction, SplitTransaction},
-        ChannelBalance,
+        SplitOutputs,
     };
     use bitcoin::Amount;
 
@@ -83,7 +83,7 @@ mod test {
         )
         .unwrap();
 
-        let TX_s = SplitTransaction::new(&TX_c, ChannelBalance {
+        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
             a: (channel_balance_alice, x_alice.public()),
             b: (channel_balance_bob, x_bob.public()),
         });

@@ -3,7 +3,7 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    ChannelBalance,
+    SplitOutputs,
 };
 use anyhow::bail;
 use bitcoin::{
@@ -343,15 +343,15 @@ pub struct SplitTransaction {
     inner: Transaction,
     input_descriptor: Descriptor<bitcoin::PublicKey>,
     digest: SigHash,
-    balance: ChannelBalance,
+    outputs: SplitOutputs,
 }
 
 impl SplitTransaction {
-    pub fn new(TX_c: &CommitTransaction, channel_balance: ChannelBalance) -> Self {
-        let ChannelBalance {
+    pub fn new(TX_c: &CommitTransaction, outputs: SplitOutputs) -> Self {
+        let SplitOutputs {
             a: (amount_a, X_a),
             b: (amount_b, X_b),
-        } = channel_balance.clone();
+        } = outputs.clone();
 
         let input = TX_c.as_txin();
 
@@ -384,7 +384,7 @@ impl SplitTransaction {
             inner: TX_s,
             input_descriptor,
             digest,
-            balance: channel_balance,
+            outputs,
         }
     }
 
@@ -392,8 +392,8 @@ impl SplitTransaction {
         x_self.sign(self.digest)
     }
 
-    pub fn balance(&self) -> ChannelBalance {
-        self.balance.clone()
+    pub fn outputs(&self) -> SplitOutputs {
+        self.outputs.clone()
     }
 
     pub fn digest(&self) -> SigHash {
