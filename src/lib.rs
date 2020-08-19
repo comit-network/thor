@@ -44,6 +44,32 @@ pub struct RevokedState {
     r_other: RevocationSecretKey,
 }
 
+impl RevokedState {
+    /// Add signatures to the `CommitTransaction`. Publishing the resulting
+    /// transaction is punishable by the counterparty, as they can recover the
+    /// `PublishingSecretkey` from it and they already know the
+    /// `RevocationSecretKey`, since this state has already been revoked.
+    pub fn signed_TX_c(
+        &self,
+        x_self: keys::OwnershipKeyPair,
+        X_other: OwnershipPublicKey,
+    ) -> anyhow::Result<bitcoin::Transaction> {
+        let sig_TX_c_other = signature::decrypt(
+            self.channel_state.y_self.clone().into(),
+            self.channel_state.encsig_TX_c_other.clone(),
+        );
+        let sig_TX_c_self = self.channel_state.TX_c.sign(&x_self);
+
+        let signed_TX_c = self
+            .channel_state
+            .TX_c
+            .clone()
+            .add_signatures((x_self.public(), sig_TX_c_self), (X_other, sig_TX_c_other))?;
+
+        Ok(signed_TX_c)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChannelBalance {
     a: (Amount, OwnershipPublicKey),
