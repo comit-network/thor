@@ -1,3 +1,13 @@
+//! # Channel update protocol
+//!
+//! Alice proposes a channel update to the counterparty.
+//!
+//! Alice: CommonState0 --> AliceState1 --> CommonState2 --> CommonState3 -->
+//! CommonState4 --> CommonState0
+//!
+//! Counterparty: CommonState0 --> CommonState2 --> CommonState3 -->
+//! CommonState4 --> CommonState0
+
 use crate::{
     create,
     keys::{
