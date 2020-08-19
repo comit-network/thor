@@ -1,30 +1,33 @@
-use thor::{update, update::ChannelUpdate};
+use thor::{update, update::ChannelUpdate, Channel};
 
 pub struct Init {
-    pub alice: update::Channel,
-    pub bob: update::Channel,
+    pub alice: Channel,
+    pub bob: Channel,
 }
 
 impl Init {
     pub fn new(alice: thor::create::Party6, bob: thor::create::Party6) -> Self {
-        let alice = update::Channel::new(alice);
-        let bob = update::Channel::new(bob);
+        let alice = Channel::new(alice);
+        let bob = Channel::new(bob);
 
         Self { alice, bob }
     }
 }
 
 pub struct Final {
-    pub alice: update::Channel,
-    pub bob: update::Channel,
+    pub alice: Channel,
+    pub bob: Channel,
 }
 
 pub fn run(
-    alice0: update::Channel,
-    bob0: update::Channel,
+    alice_channel: Channel,
+    bob_channel: Channel,
     channel_update: ChannelUpdate,
     time_lock: u32,
 ) -> Final {
+    let alice0: update::State0 = alice_channel.into();
+    let bob0: update::State0 = bob_channel.into();
+
     let (alice1, message0) = alice0.compose(channel_update, time_lock).unwrap();
 
     let (bob1, message1) = bob0.interpret(message0).unwrap();
