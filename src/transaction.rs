@@ -632,6 +632,88 @@ impl From<PunishTransaction> for Transaction {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CloseTransaction {
+    inner: Transaction,
+    input_descriptor: Descriptor<bitcoin::PublicKey>,
+    digest: SigHash,
+}
+
+impl CloseTransaction {
+    pub fn new(
+        TX_f: &FundingTransaction,
+        (amount_a, output_a): (Amount, Address),
+        (amount_b, output_b): (Amount, Address),
+    ) -> Self {
+        let output_a = TxOut {
+            value: amount_a.as_sat() - 10_000,
+            script_pubkey: output_a.script_pubkey(),
+        };
+
+        let output_b = TxOut {
+            value: amount_b.as_sat() - 10_000,
+            script_pubkey: output_b.script_pubkey(),
+        };
+
+        let closing_transaction = Transaction {
+            version: 2,
+            lock_time: 0,
+            input: vec![TX_f.as_txin()],
+            output: vec![output_a, output_b],
+        };
+
+        let digest = Self::compute_digest(&closing_transaction, TX_f);
+
+        Self {
+            inner: closing_transaction,
+            input_descriptor: TX_f.fund_output_descriptor(),
+            digest,
+        }
+    }
+
+    fn compute_digest(closing_transaction: &Transaction, TX_f: &FundingTransaction) -> SigHash {
+        SighashComponents::new(&closing_transaction).sighash_all(
+            &TX_f.as_txin(),
+            &TX_f.fund_output_descriptor().witness_script(),
+            TX_f.value().as_sat(),
+        )
+    }
+
+    pub fn add_signatures(
+        self,
+        (X_a, sig_a): (OwnershipPublicKey, Signature),
+        (X_b, sig_b): (OwnershipPublicKey, Signature),
+    ) -> anyhow::Result<Transaction> {
+        let satisfier = {
+            let mut satisfier = HashMap::with_capacity(2);
+
+            let X_a = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_a.into(),
+            };
+            let X_b = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_b.into(),
+            };
+
+            satisfier.insert(X_a, (sig_a.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_b, (sig_b.into(), ::bitcoin::SigHashType::All));
+
+            satisfier
+        };
+
+        let mut closing_transaction = self.inner;
+        self.input_descriptor
+            .satisfy(&mut closing_transaction.input[0], satisfier)?;
+
+        Ok(closing_transaction)
+    }
+
+    pub fn sign_once(&self, x_self: OwnershipKeyPair) -> Signature {
+        x_self.sign(self.digest)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Miniscript compiler: ")]
