@@ -71,9 +71,9 @@ impl Channel {
 
         let message0_bob = match transport.receive_message().await? {
             Message::CreateMessage0(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<create::Message0>(message)),
         };
-        let alice1 = alice0.receive(message0_bob, wallet).await.unwrap();
+        let alice1 = alice0.receive(message0_bob, wallet).await?;
 
         let message1_alice = alice1.next_message();
         transport
@@ -82,9 +82,9 @@ impl Channel {
 
         let message1_bob = match transport.receive_message().await? {
             Message::CreateMessage1(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<create::Message1>(message)),
         };
-        let alice2 = alice1.receive(message1_bob).unwrap();
+        let alice2 = alice1.receive(message1_bob)?;
 
         let message2_alice = alice2.next_message();
         transport
@@ -93,9 +93,9 @@ impl Channel {
 
         let message2_bob = match transport.receive_message().await? {
             Message::CreateMessage2(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<create::Message2>(message)),
         };
-        let alice3 = alice2.receive(message2_bob).unwrap();
+        let alice3 = alice2.receive(message2_bob)?;
 
         Self::create(transport, wallet, alice3).await
     }
@@ -126,9 +126,9 @@ impl Channel {
 
         let message0_alice = match transport.receive_message().await? {
             Message::CreateMessage0(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<create::Message0>(message)),
         };
-        let bob1 = bob0.receive(message0_alice, wallet).await.unwrap();
+        let bob1 = bob0.receive(message0_alice, wallet).await?;
 
         let message1_bob = bob1.next_message();
         transport
@@ -137,9 +137,9 @@ impl Channel {
 
         let message1_alice = match transport.receive_message().await? {
             Message::CreateMessage1(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<create::Message1>(message)),
         };
-        let bob2 = bob1.receive(message1_alice).unwrap();
+        let bob2 = bob1.receive(message1_alice)?;
 
         let message2_bob = bob2.next_message();
         transport
@@ -148,9 +148,9 @@ impl Channel {
 
         let message2_alice = match transport.receive_message().await? {
             Message::CreateMessage2(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<create::Message2>(message)),
         };
-        let bob3 = bob2.receive(message2_alice).unwrap();
+        let bob3 = bob2.receive(message2_alice)?;
 
         Self::create(transport, wallet, bob3).await
     }
@@ -171,9 +171,9 @@ impl Channel {
 
         let message3_other = match transport.receive_message().await? {
             Message::CreateMessage3(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<create::Message3>(message)),
         };
-        let state_4 = state3.receive(message3_other).unwrap();
+        let state_4 = state3.receive(message3_other)?;
 
         let message4_self = state_4.next_message();
         transport
@@ -182,20 +182,20 @@ impl Channel {
 
         let message4_other = match transport.receive_message().await? {
             Message::CreateMessage4(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<create::Message4>(message)),
         };
-        let state5 = state_4.receive(message4_other).unwrap();
+        let state5 = state_4.receive(message4_other)?;
 
-        let message5_self = state5.next_message(wallet).await.unwrap();
+        let message5_self = state5.next_message(wallet).await?;
         transport
             .send_message(Message::CreateMessage5(message5_self))
             .await?;
         let message5_other = match transport.receive_message().await? {
             Message::CreateMessage5(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<create::Message5>(message)),
         };
 
-        let (channel, transaction) = state5.receive(message5_other, wallet).await.unwrap();
+        let (channel, transaction) = state5.receive(message5_other, wallet).await?;
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
@@ -220,7 +220,7 @@ impl Channel {
 
         let message0_bob = match transport.receive_message().await? {
             Message::UpdateMessage0(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<update::ShareKeys>(message)),
         };
         let alice1 = alice0.interpret(message0_bob)?;
 
@@ -245,7 +245,7 @@ impl Channel {
 
         let message0_alice = match transport.receive_message().await? {
             Message::UpdateMessage0(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<update::ShareKeys>(message)),
         };
         let bob1 = bob0.interpret(message0_alice)?;
 
@@ -267,7 +267,9 @@ impl Channel {
 
         let message1_other = match transport.receive_message().await? {
             Message::UpdateMessage1(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<update::ShareSplitSignature>(
+                message
+            )),
         };
         let state2 = state1.interpret(message1_other)?;
 
@@ -278,7 +280,9 @@ impl Channel {
 
         let message2_other = match transport.receive_message().await? {
             Message::UpdateMessage2(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(
+                UnexpecteMessage::new::<update::ShareCommitEncryptedSignature>(message)
+            ),
         };
         let state3 = state2.interpret(message2_other)?;
 
@@ -289,7 +293,9 @@ impl Channel {
 
         let message3_other = match transport.receive_message().await? {
             Message::UpdateMessage3(message) => message,
-            _ => anyhow::bail!("wrong message"),
+            message => anyhow::bail!(UnexpecteMessage::new::<update::RevealRevocationSecretKey>(
+                message
+            )),
         };
         let updated_channel = state3.interpret(message3_other)?;
 
@@ -393,6 +399,7 @@ pub struct Balance {
 
 /// All possible messages that can be sent between two parties using this
 /// library.
+#[derive(Debug)]
 pub enum Message {
     CreateMessage0(create::Message0),
     CreateMessage1(create::Message1),
@@ -404,4 +411,22 @@ pub enum Message {
     UpdateMessage1(update::ShareSplitSignature),
     UpdateMessage2(update::ShareCommitEncryptedSignature),
     UpdateMessage3(update::RevealRevocationSecretKey),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("expected message of type {expected_type}, got {received:?}")]
+pub struct UnexpecteMessage {
+    expected_type: String,
+    received: Message,
+}
+
+impl UnexpecteMessage {
+    pub fn new<T>(received: Message) -> Self {
+        let expected_type = std::any::type_name::<T>();
+
+        Self {
+            expected_type: expected_type.to_string(),
+            received,
+        }
+    }
 }

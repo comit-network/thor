@@ -72,10 +72,10 @@ pub struct RevocationKeyPair {
     public_key: Point,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RevocationSecretKey(Scalar);
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RevocationPublicKey(Point);
 
 impl RevocationKeyPair {
@@ -153,7 +153,7 @@ pub struct PublishingKeyPair {
 #[derive(Clone)]
 pub struct PublishingSecretKey(Scalar);
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PublishingPublicKey(Point);
 
 impl PublishingKeyPair {
