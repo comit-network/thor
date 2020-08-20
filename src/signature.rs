@@ -1,6 +1,6 @@
 use crate::{
     keys::{OwnershipPublicKey, PublishingPublicKey, PublishingSecretKey},
-    transaction::{CommitTransaction, SplitTransaction},
+    transaction::CommitTransaction,
 };
 use bitcoin::hashes::Hash;
 use ecdsa_fun::{
@@ -9,6 +9,7 @@ use ecdsa_fun::{
     Signature, ECDSA,
 };
 
+use bitcoin::SigHash;
 use sha2::Sha256;
 
 #[derive(Debug, thiserror::Error)]
@@ -17,14 +18,14 @@ pub struct InvalidSignature;
 
 pub fn verify_sig(
     verification_key: OwnershipPublicKey,
-    TX_s: &SplitTransaction,
+    transaction_sig_hash: &SigHash,
     signature: &Signature,
 ) -> Result<(), InvalidSignature> {
     let ecdsa = ECDSA::verify_only();
 
     if ecdsa.verify(
         &verification_key.into(),
-        &TX_s.digest().into_inner(),
+        &transaction_sig_hash.into_inner(),
         &signature,
     ) {
         Ok(())

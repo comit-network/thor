@@ -679,6 +679,10 @@ impl CloseTransaction {
         )
     }
 
+    pub fn digest(&self) -> SigHash {
+        self.digest.clone()
+    }
+
     pub fn add_signatures(
         self,
         (X_a, sig_a): (OwnershipPublicKey, Signature),
