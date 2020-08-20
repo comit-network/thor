@@ -369,7 +369,7 @@ async fn e2e_channel_collaborative_close() {
     let alice_final_address = alice_wallet.0.new_address().await.unwrap();
     let bob_final_address = bob_wallet.0.new_address().await.unwrap();
 
-    let (alice, bob) = close::run(
+    let (alice_closing_transaction, bob_closing_transaction) = close::run(
         alice_channel,
         alice_final_address,
         bob_channel,
@@ -377,8 +377,6 @@ async fn e2e_channel_collaborative_close() {
     )
     .unwrap();
 
-    let alice_closing_transaction = alice.into_transaction();
-    let bob_closing_transaction = bob.into_transaction();
     assert_eq!(alice_closing_transaction, bob_closing_transaction);
 
     // ugly wait for 1 block

@@ -1,12 +1,12 @@
-use bitcoin::Address;
-use thor::{close, close::FinalState, Channel};
+use bitcoin::{Address, Transaction};
+use thor::{close, Channel};
 
 pub fn run(
     alice_channel: Channel,
     final_address_alice: Address,
     bob_channel: Channel,
     final_address_bob: Address,
-) -> anyhow::Result<(FinalState, FinalState)> {
+) -> anyhow::Result<(Transaction, Transaction)> {
     let alice0 = close::State0::new(alice_channel, final_address_alice);
     let bob0 = close::State0::new(bob_channel, final_address_bob);
 
@@ -19,8 +19,8 @@ pub fn run(
     let alice_message1 = alice1.compose()?;
     let bob_message1 = bob1.compose()?;
 
-    let alice_final_state = alice1.interpret(bob_message1)?;
-    let bob_final_state = bob1.interpret(alice_message1)?;
+    let alice_close_transaction = alice1.interpret(bob_message1)?;
+    let bob_close_transaction = bob1.interpret(alice_message1)?;
 
-    Ok((alice_final_state, bob_final_state))
+    Ok((alice_close_transaction, bob_close_transaction))
 }
