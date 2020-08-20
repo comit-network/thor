@@ -4,14 +4,14 @@ use crate::{
 use bitcoin::Transaction;
 
 pub struct State0 {
-    our_x: OwnershipKeyPair,
+    x_self: OwnershipKeyPair,
     revoked_states: Vec<RevokedState>,
 }
 
 impl From<Channel> for State0 {
     fn from(channel: Channel) -> Self {
         State0 {
-            our_x: channel.x_self,
+            x_self: channel.x_self,
             revoked_states: channel.revoked_states,
         }
     }
@@ -22,6 +22,13 @@ impl From<Channel> for State0 {
 pub struct NotOldCommitTransaction;
 
 impl State0 {
+    pub fn new(x_self: OwnershipKeyPair, revoked_states: Vec<RevokedState>) -> Self {
+        Self {
+            x_self,
+            revoked_states,
+        }
+    }
+
     pub fn punish(&self, transaction: Transaction) -> anyhow::Result<PunishTransaction> {
         let RevokedState {
             channel_state:
@@ -45,7 +52,7 @@ impl State0 {
             Y_other,
             our_encsig_TX_c,
             r_other.into(),
-            self.our_x.clone(),
+            self.x_self.clone(),
         )?;
 
         Ok(TX_p)
@@ -117,7 +124,7 @@ mod test {
         };
 
         let party0 = State0 {
-            our_x: x_alice.clone(),
+            x_self: x_alice.clone(),
             revoked_states: vec![revoked_state],
         };
 

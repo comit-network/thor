@@ -1,10 +1,12 @@
-pub mod create;
 pub mod update;
 
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::bitcoind_rpc::PsbtBase64;
 use reqwest::Url;
-use thor::create::{BuildFundingPSBT, SignFundingPSBT};
+use thor::{
+    create::{BuildFundingPSBT, SignFundingPSBT},
+    BroadcastSignedTransaction,
+};
 
 pub struct Wallet(pub bitcoin_harness::Wallet);
 
@@ -48,5 +50,17 @@ impl SignFundingPSBT for Wallet {
         let psbt = bitcoin::consensus::deserialize(&as_hex)?;
 
         Ok(psbt)
+    }
+}
+
+#[async_trait::async_trait]
+impl BroadcastSignedTransaction for Wallet {
+    async fn broadcast_signed_transaction(
+        &self,
+        transaction: bitcoin::Transaction,
+    ) -> anyhow::Result<()> {
+        let _txid = self.0.send_raw_transaction(transaction).await?;
+
+        Ok(())
     }
 }

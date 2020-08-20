@@ -22,6 +22,12 @@ use miniscript::{self, Descriptor, Segwitv0};
 use sha2::Sha256;
 use std::{collections::HashMap, str::FromStr};
 
+// TODO: We could handle fees dynamically
+
+/// Flat fee used for all transactions involved in the protocol. Satoshi is the
+/// unit used.
+const TX_FEE: u64 = 10_000;
+
 #[derive(Debug, Clone)]
 pub struct FundOutput(Address);
 
@@ -184,7 +190,7 @@ impl CommitTransaction {
             // This output is the same as the input, except for the
             // spending conditions
             output: vec![TxOut {
-                value: TX_f.value().as_sat() - 10_000, // TODO: Handle fees properly?
+                value: TX_f.value().as_sat() - TX_FEE,
                 script_pubkey: output_descriptor.script_pubkey(),
             }],
         };
@@ -246,11 +252,28 @@ impl CommitTransaction {
         Ok(TX_c)
     }
 
-    pub fn as_txin(&self) -> TxIn {
+    /// Use `CommitTransaction` as a Transaction Input for the
+    /// `SplitTransaction`. The sequence number is set to the value of
+    /// `time_lock` since the `SplitTransaction` uses the
+    /// time-locked path of the `CommitTransaction`'s script.
+    pub fn as_txin_for_TX_s(&self) -> TxIn {
         TxIn {
             previous_output: OutPoint::new(self.inner.txid(), 0),
             script_sig: Script::new(),
             sequence: self.time_lock,
+            witness: Vec::new(),
+        }
+    }
+
+    /// Use `CommitTransaction` as a Transaction Input for the
+    /// `PunishTransaction`. The sequence number is set to `OxFFFF_FFFF` since
+    /// the `PunishTransaction` does not use the time-locked path of the
+    /// `CommitTransaction`'s script.
+    pub fn as_txin_for_TX_p(&self) -> TxIn {
+        TxIn {
+            previous_output: OutPoint::new(self.inner.txid(), 0),
+            script_sig: Script::new(),
+            sequence: 0xFFFF_FFFF,
             witness: Vec::new(),
         }
     }
@@ -353,19 +376,19 @@ impl SplitTransaction {
             b: (amount_b, X_b),
         } = outputs.clone();
 
-        let input = TX_c.as_txin();
+        let input = TX_c.as_txin_for_TX_s();
 
         // TODO: Maybe we should spend directly to an address owned by the wallet
 
         let descriptor = SplitTransaction::wpk_descriptor(X_a);
         let output_a = TxOut {
-            value: amount_a.as_sat() - 10_000,
+            value: amount_a.as_sat() - TX_FEE,
             script_pubkey: descriptor.script_pubkey(),
         };
 
         let descriptor = SplitTransaction::wpk_descriptor(X_b);
         let output_b = TxOut {
-            value: amount_b.as_sat() - 10_000,
+            value: amount_b.as_sat() - TX_FEE,
             script_pubkey: descriptor.script_pubkey(),
         };
 
@@ -460,7 +483,7 @@ impl SplitTransaction {
 
     fn compute_digest(TX_s: &Transaction, TX_c: &CommitTransaction) -> SigHash {
         SighashComponents::new(&TX_s).sighash_all(
-            &TX_c.as_txin(),
+            &TX_c.as_txin_for_TX_s(),
             &TX_c.output_descriptor().witness_script(),
             TX_c.value().as_sat(),
         )
@@ -520,15 +543,15 @@ impl PunishTransaction {
             .ok_or_else(|| PunishError::RecoveryFailure)?;
 
         let mut TX_p = {
-            let output_descriptor = SplitTransaction::wpk_descriptor(x_self.public());
+            let output_descriptor = PunishTransaction::wpk_descriptor(x_self.public());
             let output = TxOut {
-                value: TX_c.value().as_sat(),
+                value: TX_c.value().as_sat() - TX_FEE,
                 script_pubkey: output_descriptor.script_pubkey(),
             };
             Transaction {
                 version: 2,
                 lock_time: 0,
-                input: vec![TX_c.as_txin()],
+                input: vec![TX_c.as_txin_for_TX_p()],
                 output: vec![output],
             }
         };
@@ -586,13 +609,26 @@ impl PunishTransaction {
     }
 
     fn compute_digest(TX_p: &Transaction, TX_c: &CommitTransaction) -> SigHash {
-        let input_index = 0;
-        let sighash_all = 1;
-        TX_p.signature_hash(
-            input_index,
+        SighashComponents::new(&TX_p).sighash_all(
+            &TX_c.as_txin_for_TX_p(),
             &TX_c.output_descriptor().witness_script(),
-            sighash_all,
+            TX_c.value().as_sat(),
         )
+    }
+
+    fn wpk_descriptor(key: OwnershipPublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
+        let pk = bitcoin::PublicKey {
+            key: key.into(),
+            compressed: true,
+        };
+
+        miniscript::Descriptor::Wpkh(pk)
+    }
+}
+
+impl From<PunishTransaction> for Transaction {
+    fn from(from: PunishTransaction) -> Self {
+        from.0
     }
 }
 
