@@ -9,16 +9,16 @@ use futures::{
     SinkExt, StreamExt,
 };
 use harness::{create, update, Wallet};
-use thor::{punish, update::ChannelUpdate, Channel, ReceiveMessage, SendMessage};
+use thor::{punish, update::ChannelUpdate, Channel, Message, ReceiveMessage, SendMessage};
 
 struct Network {
-    sender: Sender<thor::create::Message>,
-    receiver: Receiver<thor::create::Message>,
+    sender: Sender<Message>,
+    receiver: Receiver<Message>,
 }
 
 #[async_trait::async_trait]
 impl SendMessage for Network {
-    async fn send_message(&mut self, message: thor::create::Message) -> anyhow::Result<()> {
+    async fn send_message(&mut self, message: Message) -> anyhow::Result<()> {
         self.sender
             .send(message)
             .await
@@ -28,7 +28,7 @@ impl SendMessage for Network {
 
 #[async_trait::async_trait]
 impl ReceiveMessage for Network {
-    async fn receive_message(&mut self) -> anyhow::Result<thor::create::Message> {
+    async fn receive_message(&mut self) -> anyhow::Result<Message> {
         self.receiver
             .next()
             .await

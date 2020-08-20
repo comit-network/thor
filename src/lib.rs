@@ -34,12 +34,12 @@ pub trait BroadcastSignedTransaction {
 
 #[async_trait::async_trait]
 pub trait SendMessage {
-    async fn send_message(&mut self, message: create::Message) -> anyhow::Result<()>;
+    async fn send_message(&mut self, message: Message) -> anyhow::Result<()>;
 }
 
 #[async_trait::async_trait]
 pub trait ReceiveMessage {
-    async fn receive_message(&mut self) -> anyhow::Result<create::Message>;
+    async fn receive_message(&mut self) -> anyhow::Result<Message>;
 }
 
 impl Channel {
@@ -58,33 +58,33 @@ impl Channel {
 
         let message0_alice = alice0.next_message();
         network
-            .send_message(create::Message::Message0(message0_alice))
+            .send_message(Message::CreateMessage0(message0_alice))
             .await?;
 
-        let message0_bob: create::Message0 = match network.receive_message().await? {
-            create::Message::Message0(message) => message,
+        let message0_bob = match network.receive_message().await? {
+            Message::CreateMessage0(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let alice1 = alice0.receive(message0_bob, wallet).await.unwrap();
 
         let message1_alice = alice1.next_message();
         network
-            .send_message(create::Message::Message1(message1_alice))
+            .send_message(Message::CreateMessage1(message1_alice))
             .await?;
 
-        let message1_bob: create::Message1 = match network.receive_message().await? {
-            create::Message::Message1(message) => message,
+        let message1_bob = match network.receive_message().await? {
+            Message::CreateMessage1(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let alice2 = alice1.receive(message1_bob).unwrap();
 
         let message2_alice = alice2.next_message();
         network
-            .send_message(create::Message::Message2(message2_alice))
+            .send_message(Message::CreateMessage2(message2_alice))
             .await?;
 
-        let message2_bob: create::Message2 = match network.receive_message().await? {
-            create::Message::Message2(message) => message,
+        let message2_bob = match network.receive_message().await? {
+            Message::CreateMessage2(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let alice3 = alice2.receive(message2_bob).unwrap();
@@ -107,33 +107,33 @@ impl Channel {
 
         let message0_bob = bob0.next_message();
         network
-            .send_message(create::Message::Message0(message0_bob))
+            .send_message(Message::CreateMessage0(message0_bob))
             .await?;
 
-        let message0_alice: create::Message0 = match network.receive_message().await? {
-            create::Message::Message0(message) => message,
+        let message0_alice = match network.receive_message().await? {
+            Message::CreateMessage0(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let bob1 = bob0.receive(message0_alice, wallet).await.unwrap();
 
         let message1_bob = bob1.next_message();
         network
-            .send_message(create::Message::Message1(message1_bob))
+            .send_message(Message::CreateMessage1(message1_bob))
             .await?;
 
-        let message1_alice: create::Message1 = match network.receive_message().await? {
-            create::Message::Message1(message) => message,
+        let message1_alice = match network.receive_message().await? {
+            Message::CreateMessage1(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let bob2 = bob1.receive(message1_alice).unwrap();
 
         let message2_bob = bob2.next_message();
         network
-            .send_message(create::Message::Message2(message2_bob))
+            .send_message(Message::CreateMessage2(message2_bob))
             .await?;
 
-        let message2_alice: create::Message2 = match network.receive_message().await? {
-            create::Message::Message2(message) => message,
+        let message2_alice = match network.receive_message().await? {
+            Message::CreateMessage2(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let bob3 = bob2.receive(message2_alice).unwrap();
@@ -152,32 +152,32 @@ impl Channel {
     {
         let message3_self = party3.next_message();
         network
-            .send_message(create::Message::Message3(message3_self))
+            .send_message(Message::CreateMessage3(message3_self))
             .await?;
 
-        let message3_other: create::Message3 = match network.receive_message().await? {
-            create::Message::Message3(message) => message,
+        let message3_other = match network.receive_message().await? {
+            Message::CreateMessage3(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let party4 = party3.receive(message3_other).unwrap();
 
         let message4_self = party4.next_message();
         network
-            .send_message(create::Message::Message4(message4_self))
+            .send_message(Message::CreateMessage4(message4_self))
             .await?;
 
-        let message4_other: create::Message4 = match network.receive_message().await? {
-            create::Message::Message4(message) => message,
+        let message4_other = match network.receive_message().await? {
+            Message::CreateMessage4(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let party5 = party4.receive(message4_other).unwrap();
 
         let message5_self = party5.next_message(wallet).await.unwrap();
         network
-            .send_message(create::Message::Message5(message5_self))
+            .send_message(Message::CreateMessage5(message5_self))
             .await?;
-        let message5_other: create::Message5 = match network.receive_message().await? {
-            create::Message::Message5(message) => message,
+        let message5_other = match network.receive_message().await? {
+            Message::CreateMessage5(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
 
@@ -315,4 +315,15 @@ pub struct SplitOutputs {
 pub struct Balance {
     pub ours: Amount,
     pub theirs: Amount,
+}
+
+/// All possible messages that can be sent between two parties using this
+/// library.
+pub enum Message {
+    CreateMessage0(create::Message0),
+    CreateMessage1(create::Message1),
+    CreateMessage2(create::Message2),
+    CreateMessage3(create::Message3),
+    CreateMessage4(create::Message4),
+    CreateMessage5(create::Message5),
 }

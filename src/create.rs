@@ -13,15 +13,6 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 pub use crate::transaction::FundingTransaction;
 
-pub enum Message {
-    Message0(Message0),
-    Message1(Message1),
-    Message2(Message2),
-    Message3(Message3),
-    Message4(Message4),
-    Message5(Message5),
-}
-
 pub struct Message0 {
     X: OwnershipPublicKey,
     fund_amount: Amount,
