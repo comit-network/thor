@@ -2,7 +2,10 @@ use crate::{transaction::CloseTransaction, Channel};
 use bitcoin::{Address, Transaction};
 use ecdsa_fun::Signature;
 
-pub struct State0(Channel);
+pub struct State0 {
+    channel: Channel,
+    final_address_self: Address,
+}
 pub struct State1 {
     channel: Channel,
     final_address_self: Address,
@@ -13,12 +16,6 @@ pub struct FinalState(Transaction);
 impl FinalState {
     pub fn into_transaction(self) -> Transaction {
         self.0
-    }
-}
-
-impl From<Channel> for State0 {
-    fn from(channel: Channel) -> Self {
-        Self(channel)
     }
 }
 
@@ -33,20 +30,28 @@ pub struct Message1 {
 }
 
 impl State0 {
-    pub fn compose(&self, final_address: Address) -> Message0 {
-        Message0 { final_address }
+    pub fn new(channel: Channel, final_address_self: Address) -> Self {
+        Self {
+            channel,
+            final_address_self,
+        }
+    }
+
+    pub fn compose(&self) -> Message0 {
+        Message0 {
+            final_address: self.final_address_self.clone(),
+        }
     }
 
     pub fn interpret(
         self,
-        final_address_self: Address,
         Message0 {
             final_address: final_address_other,
         }: Message0,
     ) -> State1 {
         State1 {
-            channel: self.0,
-            final_address_self,
+            channel: self.channel,
+            final_address_self: self.final_address_self,
             final_address_other,
         }
     }

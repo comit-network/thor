@@ -7,14 +7,14 @@ pub fn run(
     bob_channel: Channel,
     final_address_bob: Address,
 ) -> anyhow::Result<(FinalState, FinalState)> {
-    let alice0: close::State0 = alice_channel.into();
-    let bob0: close::State0 = bob_channel.into();
+    let alice0 = close::State0::new(alice_channel, final_address_alice);
+    let bob0 = close::State0::new(bob_channel, final_address_bob);
 
-    let alice_message0 = alice0.compose(final_address_alice.clone());
-    let bob_message0 = bob0.compose(final_address_bob.clone());
+    let alice_message0 = alice0.compose();
+    let bob_message0 = bob0.compose();
 
-    let alice1 = alice0.interpret(final_address_alice, bob_message0);
-    let bob1 = bob0.interpret(final_address_bob, alice_message0);
+    let alice1 = alice0.interpret(bob_message0);
+    let bob1 = bob0.interpret(alice_message0);
 
     let alice_message1 = alice1.compose()?;
     let bob_message1 = bob1.compose()?;
