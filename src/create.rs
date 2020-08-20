@@ -13,36 +13,54 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 pub use crate::transaction::FundingTransaction;
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message0 {
     X: OwnershipPublicKey,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     fund_amount: Amount,
     time_lock: u32,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message1 {
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "crate::serde::partially_signed_transaction")
+    )]
     tid: PartiallySignedTransaction,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message2 {
     R: RevocationPublicKey,
     Y: PublishingPublicKey,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message3 {
     sig_TX_s: Signature,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message4 {
     encsig_TX_c: EncryptedSignature,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message5 {
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "crate::serde::partially_signed_transaction")
+    )]
     TX_f_signed_once: PartiallySignedTransaction,
 }
 

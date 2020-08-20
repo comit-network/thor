@@ -15,6 +15,7 @@ pub struct OwnershipKeyPair {
     public_key: Point,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct OwnershipPublicKey(Point);
 
@@ -75,6 +76,7 @@ pub struct RevocationKeyPair {
 #[derive(Debug, Clone)]
 pub struct RevocationSecretKey(Scalar);
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone)]
 pub struct RevocationPublicKey(Point);
 
@@ -153,6 +155,7 @@ pub struct PublishingKeyPair {
 #[derive(Clone)]
 pub struct PublishingSecretKey(Scalar);
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone)]
 pub struct PublishingPublicKey(Point);
 
@@ -270,4 +273,20 @@ pub fn point_from_str(from: &str) -> anyhow::Result<Point> {
         Point::from_bytes(bytes).ok_or_else(|| anyhow::anyhow!("string slice is not a Point"))?;
 
     Ok(point)
+}
+
+#[cfg(feature = "serde")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ownership_public_key_deser_round() {
+        let pubkey = OwnershipKeyPair::new_random().public();
+
+        let str = serde_json::to_string(&pubkey).unwrap();
+        let res = serde_json::from_str(&str).unwrap();
+
+        assert_eq!(pubkey, res);
+    }
 }

@@ -9,6 +9,9 @@ mod keys;
 mod signature;
 mod transaction;
 
+#[cfg(feature = "serde")]
+pub(crate) mod serde;
+
 use crate::{
     create::{BuildFundingPSBT, SignFundingPSBT},
     keys::{
@@ -334,6 +337,7 @@ pub struct Balance {
 
 /// All possible messages that can be sent between two parties using this
 /// library.
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Debug, EnumAsInner)]
 pub enum Message {
     Create0(create::Message0),

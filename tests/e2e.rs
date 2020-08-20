@@ -3,6 +3,7 @@
 mod harness;
 
 use crate::harness::close;
+use anyhow::Context;
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
 use futures::{
@@ -13,15 +14,18 @@ use harness::Wallet;
 use thor::{punish, Balance, Channel, Message, ReceiveMessage, SendMessage};
 
 struct Transport {
-    sender: Sender<Message>,
-    receiver: Receiver<Message>,
+    // While it would be more efficient to use `Message` this allows us to test the `use-serde`
+    // feature
+    sender: Sender<String>,
+    receiver: Receiver<String>,
 }
 
 #[async_trait::async_trait]
 impl SendMessage for Transport {
     async fn send_message(&mut self, message: Message) -> anyhow::Result<()> {
+        let str = serde_json::to_string(&message).context("failed to encode message")?;
         self.sender
-            .send(message)
+            .send(str)
             .await
             .map_err(|_| anyhow::anyhow!("failed to send message"))
     }
@@ -30,10 +34,13 @@ impl SendMessage for Transport {
 #[async_trait::async_trait]
 impl ReceiveMessage for Transport {
     async fn receive_message(&mut self) -> anyhow::Result<Message> {
-        self.receiver
+        let str = self
+            .receiver
             .next()
             .await
-            .ok_or_else(|| anyhow::anyhow!("failed to send message"))
+            .ok_or_else(|| anyhow::anyhow!("failed to receive message"))?;
+        let message = serde_json::from_str(&str).context("failed to decode message")?;
+        Ok(message)
     }
 }
 
