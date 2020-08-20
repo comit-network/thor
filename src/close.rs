@@ -26,7 +26,6 @@ pub struct Message0 {
 
 #[derive(Debug)]
 pub struct Message1 {
-    close_transaction: CloseTransaction,
     sig_close_transaction: Signature,
 }
 
@@ -60,6 +59,39 @@ impl State0 {
 
 impl State1 {
     pub fn compose(&self) -> anyhow::Result<Message1> {
+        let close_transaction = self.create_close_transaction()?;
+        let sig_close_transaction = close_transaction.sign_once(self.channel.x_self.clone());
+
+        Ok(Message1 {
+            sig_close_transaction,
+        })
+    }
+
+    pub fn interpret(
+        self,
+        Message1 {
+            sig_close_transaction: sig_close_transaction_other,
+        }: Message1,
+    ) -> anyhow::Result<FinalState> {
+        let close_transaction = self.create_close_transaction()?;
+
+        // in a real application we would double check the amounts
+        verify_sig(
+            self.channel.X_other.clone(),
+            &close_transaction.digest(),
+            &sig_close_transaction_other.clone(),
+        )
+        .context("failed to verify close transaction sent by counterparty")?;
+
+        let sig_close_transaction_self = close_transaction.sign_once(self.channel.x_self.clone());
+        let close_transaction = close_transaction.add_signatures(
+            (self.channel.x_self.public(), sig_close_transaction_self),
+            (self.channel.X_other, sig_close_transaction_other),
+        )?;
+        Ok(FinalState(close_transaction))
+    }
+
+    fn create_close_transaction(&self) -> anyhow::Result<CloseTransaction> {
         let (amount_a, X_a) = self.channel.current_state.signed_TX_s.outputs().a;
         let (amount_b, X_b) = self.channel.current_state.signed_TX_s.outputs().b;
 
@@ -77,36 +109,10 @@ impl State1 {
             anyhow::bail!("No valid output found")
         };
 
-        let close_transaction = CloseTransaction::new(&self.channel.TX_f_body, output_a, output_b);
-
-        let sig_close_transaction = close_transaction.sign_once(self.channel.x_self.clone());
-
-        Ok(Message1 {
-            close_transaction,
-            sig_close_transaction,
-        })
-    }
-
-    pub fn interpret(
-        self,
-        Message1 {
-            close_transaction,
-            sig_close_transaction: sig_close_transaction_other,
-        }: Message1,
-    ) -> anyhow::Result<FinalState> {
-        // in a real application we would double check the amounts
-        verify_sig(
-            self.channel.X_other.clone(),
-            &close_transaction.digest(),
-            &sig_close_transaction_other.clone(),
-        )
-        .context("failed to verify close transaction sent by counterparty")?;
-
-        let sig_close_transaction_self = close_transaction.sign_once(self.channel.x_self.clone());
-        let close_transaction = close_transaction.add_signatures(
-            (self.channel.x_self.public(), sig_close_transaction_self),
-            (self.channel.X_other, sig_close_transaction_other),
-        )?;
-        Ok(FinalState(close_transaction))
+        Ok(CloseTransaction::new(
+            &self.channel.TX_f_body,
+            output_a,
+            output_b,
+        ))
     }
 }
