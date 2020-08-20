@@ -1,3 +1,4 @@
+pub mod close;
 pub mod update;
 
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};

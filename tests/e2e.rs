@@ -2,6 +2,7 @@
 
 mod harness;
 
+use crate::harness::close;
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
 use futures::{
@@ -255,4 +256,95 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
         .send_raw_transaction(TX_p.into())
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn e2e_channel_collaborative_close() {
+    let tc_client = testcontainers::clients::Cli::default();
+    let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
+
+    bitcoind.init(5).await.unwrap();
+
+    let fund_amount = Amount::ONE_BTC;
+    let time_lock = 1;
+
+    let alice_wallet = Wallet::new("alice", bitcoind.node_url.clone())
+        .await
+        .unwrap();
+    let bob_wallet = Wallet::new("bob", bitcoind.node_url.clone()).await.unwrap();
+
+    let buffer = Amount::from_btc(1.0).unwrap();
+
+    {
+        let address = alice_wallet.0.new_address().await.unwrap();
+        bitcoind.mint(address, fund_amount + buffer).await.unwrap();
+    }
+
+    {
+        let address = bob_wallet.0.new_address().await.unwrap();
+        bitcoind.mint(address, fund_amount + buffer).await.unwrap()
+    };
+
+    let (mut alice_transport, mut bob_transport) = {
+        let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
+        let (bob_sender, alice_receiver) = futures::channel::mpsc::channel(5);
+
+        let alice_transport = Transport {
+            sender: alice_sender,
+            receiver: alice_receiver,
+        };
+
+        let bob_transport = Transport {
+            sender: bob_sender,
+            receiver: bob_receiver,
+        };
+
+        (alice_transport, bob_transport)
+    };
+
+    let alice_create =
+        Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
+    let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+
+    let (alice_channel, bob_channel) = futures::future::try_join(alice_create, bob_create)
+        .await
+        .unwrap();
+
+    // Start closing channel
+    let alice_final_address = alice_wallet.0.new_address().await.unwrap();
+    let bob_final_address = bob_wallet.0.new_address().await.unwrap();
+
+    let (alice, bob) = close::run(
+        alice_channel,
+        alice_final_address,
+        bob_channel,
+        bob_final_address,
+    )
+    .unwrap();
+
+    let alice_closing_transaction = alice.into_transaction();
+    let bob_closing_transaction = bob.into_transaction();
+    assert_eq!(alice_closing_transaction, bob_closing_transaction);
+
+    // ugly wait for 1 block
+    tokio::time::delay_for(std::time::Duration::from_millis(2_000)).await;
+    let before_closure_amount = alice_wallet.0.balance().await.unwrap();
+
+    alice_wallet
+        .0
+        .send_raw_transaction(alice_closing_transaction)
+        .await
+        .unwrap();
+
+    // ugly wait for 1 block
+    tokio::time::delay_for(std::time::Duration::from_millis(2_000)).await;
+    let after_closure_amount = alice_wallet.0.balance().await.unwrap();
+
+    // amounts should not be the same as after closure should be bigger than before
+    // closure
+    assert_eq!(before_closure_amount < after_closure_amount, true);
+
+    // difference should be last channel balance
+    let amount = after_closure_amount - before_closure_amount;
+    assert_eq!(amount <= fund_amount && amount > Amount::ZERO, true);
 }
