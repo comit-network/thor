@@ -1,16 +1,27 @@
-use crate::{keys::OwnershipKeyPair, transaction::PunishTransaction, ChannelState, RevokedState};
+use crate::{
+    keys::OwnershipKeyPair, transaction::PunishTransaction, Channel, ChannelState, RevokedState,
+};
 use bitcoin::Transaction;
 
-pub struct Party0 {
+pub struct State0 {
     x_self: OwnershipKeyPair,
     revoked_states: Vec<RevokedState>,
+}
+
+impl From<Channel> for State0 {
+    fn from(channel: Channel) -> Self {
+        State0 {
+            x_self: channel.x_self,
+            revoked_states: channel.revoked_states,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("transaction cannot be punished")]
 pub struct NotOldCommitTransaction;
 
-impl Party0 {
+impl State0 {
     pub fn new(x_self: OwnershipKeyPair, revoked_states: Vec<RevokedState>) -> Self {
         Self {
             x_self,
@@ -24,7 +35,7 @@ impl Party0 {
                 ChannelState {
                     TX_c,
                     Y_other,
-                    encsig_TX_c_self,
+                    encsig_TX_c_self: our_encsig_TX_c,
                     ..
                 },
             r_other,
@@ -39,7 +50,7 @@ impl Party0 {
             transaction,
             TX_c,
             Y_other,
-            encsig_TX_c_self,
+            our_encsig_TX_c,
             r_other.into(),
             self.x_self.clone(),
         )?;
@@ -112,7 +123,7 @@ mod test {
             r_other: r_bob.into(),
         };
 
-        let party0 = Party0 {
+        let party0 = State0 {
             x_self: x_alice.clone(),
             revoked_states: vec![revoked_state],
         };

@@ -12,7 +12,6 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    punish,
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
     Channel, ChannelState, RevokedState, SplitOutputs,
@@ -446,12 +445,6 @@ impl Balance {
             }
             _ => bail!(InvalidChannelUpdate),
         }
-    }
-}
-
-impl From<Channel> for punish::Party0 {
-    fn from(from: Channel) -> Self {
-        Self::new(from.x_self, from.revoked_states)
     }
 }
 

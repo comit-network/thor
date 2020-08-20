@@ -5,7 +5,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundOutput, SplitTransaction},
-    SplitOutputs,
+    Channel, ChannelState, SplitOutputs,
 };
 use anyhow::Context;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
@@ -502,50 +502,35 @@ impl Party5 {
         Ok(Message5 { TX_f_signed_once })
     }
 
+    /// Returns the Channel and the transaction to broadcast.
     pub async fn receive(
         self,
         Message5 { TX_f_signed_once }: Message5,
         wallet: &impl SignFundingPSBT,
-    ) -> anyhow::Result<Party6> {
+    ) -> anyhow::Result<(Channel, Transaction)> {
         let signed_TX_f = wallet.sign_funding_psbt(TX_f_signed_once).await?;
         let signed_TX_f = signed_TX_f.extract_tx();
 
-        Ok(Party6 {
-            x_self: self.x_self,
-            X_other: self.X_other,
-            r_self: self.r_self,
-            R_other: self.R_other,
-            y_self: self.y_self,
-            Y_other: self.Y_other,
-            TX_f_body: self.TX_f,
+        Ok((
+            Channel {
+                x_self: self.x_self,
+                X_other: self.X_other,
+                TX_f_body: self.TX_f,
+                current_state: ChannelState {
+                    TX_c: self.TX_c,
+                    encsig_TX_c_self: self.encsig_TX_c_self,
+                    encsig_TX_c_other: self.encsig_TX_c_other,
+                    r_self: self.r_self,
+                    R_other: self.R_other,
+                    y_self: self.y_self,
+                    Y_other: self.Y_other,
+                    signed_TX_s: self.signed_TX_s,
+                },
+                revoked_states: vec![],
+            },
             signed_TX_f,
-            TX_c: self.TX_c,
-            signed_TX_s: self.signed_TX_s,
-            encsig_TX_c_self: self.encsig_TX_c_self,
-            encsig_TX_c_other: self.encsig_TX_c_other,
-        })
+        ))
     }
-}
-
-/// A party which has reached this state is now able to safely broadcast the
-/// `FundingTransaction` in order to open the channel.
-#[allow(dead_code)]
-pub struct Party6 {
-    pub x_self: OwnershipKeyPair,
-    pub X_other: OwnershipPublicKey,
-    pub r_self: RevocationKeyPair,
-    pub R_other: RevocationPublicKey,
-    pub y_self: PublishingKeyPair,
-    pub Y_other: PublishingPublicKey,
-    // TODO: Use `FundingTransaction` or introduce `SignedFundingTransaction` type. This is
-    // necessary because other protocols will still need functionality defined on
-    // `FundingTransaction` even after the channel has been created
-    pub TX_f_body: FundingTransaction,
-    pub signed_TX_f: Transaction,
-    pub TX_c: CommitTransaction,
-    pub signed_TX_s: SplitTransaction,
-    pub encsig_TX_c_self: EncryptedSignature,
-    pub encsig_TX_c_other: EncryptedSignature,
 }
 
 #[cfg(test)]
@@ -637,17 +622,31 @@ mod test {
         let message5_alice = alice5.next_message(&alice_wallet).await.unwrap();
         let message5_bob = bob5.next_message(&bob_wallet).await.unwrap();
 
-        let alice6 = alice5.receive(message5_bob, &alice_wallet).await.unwrap();
-        let bob6 = bob5.receive(message5_alice, &bob_wallet).await.unwrap();
+        let (alice_channel, alice_transaction) =
+            alice5.receive(message5_bob, &alice_wallet).await.unwrap();
+        let (bob_channel, bob_transaction) =
+            bob5.receive(message5_alice, &bob_wallet).await.unwrap();
 
-        assert_eq!(alice6.signed_TX_f, bob6.signed_TX_f);
+        assert_eq!(alice_transaction, bob_transaction);
 
-        assert_eq!(alice6.TX_c, bob6.TX_c);
+        assert_eq!(
+            alice_channel.current_state.TX_c,
+            bob_channel.current_state.TX_c
+        );
 
-        assert_eq!(alice6.encsig_TX_c_self, bob6.encsig_TX_c_other);
+        assert_eq!(
+            alice_channel.current_state.encsig_TX_c_self,
+            bob_channel.current_state.encsig_TX_c_other
+        );
 
-        assert_eq!(alice6.encsig_TX_c_other, bob6.encsig_TX_c_self);
+        assert_eq!(
+            alice_channel.current_state.encsig_TX_c_other,
+            bob_channel.current_state.encsig_TX_c_self
+        );
 
-        assert_eq!(alice6.signed_TX_s, bob6.signed_TX_s);
+        assert_eq!(
+            alice_channel.current_state.signed_TX_s,
+            bob_channel.current_state.signed_TX_s
+        );
     }
 }
