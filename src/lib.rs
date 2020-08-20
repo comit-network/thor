@@ -66,25 +66,6 @@ pub struct Balance {
 }
 
 impl Channel {
-    pub fn new(party: create::Party6) -> Self {
-        Self {
-            x_self: party.x_self,
-            X_other: party.X_other,
-            TX_f_body: party.TX_f_body,
-            current_state: ChannelState {
-                TX_c: party.TX_c,
-                encsig_TX_c_self: party.encsig_TX_c_self,
-                encsig_TX_c_other: party.encsig_TX_c_other,
-                r_self: party.r_self,
-                R_other: party.R_other,
-                y_self: party.y_self,
-                Y_other: party.Y_other,
-                signed_TX_s: party.signed_TX_s,
-            },
-            revoked_states: Vec::new(),
-        }
-    }
-
     pub fn balance(&self) -> anyhow::Result<Balance> {
         let outputs = self.current_state.signed_TX_s.outputs();
 

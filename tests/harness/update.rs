@@ -1,19 +1,5 @@
 use thor::{update, update::ChannelUpdate, Channel};
 
-pub struct Init {
-    pub alice: Channel,
-    pub bob: Channel,
-}
-
-impl Init {
-    pub fn new(alice: thor::create::Party6, bob: thor::create::Party6) -> Self {
-        let alice = Channel::new(alice);
-        let bob = Channel::new(bob);
-
-        Self { alice, bob }
-    }
-}
-
 pub struct Final {
     pub alice: Channel,
     pub bob: Channel,

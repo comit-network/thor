@@ -1,8 +1,11 @@
 use crate::harness::Wallet;
-use bitcoin::Amount;
+use bitcoin::{Amount, Transaction};
 use bitcoin_harness::Bitcoind;
-use create::{BuildFundingPSBT, Party6, SignFundingPSBT};
-use thor::create;
+use thor::{
+    create,
+    create::{BuildFundingPSBT, SignFundingPSBT},
+    Channel,
+};
 
 pub struct Init {
     pub alice: create::Alice0,
@@ -54,8 +57,8 @@ impl Init {
 }
 
 pub struct Final {
-    pub alice: Party6,
-    pub bob: Party6,
+    pub alice: (Channel, Transaction),
+    pub bob: (Channel, Transaction),
 }
 
 pub async fn run<W>(
