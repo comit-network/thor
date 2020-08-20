@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+pub mod close;
 pub mod create;
 mod keys;
 pub mod punish;
@@ -18,6 +19,12 @@ use crate::{
 use anyhow::bail;
 use bitcoin::{Amount, Transaction};
 use ecdsa_fun::adaptor::EncryptedSignature;
+
+// TODO: We should handle fees dynamically
+
+/// Flat fee used for all transactions involved in the protocol. Satoshi is the
+/// unit used.
+pub const TX_FEE: u64 = 10_000;
 
 pub struct Channel {
     x_self: OwnershipKeyPair,
