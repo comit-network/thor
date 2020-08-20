@@ -43,10 +43,17 @@ pub trait ReceiveMessage {
 }
 
 impl Channel {
+    /// Create a channel in the role of Alice.
+    ///
+    /// The `fund_amount` represents how much Bitcoin Alice will contribute to
+    /// the channel. Bob will contribute the _same_ amount as Alice.
+    ///
+    /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
+    /// on the `network` they provide, allowing Alice to communicate with
+    /// Bob.
     pub async fn create_alice<N, W>(
         network: &mut N,
         wallet: &W,
-        // Both parties fund the same amount
         fund_amount: Amount,
         time_lock: u32,
     ) -> anyhow::Result<Self>
@@ -92,10 +99,16 @@ impl Channel {
         Self::create(network, wallet, alice3).await
     }
 
+    /// Create a channel in the role of Bob.
+    ///
+    /// The `fund_amount` represents how much Bitcoin Bob will contribute to
+    /// the channel. Alice will contribute the _same_ amount as Bob.
+    ///
+    /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
+    /// on the `network` they provide, allowing Bob to communicate with Alice.
     pub async fn create_bob<N, W>(
         network: &mut N,
         wallet: &W,
-        // Both parties fund the same amount
         fund_amount: Amount,
         time_lock: u32,
     ) -> anyhow::Result<Self>
