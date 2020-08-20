@@ -1,4 +1,5 @@
-use crate::{transaction::CloseTransaction, Channel};
+use crate::{signature::verify_sig, transaction::CloseTransaction, Channel};
+use anyhow::Context;
 use bitcoin::{Address, Transaction};
 use ecdsa_fun::Signature;
 
@@ -59,15 +60,15 @@ impl State0 {
 
 impl State1 {
     pub fn compose(&self) -> anyhow::Result<Message1> {
-        let (amount_a, ownership_a) = self.channel.current_state.signed_TX_s.outputs().a;
-        let (amount_b, ownership_b) = self.channel.current_state.signed_TX_s.outputs().b;
+        let (amount_a, X_a) = self.channel.current_state.signed_TX_s.outputs().a;
+        let (amount_b, X_b) = self.channel.current_state.signed_TX_s.outputs().b;
 
-        let (output_a, output_b) = if ownership_a == self.channel.x_self.public() {
+        let (output_a, output_b) = if X_a == self.channel.x_self.public() {
             (
                 (amount_a, self.final_address_self.clone()),
                 (amount_b, self.final_address_other.clone()),
             )
-        } else if ownership_b == self.channel.x_self.public() {
+        } else if X_b == self.channel.x_self.public() {
             (
                 (amount_a, self.final_address_other.clone()),
                 (amount_b, self.final_address_self.clone()),
@@ -94,6 +95,13 @@ impl State1 {
         }: Message1,
     ) -> anyhow::Result<FinalState> {
         // in a real application we would double check the amounts
+        verify_sig(
+            self.channel.X_other.clone(),
+            &close_transaction.digest(),
+            &sig_close_transaction_other.clone(),
+        )
+        .context("failed to verify close transaction sent by counterparty")?;
+
         let sig_close_transaction_self = close_transaction.sign_once(self.channel.x_self.clone());
         let close_transaction = close_transaction.add_signatures(
             (self.channel.x_self.public(), sig_close_transaction_self),
