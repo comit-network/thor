@@ -22,6 +22,12 @@ use miniscript::{self, Descriptor, Segwitv0};
 use sha2::Sha256;
 use std::{collections::HashMap, str::FromStr};
 
+// TODO: We could handle fees dynamically
+
+/// Flat fee used for all transactions involved in the protocol. Satoshi is the
+/// unit used.
+const TX_FEE: u64 = 10_000;
+
 #[derive(Debug, Clone)]
 pub struct FundOutput(Address);
 
@@ -184,7 +190,7 @@ impl CommitTransaction {
             // This output is the same as the input, except for the
             // spending conditions
             output: vec![TxOut {
-                value: TX_f.value().as_sat() - 10_000, // TODO: Handle fees properly?
+                value: TX_f.value().as_sat() - TX_FEE,
                 script_pubkey: output_descriptor.script_pubkey(),
             }],
         };
@@ -376,13 +382,13 @@ impl SplitTransaction {
 
         let descriptor = SplitTransaction::wpk_descriptor(X_a);
         let output_a = TxOut {
-            value: amount_a.as_sat() - 10_000,
+            value: amount_a.as_sat() - TX_FEE,
             script_pubkey: descriptor.script_pubkey(),
         };
 
         let descriptor = SplitTransaction::wpk_descriptor(X_b);
         let output_b = TxOut {
-            value: amount_b.as_sat() - 10_000,
+            value: amount_b.as_sat() - TX_FEE,
             script_pubkey: descriptor.script_pubkey(),
         };
 
@@ -539,7 +545,7 @@ impl PunishTransaction {
         let mut TX_p = {
             let output_descriptor = PunishTransaction::wpk_descriptor(x_self.public());
             let output = TxOut {
-                value: TX_c.value().as_sat() - 10_000,
+                value: TX_c.value().as_sat() - TX_FEE,
                 script_pubkey: output_descriptor.script_pubkey(),
             };
             Transaction {
