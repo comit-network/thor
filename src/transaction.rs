@@ -680,7 +680,7 @@ impl CloseTransaction {
     }
 
     pub fn digest(&self) -> SigHash {
-        self.digest.clone()
+        self.digest
     }
 
     pub fn add_signatures(

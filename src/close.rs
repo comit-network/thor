@@ -79,7 +79,7 @@ impl State1 {
         verify_sig(
             self.channel.X_other.clone(),
             &close_transaction.digest(),
-            &sig_close_transaction_other.clone(),
+            &sig_close_transaction_other,
         )
         .context("failed to verify close transaction sent by counterparty")?;
 

@@ -382,8 +382,9 @@ async fn e2e_channel_collaborative_close() {
     assert_eq!(alice_closing_transaction, bob_closing_transaction);
 
     // ugly wait for 1 block
-    tokio::time::delay_for(std::time::Duration::from_millis(2_000)).await;
-    let before_closure_amount = alice_wallet.0.balance().await.unwrap();
+    tokio::time::delay_for(std::time::Duration::from_millis(1100)).await;
+    let before_closure_amount_alice = alice_wallet.0.balance().await.unwrap();
+    let before_closure_amount_bob = bob_wallet.0.balance().await.unwrap();
 
     alice_wallet
         .0
@@ -392,14 +393,14 @@ async fn e2e_channel_collaborative_close() {
         .unwrap();
 
     // ugly wait for 1 block
-    tokio::time::delay_for(std::time::Duration::from_millis(2_000)).await;
-    let after_closure_amount = alice_wallet.0.balance().await.unwrap();
+    tokio::time::delay_for(std::time::Duration::from_millis(1100)).await;
+    let after_closure_amount_alice = alice_wallet.0.balance().await.unwrap();
+    let after_closure_amount_bob = bob_wallet.0.balance().await.unwrap();
 
-    // amounts should not be the same as after closure should be bigger than before
-    // closure
-    assert_eq!(before_closure_amount < after_closure_amount, true);
+    // difference should be last channel balance - fees
+    let amount_difference_alice = after_closure_amount_alice - before_closure_amount_alice;
+    assert!(Amount::ZERO < amount_difference_alice && amount_difference_alice <= fund_amount);
 
-    // difference should be last channel balance
-    let amount = after_closure_amount - before_closure_amount;
-    assert_eq!(amount <= fund_amount && amount > Amount::ZERO, true);
+    let amount_difference_bob = after_closure_amount_bob - before_closure_amount_bob;
+    assert!(Amount::ZERO < amount_difference_bob && amount_difference_bob <= fund_amount);
 }
