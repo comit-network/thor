@@ -49,54 +49,54 @@ impl Channel {
     /// the channel. Bob will contribute the _same_ amount as Alice.
     ///
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
-    /// on the `network` they provide, allowing Alice to communicate with
+    /// on the `transport` they provide, allowing Alice to communicate with
     /// Bob.
-    pub async fn create_alice<N, W>(
-        network: &mut N,
+    pub async fn create_alice<T, W>(
+        transport: &mut T,
         wallet: &W,
         fund_amount: Amount,
         time_lock: u32,
     ) -> anyhow::Result<Self>
     where
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction,
-        N: SendMessage + ReceiveMessage,
+        T: SendMessage + ReceiveMessage,
     {
         let alice0 = create::Alice0::new(fund_amount, time_lock);
 
         let message0_alice = alice0.next_message();
-        network
+        transport
             .send_message(Message::CreateMessage0(message0_alice))
             .await?;
 
-        let message0_bob = match network.receive_message().await? {
+        let message0_bob = match transport.receive_message().await? {
             Message::CreateMessage0(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let alice1 = alice0.receive(message0_bob, wallet).await.unwrap();
 
         let message1_alice = alice1.next_message();
-        network
+        transport
             .send_message(Message::CreateMessage1(message1_alice))
             .await?;
 
-        let message1_bob = match network.receive_message().await? {
+        let message1_bob = match transport.receive_message().await? {
             Message::CreateMessage1(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let alice2 = alice1.receive(message1_bob).unwrap();
 
         let message2_alice = alice2.next_message();
-        network
+        transport
             .send_message(Message::CreateMessage2(message2_alice))
             .await?;
 
-        let message2_bob = match network.receive_message().await? {
+        let message2_bob = match transport.receive_message().await? {
             Message::CreateMessage2(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let alice3 = alice2.receive(message2_bob).unwrap();
 
-        Self::create(network, wallet, alice3).await
+        Self::create(transport, wallet, alice3).await
     }
 
     /// Create a channel in the role of Bob.
@@ -105,91 +105,91 @@ impl Channel {
     /// the channel. Alice will contribute the _same_ amount as Bob.
     ///
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
-    /// on the `network` they provide, allowing Bob to communicate with Alice.
-    pub async fn create_bob<N, W>(
-        network: &mut N,
+    /// on the `transport` they provide, allowing Bob to communicate with Alice.
+    pub async fn create_bob<T, W>(
+        transport: &mut T,
         wallet: &W,
         fund_amount: Amount,
         time_lock: u32,
     ) -> anyhow::Result<Self>
     where
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction,
-        N: SendMessage + ReceiveMessage,
+        T: SendMessage + ReceiveMessage,
     {
         let bob0 = create::Bob0::new(fund_amount, time_lock);
 
         let message0_bob = bob0.next_message();
-        network
+        transport
             .send_message(Message::CreateMessage0(message0_bob))
             .await?;
 
-        let message0_alice = match network.receive_message().await? {
+        let message0_alice = match transport.receive_message().await? {
             Message::CreateMessage0(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let bob1 = bob0.receive(message0_alice, wallet).await.unwrap();
 
         let message1_bob = bob1.next_message();
-        network
+        transport
             .send_message(Message::CreateMessage1(message1_bob))
             .await?;
 
-        let message1_alice = match network.receive_message().await? {
+        let message1_alice = match transport.receive_message().await? {
             Message::CreateMessage1(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let bob2 = bob1.receive(message1_alice).unwrap();
 
         let message2_bob = bob2.next_message();
-        network
+        transport
             .send_message(Message::CreateMessage2(message2_bob))
             .await?;
 
-        let message2_alice = match network.receive_message().await? {
+        let message2_alice = match transport.receive_message().await? {
             Message::CreateMessage2(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let bob3 = bob2.receive(message2_alice).unwrap();
 
-        Self::create(network, wallet, bob3).await
+        Self::create(transport, wallet, bob3).await
     }
 
-    async fn create<W, N>(
-        network: &mut N,
+    async fn create<W, T>(
+        transport: &mut T,
         wallet: &W,
         party3: create::Party3,
     ) -> anyhow::Result<Self>
     where
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction,
-        N: SendMessage + ReceiveMessage,
+        T: SendMessage + ReceiveMessage,
     {
         let message3_self = party3.next_message();
-        network
+        transport
             .send_message(Message::CreateMessage3(message3_self))
             .await?;
 
-        let message3_other = match network.receive_message().await? {
+        let message3_other = match transport.receive_message().await? {
             Message::CreateMessage3(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let party4 = party3.receive(message3_other).unwrap();
 
         let message4_self = party4.next_message();
-        network
+        transport
             .send_message(Message::CreateMessage4(message4_self))
             .await?;
 
-        let message4_other = match network.receive_message().await? {
+        let message4_other = match transport.receive_message().await? {
             Message::CreateMessage4(message) => message,
             _ => anyhow::bail!("wrong message"),
         };
         let party5 = party4.receive(message4_other).unwrap();
 
         let message5_self = party5.next_message(wallet).await.unwrap();
-        network
+        transport
             .send_message(Message::CreateMessage5(message5_self))
             .await?;
-        let message5_other = match network.receive_message().await? {
+        let message5_other = match transport.receive_message().await? {
             Message::CreateMessage5(message) => message,
             _ => anyhow::bail!("wrong message"),
         };

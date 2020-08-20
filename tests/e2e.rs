@@ -11,13 +11,13 @@ use futures::{
 use harness::{create, update, Wallet};
 use thor::{punish, update::ChannelUpdate, Channel, Message, ReceiveMessage, SendMessage};
 
-struct Network {
+struct Transport {
     sender: Sender<Message>,
     receiver: Receiver<Message>,
 }
 
 #[async_trait::async_trait]
-impl SendMessage for Network {
+impl SendMessage for Transport {
     async fn send_message(&mut self, message: Message) -> anyhow::Result<()> {
         self.sender
             .send(message)
@@ -27,7 +27,7 @@ impl SendMessage for Network {
 }
 
 #[async_trait::async_trait]
-impl ReceiveMessage for Network {
+impl ReceiveMessage for Transport {
     async fn receive_message(&mut self) -> anyhow::Result<Message> {
         self.receiver
             .next()
@@ -63,26 +63,26 @@ async fn e2e_channel_creation() {
         bitcoind.mint(address, fund_amount + buffer).await.unwrap()
     };
 
-    let (mut alice_network, mut bob_network) = {
+    let (mut alice_transport, mut bob_transport) = {
         let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
         let (bob_sender, alice_receiver) = futures::channel::mpsc::channel(5);
 
-        let alice_network = Network {
+        let alice_transport = Transport {
             sender: alice_sender,
             receiver: alice_receiver,
         };
 
-        let bob_network = Network {
+        let bob_transport = Transport {
             sender: bob_sender,
             receiver: bob_receiver,
         };
 
-        (alice_network, bob_network)
+        (alice_transport, bob_transport)
     };
 
     let alice_create =
-        Channel::create_alice(&mut alice_network, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create_bob(&mut bob_network, &bob_wallet, fund_amount, time_lock);
+        Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
+    let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
     let (alice, bob) = futures::future::try_join(alice_create, bob_create)
         .await
