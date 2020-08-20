@@ -3,7 +3,7 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    SplitOutputs,
+    SplitOutputs, TX_FEE,
 };
 use anyhow::bail;
 use bitcoin::{
@@ -21,12 +21,6 @@ use ecdsa_fun::{
 use miniscript::{self, Descriptor, Segwitv0};
 use sha2::Sha256;
 use std::{collections::HashMap, str::FromStr};
-
-// TODO: We could handle fees dynamically
-
-/// Flat fee used for all transactions involved in the protocol. Satoshi is the
-/// unit used.
-const TX_FEE: u64 = 10_000;
 
 #[derive(Debug, Clone)]
 pub struct FundOutput(Address);

@@ -342,8 +342,15 @@ async fn e2e_channel_collaborative_close() {
 
     // difference should be last channel balance - fees
     let amount_difference_alice = after_closure_amount_alice - before_closure_amount_alice;
-    assert!(Amount::ZERO < amount_difference_alice && amount_difference_alice <= fund_amount);
-
+    assert_eq!(
+        amount_difference_alice,
+        fund_amount - Amount::from_sat(thor::TX_FEE),
+        "Balance difference before and after channel closure should be initial channel funding minus transaction fees"
+    );
     let amount_difference_bob = after_closure_amount_bob - before_closure_amount_bob;
-    assert!(Amount::ZERO < amount_difference_bob && amount_difference_bob <= fund_amount);
+    assert_eq!(
+        amount_difference_bob,
+        fund_amount - Amount::from_sat(thor::TX_FEE),
+        "Balance difference before and after channel closure should be initial channel funding minus transaction fees"
+    );
 }
