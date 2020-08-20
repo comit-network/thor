@@ -12,13 +12,6 @@ pub struct State1 {
     final_address_self: Address,
     final_address_other: Address,
 }
-pub struct FinalState(Transaction);
-
-impl FinalState {
-    pub fn into_transaction(self) -> Transaction {
-        self.0
-    }
-}
 
 pub struct Message0 {
     final_address: Address,
@@ -72,7 +65,7 @@ impl State1 {
         Message1 {
             sig_close_transaction: sig_close_transaction_other,
         }: Message1,
-    ) -> anyhow::Result<FinalState> {
+    ) -> anyhow::Result<Transaction> {
         let close_transaction = self.create_close_transaction()?;
 
         // in a real application we would double check the amounts
@@ -88,7 +81,7 @@ impl State1 {
             (self.channel.x_self.public(), sig_close_transaction_self),
             (self.channel.X_other, sig_close_transaction_other),
         )?;
-        Ok(FinalState(close_transaction))
+        Ok(close_transaction)
     }
 
     fn create_close_transaction(&self) -> anyhow::Result<CloseTransaction> {
