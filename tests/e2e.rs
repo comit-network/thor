@@ -4,66 +4,20 @@ mod harness;
 
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
-use futures::{
-    channel::mpsc::{Receiver, Sender},
-    SinkExt, StreamExt,
-};
-use harness::make_wallets;
-use thor::{punish, Balance, Channel, Message, ReceiveMessage, SendMessage};
-
-struct Transport {
-    sender: Sender<Message>,
-    receiver: Receiver<Message>,
-}
-
-#[async_trait::async_trait]
-impl SendMessage for Transport {
-    async fn send_message(&mut self, message: Message) -> anyhow::Result<()> {
-        self.sender
-            .send(message)
-            .await
-            .map_err(|_| anyhow::anyhow!("failed to send message"))
-    }
-}
-
-#[async_trait::async_trait]
-impl ReceiveMessage for Transport {
-    async fn receive_message(&mut self) -> anyhow::Result<Message> {
-        self.receiver
-            .next()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("failed to send message"))
-    }
-}
+use harness::{make_transports, make_wallets};
+use thor::{punish, Balance, Channel};
 
 #[tokio::test]
 async fn e2e_channel_creation() {
     let tc_client = testcontainers::clients::Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
-
     bitcoind.init(5).await.unwrap();
 
     let fund_amount = Amount::ONE_BTC;
     let time_lock = 1;
 
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
-
-    let (mut alice_transport, mut bob_transport) = {
-        let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
-        let (bob_sender, alice_receiver) = futures::channel::mpsc::channel(5);
-
-        let alice_transport = Transport {
-            sender: alice_sender,
-            receiver: alice_receiver,
-        };
-
-        let bob_transport = Transport {
-            sender: bob_sender,
-            receiver: bob_receiver,
-        };
-
-        (alice_transport, bob_transport)
-    };
+    let (mut alice_transport, mut bob_transport) = make_transports();
 
     let alice_create =
         Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
@@ -96,30 +50,13 @@ async fn e2e_channel_creation() {
 async fn e2e_channel_update() {
     let tc_client = testcontainers::clients::Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
-
     bitcoind.init(5).await.unwrap();
 
     let fund_amount = Amount::ONE_BTC;
     let time_lock = 1;
 
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
-
-    let (mut alice_transport, mut bob_transport) = {
-        let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
-        let (bob_sender, alice_receiver) = futures::channel::mpsc::channel(5);
-
-        let alice_transport = Transport {
-            sender: alice_sender,
-            receiver: alice_receiver,
-        };
-
-        let bob_transport = Transport {
-            sender: bob_sender,
-            receiver: bob_receiver,
-        };
-
-        (alice_transport, bob_transport)
-    };
+    let (mut alice_transport, mut bob_transport) = make_transports();
 
     let alice_create =
         Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
@@ -187,30 +124,13 @@ async fn e2e_channel_update() {
 async fn e2e_punish_publication_of_revoked_commit_transaction() {
     let tc_client = testcontainers::clients::Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
-
     bitcoind.init(5).await.unwrap();
 
     let fund_amount = Amount::ONE_BTC;
     let time_lock = 1;
 
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
-
-    let (mut alice_transport, mut bob_transport) = {
-        let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
-        let (bob_sender, alice_receiver) = futures::channel::mpsc::channel(5);
-
-        let alice_transport = Transport {
-            sender: alice_sender,
-            receiver: alice_receiver,
-        };
-
-        let bob_transport = Transport {
-            sender: bob_sender,
-            receiver: bob_receiver,
-        };
-
-        (alice_transport, bob_transport)
-    };
+    let (mut alice_transport, mut bob_transport) = make_transports();
 
     let alice_create =
         Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
@@ -271,30 +191,13 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
 async fn e2e_channel_collaborative_close() {
     let tc_client = testcontainers::clients::Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
-
     bitcoind.init(5).await.unwrap();
 
     let fund_amount = Amount::ONE_BTC;
     let time_lock = 1;
 
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
-
-    let (mut alice_transport, mut bob_transport) = {
-        let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
-        let (bob_sender, alice_receiver) = futures::channel::mpsc::channel(5);
-
-        let alice_transport = Transport {
-            sender: alice_sender,
-            receiver: alice_receiver,
-        };
-
-        let bob_transport = Transport {
-            sender: bob_sender,
-            receiver: bob_receiver,
-        };
-
-        (alice_transport, bob_transport)
-    };
+    let (mut alice_transport, mut bob_transport) = make_transports();
 
     let alice_create =
         Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
