@@ -235,7 +235,7 @@ impl State1 {
             sig_TX_s: sig_TX_s_other,
         }: ShareSplitSignature,
     ) -> anyhow::Result<State2> {
-        verify_sig(self.X_other.clone(), &self.TX_s, &sig_TX_s_other)
+        verify_sig(self.X_other.clone(), &self.TX_s.digest(), &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
 
         self.TX_s.add_signatures(
