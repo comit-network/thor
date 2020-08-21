@@ -73,6 +73,7 @@ pub struct RevocationKeyPair {
     public_key: Point,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone)]
 pub struct RevocationSecretKey(Scalar);
 

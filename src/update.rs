@@ -20,6 +20,7 @@ use anyhow::Context;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 /// First message of the channel update protocol.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct ShareKeys {
     R: RevocationPublicKey,
@@ -27,18 +28,21 @@ pub struct ShareKeys {
 }
 
 /// Third message of the channel update protocol.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct ShareSplitSignature {
     sig_TX_s: Signature,
 }
 
 /// Fourth message of the channel update protocol.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct ShareCommitEncryptedSignature {
     encsig_TX_c: EncryptedSignature,
 }
 
 /// Fifth and last message of the channel update protocol.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct RevealRevocationSecretKey {
     r: RevocationSecretKey,
