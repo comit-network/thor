@@ -64,6 +64,7 @@ pub struct Message5 {
     TX_f_signed_once: PartiallySignedTransaction,
 }
 
+#[derive(Debug)]
 pub struct Alice0 {
     x_self: OwnershipKeyPair,
     fund_amount_self: Amount,
@@ -128,6 +129,7 @@ impl Alice0 {
     }
 }
 
+#[derive(Debug)]
 pub struct Bob0 {
     x_self: OwnershipKeyPair,
     fund_amount_self: Amount,
@@ -183,6 +185,7 @@ impl Bob0 {
     }
 }
 
+#[derive(Debug)]
 pub struct Alice1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -224,6 +227,7 @@ impl Alice1 {
     }
 }
 
+#[derive(Debug)]
 pub struct Bob1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -265,7 +269,7 @@ impl Bob1 {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("time_locks are not equal")]
 pub struct IncompatibleTimeLocks;
 
@@ -277,6 +281,7 @@ fn check_timelocks(time_lock_self: u32, time_lock_other: u32) -> Result<(), Inco
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Alice2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -335,6 +340,7 @@ impl Alice2 {
     }
 }
 
+#[derive(Debug)]
 pub struct Bob2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -394,6 +400,7 @@ impl Bob2 {
     }
 }
 
+#[derive(Debug)]
 pub struct Party3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -444,6 +451,7 @@ impl Party3 {
     }
 }
 
+#[derive(Debug)]
 pub struct Party4 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -494,6 +502,7 @@ impl Party4 {
     }
 }
 
+#[derive(Debug)]
 pub struct Party5 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,

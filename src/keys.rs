@@ -9,7 +9,7 @@ use ecdsa_fun::{
 use sha2::Sha256;
 use std::fmt;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OwnershipKeyPair {
     secret_key: Scalar,
     public_key: Point,
@@ -67,18 +67,18 @@ impl From<Scalar> for OwnershipKeyPair {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RevocationKeyPair {
     secret_key: Scalar,
     public_key: Point,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct RevocationSecretKey(Scalar);
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct RevocationPublicKey(Point);
 
 impl RevocationKeyPair {
@@ -153,11 +153,11 @@ pub struct PublishingKeyPair {
     public_key: Point,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PublishingSecretKey(Scalar);
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct PublishingPublicKey(Point);
 
 impl PublishingKeyPair {
@@ -215,13 +215,13 @@ impl From<PublishingPublicKey> for Point {
 }
 
 impl fmt::LowerHex for PublishingPublicKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0.to_bytes()))
     }
 }
 
 impl fmt::Display for PublishingPublicKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0.to_bytes()))
     }
 }

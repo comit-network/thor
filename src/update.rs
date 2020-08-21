@@ -48,6 +48,7 @@ pub struct RevealRevocationSecretKey {
     r: RevocationSecretKey,
 }
 
+#[derive(Debug)]
 pub struct Alice0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -128,6 +129,7 @@ impl Alice0 {
     }
 }
 
+#[derive(Debug)]
 pub struct Bob0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -210,6 +212,7 @@ impl Bob0 {
 
 /// A party who has agreed on the terms of a channel update and is
 /// ready to start exchanging signatures.
+#[derive(Debug)]
 pub struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -267,6 +270,7 @@ impl State1 {
 /// A party who has exchanged signatures for the `SplitTransaction`
 /// and is ready to start exchanging encrypted signatures for the
 /// `CommitTransaction`.
+#[derive(Debug)]
 pub struct State2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -324,6 +328,7 @@ impl State2 {
 /// A party who has exchanged all necessary signatures to complete a
 /// channel update and just needs to collaborate with the counterparty
 /// to revoke the previous `CommitTransaction`.
+#[derive(Debug)]
 pub struct State3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
