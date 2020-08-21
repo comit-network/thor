@@ -13,29 +13,35 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 pub use crate::transaction::FundingTransaction;
 
+#[derive(Debug)]
 pub struct Message0 {
     X: OwnershipPublicKey,
     fund_amount: Amount,
     time_lock: u32,
 }
 
+#[derive(Debug)]
 pub struct Message1 {
     tid: PartiallySignedTransaction,
 }
 
+#[derive(Debug)]
 pub struct Message2 {
     R: RevocationPublicKey,
     Y: PublishingPublicKey,
 }
 
+#[derive(Debug)]
 pub struct Message3 {
     sig_TX_s: Signature,
 }
 
+#[derive(Debug)]
 pub struct Message4 {
     encsig_TX_c: EncryptedSignature,
 }
 
+#[derive(Debug)]
 pub struct Message5 {
     TX_f_signed_once: PartiallySignedTransaction,
 }

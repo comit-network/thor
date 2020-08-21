@@ -1,11 +1,12 @@
 #![allow(non_snake_case)]
 
 pub mod create;
-mod keys;
 pub mod punish;
+pub mod update;
+
+mod keys;
 mod signature;
 mod transaction;
-pub mod update;
 
 use crate::{
     create::{BuildFundingPSBT, SignFundingPSBT},
@@ -18,6 +19,7 @@ use crate::{
 use anyhow::bail;
 use bitcoin::{Amount, Transaction};
 use ecdsa_fun::adaptor::EncryptedSignature;
+use enum_as_inner::EnumAsInner;
 
 #[derive(Clone)]
 pub struct Channel {
@@ -64,38 +66,24 @@ impl Channel {
     {
         let alice0 = create::Alice0::new(fund_amount, time_lock);
 
-        let message0_alice = alice0.next_message();
-        transport
-            .send_message(Message::CreateMessage0(message0_alice))
-            .await?;
+        let msg0_alice = alice0.next_message();
+        transport.send_message(Message::Create0(msg0_alice)).await?;
 
-        let message0_bob = match transport.receive_message().await? {
-            Message::CreateMessage0(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let alice1 = alice0.receive(message0_bob, wallet).await.unwrap();
+        let msg0_bob = map_err(transport.receive_message().await?.into_create0())?;
+        let alice1 = alice0.receive(msg0_bob, wallet).await?;
 
-        let message1_alice = alice1.next_message();
-        transport
-            .send_message(Message::CreateMessage1(message1_alice))
-            .await?;
+        let msg1_alice = alice1.next_message();
+        transport.send_message(Message::Create1(msg1_alice)).await?;
 
-        let message1_bob = match transport.receive_message().await? {
-            Message::CreateMessage1(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let alice2 = alice1.receive(message1_bob).unwrap();
+        let msg1_bob = map_err(transport.receive_message().await?.into_create1())?;
+        let alice2 = alice1.receive(msg1_bob)?;
 
-        let message2_alice = alice2.next_message();
-        transport
-            .send_message(Message::CreateMessage2(message2_alice))
-            .await?;
+        let msg2_alice = alice2.next_message();
+        transport.send_message(Message::Create2(msg2_alice)).await?;
 
-        let message2_bob = match transport.receive_message().await? {
-            Message::CreateMessage2(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let alice3 = alice2.receive(message2_bob).unwrap();
+        let msg2_bob = map_err(transport.receive_message().await?.into_create2())?;
+
+        let alice3 = alice2.receive(msg2_bob)?;
 
         Self::create(transport, wallet, alice3).await
     }
@@ -119,38 +107,23 @@ impl Channel {
     {
         let bob0 = create::Bob0::new(fund_amount, time_lock);
 
-        let message0_bob = bob0.next_message();
-        transport
-            .send_message(Message::CreateMessage0(message0_bob))
-            .await?;
+        let msg0_bob = bob0.next_message();
+        transport.send_message(Message::Create0(msg0_bob)).await?;
 
-        let message0_alice = match transport.receive_message().await? {
-            Message::CreateMessage0(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let bob1 = bob0.receive(message0_alice, wallet).await.unwrap();
+        let msg0_alice = map_err(transport.receive_message().await?.into_create0())?;
+        let bob1 = bob0.receive(msg0_alice, wallet).await?;
 
-        let message1_bob = bob1.next_message();
-        transport
-            .send_message(Message::CreateMessage1(message1_bob))
-            .await?;
+        let msg1_bob = bob1.next_message();
+        transport.send_message(Message::Create1(msg1_bob)).await?;
 
-        let message1_alice = match transport.receive_message().await? {
-            Message::CreateMessage1(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let bob2 = bob1.receive(message1_alice).unwrap();
+        let msg1_alice = map_err(transport.receive_message().await?.into_create1())?;
+        let bob2 = bob1.receive(msg1_alice)?;
 
-        let message2_bob = bob2.next_message();
-        transport
-            .send_message(Message::CreateMessage2(message2_bob))
-            .await?;
+        let msg2_bob = bob2.next_message();
+        transport.send_message(Message::Create2(msg2_bob)).await?;
 
-        let message2_alice = match transport.receive_message().await? {
-            Message::CreateMessage2(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let bob3 = bob2.receive(message2_alice).unwrap();
+        let msg2_alice = map_err(transport.receive_message().await?.into_create2())?;
+        let bob3 = bob2.receive(msg2_alice)?;
 
         Self::create(transport, wallet, bob3).await
     }
@@ -164,38 +137,24 @@ impl Channel {
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction,
         T: SendMessage + ReceiveMessage,
     {
-        let message3_self = state3.next_message();
-        transport
-            .send_message(Message::CreateMessage3(message3_self))
-            .await?;
+        let msg3_self = state3.next_message();
+        transport.send_message(Message::Create3(msg3_self)).await?;
 
-        let message3_other = match transport.receive_message().await? {
-            Message::CreateMessage3(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let state_4 = state3.receive(message3_other).unwrap();
+        let msg3_other = map_err(transport.receive_message().await?.into_create3())?;
+        let state_4 = state3.receive(msg3_other)?;
 
-        let message4_self = state_4.next_message();
-        transport
-            .send_message(Message::CreateMessage4(message4_self))
-            .await?;
+        let msg4_self = state_4.next_message();
+        transport.send_message(Message::Create4(msg4_self)).await?;
 
-        let message4_other = match transport.receive_message().await? {
-            Message::CreateMessage4(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let state5 = state_4.receive(message4_other).unwrap();
+        let msg4_other = map_err(transport.receive_message().await?.into_create4())?;
+        let state5 = state_4.receive(msg4_other)?;
 
-        let message5_self = state5.next_message(wallet).await.unwrap();
-        transport
-            .send_message(Message::CreateMessage5(message5_self))
-            .await?;
-        let message5_other = match transport.receive_message().await? {
-            Message::CreateMessage5(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
+        let msg5_self = state5.next_message(wallet).await?;
+        transport.send_message(Message::Create5(msg5_self)).await?;
 
-        let (channel, transaction) = state5.receive(message5_other, wallet).await.unwrap();
+        let msg5_other = map_err(transport.receive_message().await?.into_create5())?;
+
+        let (channel, transaction) = state5.receive(msg5_other, wallet).await?;
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
@@ -213,16 +172,11 @@ impl Channel {
     {
         let alice0 = update::Alice0::new(self.clone(), new_balance, time_lock);
 
-        let message0_alice = alice0.compose();
-        transport
-            .send_message(Message::UpdateMessage0(message0_alice))
-            .await?;
+        let msg0_alice = alice0.compose();
+        transport.send_message(Message::Update0(msg0_alice)).await?;
 
-        let message0_bob = match transport.receive_message().await? {
-            Message::UpdateMessage0(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let alice1 = alice0.interpret(message0_bob)?;
+        let msg0_bob = map_err(transport.receive_message().await?.into_update0())?;
+        let alice1 = alice0.interpret(msg0_bob)?;
 
         self.update(transport, alice1).await
     }
@@ -238,16 +192,11 @@ impl Channel {
     {
         let bob0 = update::Bob0::new(self.clone(), new_balance, time_lock);
 
-        let message0_bob = bob0.compose();
-        transport
-            .send_message(Message::UpdateMessage0(message0_bob))
-            .await?;
+        let msg0_bob = bob0.compose();
+        transport.send_message(Message::Update0(msg0_bob)).await?;
 
-        let message0_alice = match transport.receive_message().await? {
-            Message::UpdateMessage0(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let bob1 = bob0.interpret(message0_alice)?;
+        let msg0_alice = map_err(transport.receive_message().await?.into_update0())?;
+        let bob1 = bob0.interpret(msg0_alice)?;
 
         self.update(transport, bob1).await
     }
@@ -260,38 +209,23 @@ impl Channel {
     where
         T: SendMessage + ReceiveMessage,
     {
-        let message1_self = state1.compose();
-        transport
-            .send_message(Message::UpdateMessage1(message1_self))
-            .await?;
+        let msg1_self = state1.compose();
+        transport.send_message(Message::Update1(msg1_self)).await?;
 
-        let message1_other = match transport.receive_message().await? {
-            Message::UpdateMessage1(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let state2 = state1.interpret(message1_other)?;
+        let msg1_other = map_err(transport.receive_message().await?.into_update1())?;
+        let state2 = state1.interpret(msg1_other)?;
 
-        let message2_self = state2.compose();
-        transport
-            .send_message(Message::UpdateMessage2(message2_self))
-            .await?;
+        let msg2_self = state2.compose();
+        transport.send_message(Message::Update2(msg2_self)).await?;
 
-        let message2_other = match transport.receive_message().await? {
-            Message::UpdateMessage2(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let state3 = state2.interpret(message2_other)?;
+        let msg2_other = map_err(transport.receive_message().await?.into_update2())?;
+        let state3 = state2.interpret(msg2_other)?;
 
-        let message3_self = state3.compose();
-        transport
-            .send_message(Message::UpdateMessage3(message3_self))
-            .await?;
+        let msg3_self = state3.compose();
+        transport.send_message(Message::Update3(msg3_self)).await?;
 
-        let message3_other = match transport.receive_message().await? {
-            Message::UpdateMessage3(message) => message,
-            _ => anyhow::bail!("wrong message"),
-        };
-        let updated_channel = state3.interpret(message3_other)?;
+        let msg3_other = map_err(transport.receive_message().await?.into_update3())?;
+        let updated_channel = state3.interpret(msg3_other)?;
 
         *self = updated_channel;
 
@@ -393,15 +327,38 @@ pub struct Balance {
 
 /// All possible messages that can be sent between two parties using this
 /// library.
+#[derive(Debug, EnumAsInner)]
 pub enum Message {
-    CreateMessage0(create::Message0),
-    CreateMessage1(create::Message1),
-    CreateMessage2(create::Message2),
-    CreateMessage3(create::Message3),
-    CreateMessage4(create::Message4),
-    CreateMessage5(create::Message5),
-    UpdateMessage0(update::ShareKeys),
-    UpdateMessage1(update::ShareSplitSignature),
-    UpdateMessage2(update::ShareCommitEncryptedSignature),
-    UpdateMessage3(update::RevealRevocationSecretKey),
+    Create0(create::Message0),
+    Create1(create::Message1),
+    Create2(create::Message2),
+    Create3(create::Message3),
+    Create4(create::Message4),
+    Create5(create::Message5),
+    Update0(update::ShareKeys),
+    Update1(update::ShareSplitSignature),
+    Update2(update::ShareCommitEncryptedSignature),
+    Update3(update::RevealRevocationSecretKey),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("expected message of type {expected_type}, got {received:?}")]
+pub struct UnexpecteMessage {
+    expected_type: String,
+    received: Message,
+}
+
+impl UnexpecteMessage {
+    pub fn new<T>(received: Message) -> Self {
+        let expected_type = std::any::type_name::<T>();
+
+        Self {
+            expected_type: expected_type.to_string(),
+            received,
+        }
+    }
+}
+
+fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpecteMessage> {
+    res.map_err(UnexpecteMessage::new::<T>)
 }
