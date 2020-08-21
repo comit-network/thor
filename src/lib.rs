@@ -21,6 +21,7 @@ use anyhow::bail;
 use bitcoin::{Address, Amount, Transaction};
 use ecdsa_fun::adaptor::EncryptedSignature;
 use enum_as_inner::EnumAsInner;
+use signature::decrypt;
 
 // TODO: We should handle fees dynamically
 
@@ -32,6 +33,8 @@ pub const TX_FEE: u64 = 10_000;
 pub struct Channel {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
+    final_address_self: Address,
+    final_address_other: Address,
     pub TX_f_body: FundingTransaction,
     pub current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
@@ -68,10 +71,11 @@ impl Channel {
         time_lock: u32,
     ) -> anyhow::Result<Self>
     where
-        W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction,
+        W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
         T: SendMessage + ReceiveMessage,
     {
-        let alice0 = create::Alice0::new(fund_amount, time_lock);
+        let final_address = wallet.new_address().await?;
+        let alice0 = create::Alice0::new(fund_amount, time_lock, final_address);
 
         let msg0_alice = alice0.next_message();
         transport.send_message(Message::Create0(msg0_alice)).await?;
@@ -109,10 +113,11 @@ impl Channel {
         time_lock: u32,
     ) -> anyhow::Result<Self>
     where
-        W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction,
+        W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
         T: SendMessage + ReceiveMessage,
     {
-        let bob0 = create::Bob0::new(fund_amount, time_lock);
+        let final_address = wallet.new_address().await?;
+        let bob0 = create::Bob0::new(fund_amount, time_lock, final_address);
 
         let msg0_bob = bob0.next_message();
         transport.send_message(Message::Create0(msg0_bob)).await?;
@@ -243,24 +248,35 @@ impl Channel {
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
     {
-        let final_address = wallet.new_address().await?;
-
-        let state0 = close::State0::new(&self, final_address);
+        let state0 = close::State0::new(&self);
 
         let msg0_self = state0.compose();
         transport.send_message(Message::Close0(msg0_self)).await?;
 
         let msg0_other = map_err(transport.receive_message().await?.into_close0())?;
-        let state1 = state0.interpret(msg0_other);
-
-        let msg1_self = state1.compose()?;
-        transport.send_message(Message::Close1(msg1_self)).await?;
-
-        let msg1_other = map_err(transport.receive_message().await?.into_close1())?;
-        let close_transaction = state1.interpret(msg1_other)?;
+        let close_transaction = state0.interpret(msg0_other)?;
 
         wallet
             .broadcast_signed_transaction(close_transaction)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn force_close<W>(&mut self, wallet: &W) -> anyhow::Result<()>
+    where
+        W: NewAddress + BroadcastSignedTransaction,
+    {
+        let commit_transaction = self
+            .current_state
+            .signed_TX_c(&self.x_self, &self.X_other)?;
+        wallet
+            .broadcast_signed_transaction(commit_transaction)
+            .await?;
+
+        let split_transaction = self.current_state.signed_TX_s.clone();
+        wallet
+            .broadcast_signed_transaction(split_transaction.clone().into())
             .await?;
 
         Ok(())
@@ -271,14 +287,18 @@ impl Channel {
 
         match outputs {
             SplitOutputs {
-                a: (ours, X_a),
-                b: (theirs, X_b),
-            } if X_a == self.x_self.public() && X_b == self.X_other => Ok(Balance { ours, theirs }),
+                a: (ours, address_a),
+                b: (theirs, address_b),
+            } if address_a == self.final_address_self && address_b == self.final_address_other => {
+                Ok(Balance { ours, theirs })
+            }
             SplitOutputs {
-                a: (theirs, X_a),
-                b: (ours, X_b),
-            } if X_a == self.X_other && X_b == self.x_self.public() => Ok(Balance { ours, theirs }),
-            _ => bail!("split transaction does not pay to X_self and X_other"),
+                a: (theirs, address_a),
+                b: (ours, address_b),
+            } if address_a == self.final_address_other && address_b == self.final_address_self => {
+                Ok(Balance { ours, theirs })
+            }
+            _ => bail!("split transaction does not pay to expected addresses"),
         }
     }
 
@@ -315,6 +335,24 @@ pub struct ChannelState {
     pub signed_TX_s: SplitTransaction,
 }
 
+impl ChannelState {
+    pub fn signed_TX_c(
+        &self,
+        x_self: &OwnershipKeyPair,
+        X_other: &OwnershipPublicKey,
+    ) -> anyhow::Result<Transaction> {
+        let sig_self = self.TX_c.sign(x_self);
+        let sig_other = decrypt(self.y_self.clone().into(), self.encsig_TX_c_other.clone());
+
+        let signed_TX_c = self
+            .TX_c
+            .clone()
+            .add_signatures((x_self.public(), sig_self), (X_other.clone(), sig_other))?;
+
+        Ok(signed_TX_c)
+    }
+}
+
 #[derive(Clone)]
 pub struct RevokedState {
     channel_state: ChannelState,
@@ -349,8 +387,8 @@ impl RevokedState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplitOutputs {
-    a: (Amount, OwnershipPublicKey),
-    b: (Amount, OwnershipPublicKey),
+    a: (Amount, Address),
+    b: (Amount, Address),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -379,7 +417,7 @@ pub enum Message {
     Update2(update::ShareCommitEncryptedSignature),
     Update3(update::RevealRevocationSecretKey),
     Close0(close::Message0),
-    Close1(close::Message1),
+    Close1(close::Message0),
 }
 
 #[derive(Debug, thiserror::Error)]

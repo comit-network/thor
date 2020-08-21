@@ -82,6 +82,12 @@ impl BroadcastSignedTransaction for Wallet {
     ) -> anyhow::Result<()> {
         let _txid = self.0.send_raw_transaction(transaction).await?;
 
+        // TODO: Instead of guessing how long it will take for the transaction to be
+        // mined we should ask bitcoind for the number of confirmations on `txid`
+
+        // give time for transaction to be mined
+        tokio::time::delay_for(std::time::Duration::from_millis(1100)).await;
+
         Ok(())
     }
 }

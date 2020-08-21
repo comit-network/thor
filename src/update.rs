@@ -17,6 +17,7 @@ use crate::{
     Balance, Channel, ChannelState, RevokedState, SplitOutputs,
 };
 use anyhow::Context;
+use bitcoin::Address;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
 /// First message of the channel update protocol.
@@ -47,6 +48,8 @@ pub struct RevealRevocationSecretKey {
 pub struct Alice0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
+    final_address_self: Address,
+    final_address_other: Address,
     TX_f_body: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
@@ -64,6 +67,8 @@ impl Alice0 {
         Self {
             x_self: channel.x_self,
             X_other: channel.X_other,
+            final_address_self: channel.final_address_self,
+            final_address_other: channel.final_address_other,
             TX_f_body: channel.TX_f_body,
             current_state: channel.current_state,
             revoked_states: channel.revoked_states,
@@ -101,14 +106,19 @@ impl Alice0 {
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (self.updated_balance.ours, self.x_self.public()),
-            b: (self.updated_balance.theirs, self.X_other.clone()),
+            a: (self.updated_balance.ours, self.final_address_self.clone()),
+            b: (
+                self.updated_balance.theirs,
+                self.final_address_other.clone(),
+            ),
         });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(State1 {
             x_self: self.x_self,
             X_other: self.X_other,
+            final_address_self: self.final_address_self,
+            final_address_other: self.final_address_other,
             TX_f: self.TX_f_body,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
@@ -127,6 +137,8 @@ impl Alice0 {
 pub struct Bob0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
+    final_address_self: Address,
+    final_address_other: Address,
     TX_f_body: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
@@ -144,6 +156,8 @@ impl Bob0 {
         Self {
             x_self: channel.x_self,
             X_other: channel.X_other,
+            final_address_self: channel.final_address_self,
+            final_address_other: channel.final_address_other,
             TX_f_body: channel.TX_f_body,
             current_state: channel.current_state,
             revoked_states: channel.revoked_states,
@@ -181,14 +195,19 @@ impl Bob0 {
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (self.updated_balance.theirs, self.X_other.clone()),
-            b: (self.updated_balance.ours, self.x_self.public()),
+            a: (
+                self.updated_balance.theirs,
+                self.final_address_other.clone(),
+            ),
+            b: (self.updated_balance.ours, self.final_address_self.clone()),
         });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(State1 {
             x_self: self.x_self,
             X_other: self.X_other,
+            final_address_self: self.final_address_self,
+            final_address_other: self.final_address_other,
             TX_f: self.TX_f_body,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
@@ -209,6 +228,8 @@ impl Bob0 {
 pub struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
+    final_address_self: Address,
+    final_address_other: Address,
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
@@ -246,6 +267,8 @@ impl State1 {
         Ok(State2 {
             x_self: self.x_self,
             X_other: self.X_other,
+            final_address_self: self.final_address_self,
+            final_address_other: self.final_address_other,
             TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
@@ -266,6 +289,8 @@ impl State1 {
 pub struct State2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
+    final_address_self: Address,
+    final_address_other: Address,
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
@@ -302,6 +327,8 @@ impl State2 {
         Ok(State3 {
             x_self: self.x_self,
             X_other: self.X_other,
+            final_address_self: self.final_address_self,
+            final_address_other: self.final_address_other,
             TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
@@ -323,6 +350,8 @@ impl State2 {
 pub struct State3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
+    final_address_self: Address,
+    final_address_other: Address,
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
@@ -372,6 +401,8 @@ impl State3 {
         Ok(Channel {
             x_self: self.x_self,
             X_other: self.X_other,
+            final_address_self: self.final_address_self,
+            final_address_other: self.final_address_other,
             TX_f_body: self.TX_f,
             current_state,
             revoked_states,
