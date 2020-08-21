@@ -24,10 +24,13 @@ pub struct State1 {
     final_address_other: Address,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug)]
 pub struct Message0 {
     final_address: Address,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message1 {
     sig_close_transaction: Signature,
