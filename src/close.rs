@@ -8,6 +8,7 @@ use anyhow::Context;
 use bitcoin::{Address, Transaction};
 use ecdsa_fun::Signature;
 
+#[derive(Debug)]
 pub struct State0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -15,6 +16,8 @@ pub struct State0 {
     TX_s: SplitTransaction,
     final_address_self: Address,
 }
+
+#[derive(Debug)]
 pub struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,

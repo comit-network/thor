@@ -3,6 +3,7 @@ use crate::{
 };
 use bitcoin::Transaction;
 
+#[derive(Debug)]
 pub struct State0 {
     x_self: OwnershipKeyPair,
     revoked_states: Vec<RevokedState>,
@@ -17,7 +18,7 @@ impl From<Channel> for State0 {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Copy, Clone, Debug, thiserror::Error)]
 #[error("transaction cannot be punished")]
 pub struct NotOldCommitTransaction;
 

@@ -1,3 +1,17 @@
+#![warn(
+    unused_extern_crates,
+    missing_debug_implementations,
+    missing_copy_implementations,
+    rust_2018_idioms,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::fallible_impl_from,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::dbg_macro
+)]
+#![cfg_attr(not(test), warn(clippy::unwrap_used))]
+#![forbid(unsafe_code)]
 #![allow(non_snake_case)]
 
 pub mod close;
@@ -31,7 +45,7 @@ use enum_as_inner::EnumAsInner;
 /// unit used.
 pub const TX_FEE: u64 = 10_000;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Channel {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -268,7 +282,7 @@ impl Channel {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ChannelState {
     pub TX_c: CommitTransaction,
     /// Encrypted signature sent to the counterparty. If the
@@ -291,7 +305,7 @@ pub struct ChannelState {
     pub signed_TX_s: SplitTransaction,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RevokedState {
     channel_state: ChannelState,
     r_other: RevocationSecretKey,
