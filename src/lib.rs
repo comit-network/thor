@@ -18,7 +18,7 @@ use crate::{
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
 use anyhow::bail;
-use bitcoin::{Amount, Transaction};
+use bitcoin::{Address, Amount, Transaction};
 use ecdsa_fun::adaptor::EncryptedSignature;
 use enum_as_inner::EnumAsInner;
 
@@ -208,11 +208,7 @@ impl Channel {
         self.update(transport, bob1).await
     }
 
-    pub async fn update<T>(
-        &mut self,
-        transport: &mut T,
-        state1: update::State1,
-    ) -> anyhow::Result<()>
+    async fn update<T>(&mut self, transport: &mut T, state1: update::State1) -> anyhow::Result<()>
     where
         T: SendMessage + ReceiveMessage,
     {
@@ -235,6 +231,37 @@ impl Channel {
         let updated_channel = state3.interpret(msg3_other)?;
 
         *self = updated_channel;
+
+        Ok(())
+    }
+
+    /// Close the channel collaboratively. It assumes that the counterparty has
+    /// already agreed to close the channel and will call the same API (or an
+    /// equivalent one).
+    pub async fn close<T, W>(&mut self, transport: &mut T, wallet: &W) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+        W: NewAddress + BroadcastSignedTransaction,
+    {
+        let final_address = wallet.new_address().await?;
+
+        let state0 = close::State0::new(&self, final_address);
+
+        let msg0_self = state0.compose();
+        transport.send_message(Message::Close0(msg0_self)).await?;
+
+        let msg0_other = map_err(transport.receive_message().await?.into_close0())?;
+        let state1 = state0.interpret(msg0_other);
+
+        let msg1_self = state1.compose()?;
+        transport.send_message(Message::Close1(msg1_self)).await?;
+
+        let msg1_other = map_err(transport.receive_message().await?.into_close1())?;
+        let close_transaction = state1.interpret(msg1_other)?;
+
+        wallet
+            .broadcast_signed_transaction(close_transaction)
+            .await?;
 
         Ok(())
     }
@@ -332,6 +359,11 @@ pub struct Balance {
     pub theirs: Amount,
 }
 
+#[async_trait::async_trait]
+pub trait NewAddress {
+    async fn new_address(&self) -> anyhow::Result<Address>;
+}
+
 /// All possible messages that can be sent between two parties using this
 /// library.
 #[derive(Debug, EnumAsInner)]
@@ -346,6 +378,8 @@ pub enum Message {
     Update1(update::ShareSplitSignature),
     Update2(update::ShareCommitEncryptedSignature),
     Update3(update::RevealRevocationSecretKey),
+    Close0(close::Message0),
+    Close1(close::Message1),
 }
 
 #[derive(Debug, thiserror::Error)]

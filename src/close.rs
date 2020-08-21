@@ -24,6 +24,7 @@ pub struct State1 {
     final_address_other: Address,
 }
 
+#[derive(Debug)]
 pub struct Message0 {
     final_address: Address,
 }
@@ -34,13 +35,13 @@ pub struct Message1 {
 }
 
 impl State0 {
-    pub fn new(channel: Channel, final_address_self: Address) -> Self {
+    pub fn new(channel: &Channel, final_address_self: Address) -> Self {
         Self {
-            x_self: channel.x_self,
-            X_other: channel.X_other,
+            x_self: channel.x_self.clone(),
+            X_other: channel.X_other.clone(),
             final_address_self,
-            TX_f: channel.TX_f_body,
-            TX_s: channel.current_state.signed_TX_s,
+            TX_f: channel.TX_f_body.clone(),
+            TX_s: channel.current_state.signed_TX_s.clone(),
         }
     }
 

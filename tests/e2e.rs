@@ -2,7 +2,6 @@
 
 mod harness;
 
-use crate::harness::close;
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
 use futures::{
@@ -361,51 +360,38 @@ async fn e2e_channel_collaborative_close() {
         Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
     let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
-    let (alice_channel, bob_channel) = futures::future::try_join(alice_create, bob_create)
+    let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
         .unwrap();
 
-    // Start closing channel
-    let alice_final_address = alice_wallet.0.new_address().await.unwrap();
-    let bob_final_address = bob_wallet.0.new_address().await.unwrap();
-
-    let (alice_closing_transaction, bob_closing_transaction) = close::run(
-        alice_channel,
-        alice_final_address,
-        bob_channel,
-        bob_final_address,
-    )
-    .unwrap();
-
-    assert_eq!(alice_closing_transaction, bob_closing_transaction);
-
-    // ugly wait for 1 block
+    // give time for fund transaction to be mined
     tokio::time::delay_for(std::time::Duration::from_millis(1100)).await;
-    let before_closure_amount_alice = alice_wallet.0.balance().await.unwrap();
-    let before_closure_amount_bob = bob_wallet.0.balance().await.unwrap();
 
-    alice_wallet
-        .0
-        .send_raw_transaction(alice_closing_transaction)
+    let after_open_balance_alice = alice_wallet.0.balance().await.unwrap();
+    let after_open_balance_bob = bob_wallet.0.balance().await.unwrap();
+
+    let alice_close = alice_channel.close(&mut alice_transport, &alice_wallet);
+    let bob_close = bob_channel.close(&mut bob_transport, &bob_wallet);
+
+    futures::future::try_join(alice_close, bob_close)
         .await
         .unwrap();
 
-    // ugly wait for 1 block
-    tokio::time::delay_for(std::time::Duration::from_millis(1100)).await;
-    let after_closure_amount_alice = alice_wallet.0.balance().await.unwrap();
-    let after_closure_amount_bob = bob_wallet.0.balance().await.unwrap();
+    // give time for close transaction to be mined
+    tokio::time::delay_for(std::time::Duration::from_millis(2000)).await;
+
+    let after_close_balance_alice = alice_wallet.0.balance().await.unwrap();
+    let after_close_balance_bob = bob_wallet.0.balance().await.unwrap();
 
     // difference should be last channel balance - fees
-    let amount_difference_alice = after_closure_amount_alice - before_closure_amount_alice;
     assert_eq!(
-        amount_difference_alice,
-        fund_amount - Amount::from_sat(thor::TX_FEE),
-        "Balance difference before and after channel closure should be initial channel funding minus transaction fees"
+        after_close_balance_alice,
+        after_open_balance_alice + fund_amount - Amount::from_sat(thor::TX_FEE),
+        "Balance after closing channel should equal balance after opening minus transaction fees"
     );
-    let amount_difference_bob = after_closure_amount_bob - before_closure_amount_bob;
     assert_eq!(
-        amount_difference_bob,
-        fund_amount - Amount::from_sat(thor::TX_FEE),
-        "Balance difference before and after channel closure should be initial channel funding minus transaction fees"
+        after_close_balance_bob,
+        after_open_balance_bob + fund_amount - Amount::from_sat(thor::TX_FEE),
+        "Balance after closing channel should equal balance after opening minus transaction fees"
     );
 }
