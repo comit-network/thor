@@ -1,5 +1,5 @@
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
-use bitcoin_harness::bitcoind_rpc::PsbtBase64;
+use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
 use thor::{
     create::{BuildFundingPSBT, SignFundingPSBT},
@@ -9,11 +9,34 @@ use thor::{
 pub struct Wallet(pub bitcoin_harness::Wallet);
 
 impl Wallet {
-    pub async fn new(name: &str, url: Url) -> anyhow::Result<Self> {
+    async fn new(name: &str, url: Url) -> anyhow::Result<Self> {
         let wallet = bitcoin_harness::Wallet::new(name, url).await?;
 
         Ok(Self(wallet))
     }
+}
+
+/// Create two bitcoind wallets on the node passed as an argument and fund them
+/// with the amount that they will contribute to the channel, plus a buffer to
+/// account for transaction fees.
+pub async fn make_wallets(
+    bitcoind: &Bitcoind<'_>,
+    channel_fund_amount: Amount,
+) -> anyhow::Result<(Wallet, Wallet)> {
+    let alice = Wallet::new("alice", bitcoind.node_url.clone()).await?;
+    let bob = Wallet::new("bob", bitcoind.node_url.clone()).await?;
+
+    let buffer = Amount::from_btc(1.0).unwrap();
+
+    for wallet in vec![&alice, &bob].iter() {
+        let address = wallet.0.new_address().await.unwrap();
+        bitcoind
+            .mint(address, channel_fund_amount + buffer)
+            .await
+            .unwrap();
+    }
+
+    Ok((alice, bob))
 }
 
 #[async_trait::async_trait]

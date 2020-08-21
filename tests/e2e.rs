@@ -8,7 +8,7 @@ use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
 };
-use harness::Wallet;
+use harness::make_wallets;
 use thor::{punish, Balance, Channel, Message, ReceiveMessage, SendMessage};
 
 struct Transport {
@@ -46,22 +46,7 @@ async fn e2e_channel_creation() {
     let fund_amount = Amount::ONE_BTC;
     let time_lock = 1;
 
-    let alice_wallet = Wallet::new("alice", bitcoind.node_url.clone())
-        .await
-        .unwrap();
-    let bob_wallet = Wallet::new("bob", bitcoind.node_url.clone()).await.unwrap();
-
-    let buffer = Amount::from_btc(1.0).unwrap();
-
-    {
-        let address = alice_wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, fund_amount + buffer).await.unwrap();
-    }
-
-    {
-        let address = bob_wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, fund_amount + buffer).await.unwrap()
-    };
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
 
     let (mut alice_transport, mut bob_transport) = {
         let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
@@ -117,22 +102,7 @@ async fn e2e_channel_update() {
     let fund_amount = Amount::ONE_BTC;
     let time_lock = 1;
 
-    let alice_wallet = Wallet::new("alice", bitcoind.node_url.clone())
-        .await
-        .unwrap();
-    let bob_wallet = Wallet::new("bob", bitcoind.node_url.clone()).await.unwrap();
-
-    let buffer = Amount::from_btc(1.0).unwrap();
-
-    {
-        let address = alice_wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, fund_amount + buffer).await.unwrap();
-    }
-
-    {
-        let address = bob_wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, fund_amount + buffer).await.unwrap()
-    };
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
 
     let (mut alice_transport, mut bob_transport) = {
         let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
@@ -223,22 +193,7 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
     let fund_amount = Amount::ONE_BTC;
     let time_lock = 1;
 
-    let alice_wallet = Wallet::new("alice", bitcoind.node_url.clone())
-        .await
-        .unwrap();
-    let bob_wallet = Wallet::new("bob", bitcoind.node_url.clone()).await.unwrap();
-
-    let buffer = Amount::from_btc(1.0).unwrap();
-
-    {
-        let address = alice_wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, fund_amount + buffer).await.unwrap();
-    }
-
-    {
-        let address = bob_wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, fund_amount + buffer).await.unwrap()
-    };
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
 
     let (mut alice_transport, mut bob_transport) = {
         let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
@@ -322,22 +277,7 @@ async fn e2e_channel_collaborative_close() {
     let fund_amount = Amount::ONE_BTC;
     let time_lock = 1;
 
-    let alice_wallet = Wallet::new("alice", bitcoind.node_url.clone())
-        .await
-        .unwrap();
-    let bob_wallet = Wallet::new("bob", bitcoind.node_url.clone()).await.unwrap();
-
-    let buffer = Amount::from_btc(1.0).unwrap();
-
-    {
-        let address = alice_wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, fund_amount + buffer).await.unwrap();
-    }
-
-    {
-        let address = bob_wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, fund_amount + buffer).await.unwrap()
-    };
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
 
     let (mut alice_transport, mut bob_transport) = {
         let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
