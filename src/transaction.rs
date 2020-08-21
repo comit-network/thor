@@ -22,7 +22,7 @@ use miniscript::{self, Descriptor, Segwitv0};
 use sha2::Sha256;
 use std::{collections::HashMap, str::FromStr};
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct FundOutput(Address);
 
 impl FundOutput {
@@ -97,15 +97,18 @@ impl FundingTransaction {
     }
 
     pub fn as_txin(&self) -> TxIn {
+        // A funding transaction should have 2 outputs at most (one for the channel, one
+        // for change)
+        #[allow(clippy::cast_possible_truncation)]
         let fund_output_index = self
             .inner
             .output
             .iter()
             .position(|output| output.script_pubkey == self.fund_output_descriptor.script_pubkey())
-            .expect("cannot fail");
+            .expect("cannot fail") as u32;
 
         TxIn {
-            previous_output: OutPoint::new(self.inner.txid(), fund_output_index as u32),
+            previous_output: OutPoint::new(self.inner.txid(), fund_output_index),
             script_sig: Script::new(),
             sequence: 0xFFFF_FFFF,
             witness: Vec::new(),
@@ -474,6 +477,7 @@ impl From<SplitTransaction> for Transaction {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct PunishTransaction(Transaction);
 
 #[derive(Debug, thiserror::Error)]

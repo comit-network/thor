@@ -8,6 +8,7 @@ use anyhow::Context;
 use bitcoin::Transaction;
 use ecdsa_fun::Signature;
 
+#[derive(Debug)]
 pub struct State0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -15,6 +16,7 @@ pub struct State0 {
     TX_s: SplitTransaction,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message0 {
     sig_close_transaction: Signature,

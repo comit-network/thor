@@ -1,3 +1,17 @@
+#![warn(
+    unused_extern_crates,
+    missing_debug_implementations,
+    missing_copy_implementations,
+    rust_2018_idioms,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::fallible_impl_from,
+    clippy::cast_precision_loss,
+    clippy::cast_possible_wrap,
+    clippy::dbg_macro
+)]
+#![cfg_attr(not(test), warn(clippy::unwrap_used))]
+#![forbid(unsafe_code)]
 #![allow(non_snake_case)]
 
 pub mod close;
@@ -8,6 +22,9 @@ pub mod update;
 mod keys;
 mod signature;
 mod transaction;
+
+#[cfg(feature = "serde")]
+pub(crate) mod serde;
 
 use crate::{
     create::{BuildFundingPSBT, SignFundingPSBT},
@@ -29,7 +46,7 @@ use signature::decrypt;
 /// unit used.
 pub const TX_FEE: u64 = 10_000;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Channel {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -312,7 +329,7 @@ impl Channel {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ChannelState {
     pub TX_c: CommitTransaction,
     /// Encrypted signature sent to the counterparty. If the
@@ -353,7 +370,7 @@ impl ChannelState {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RevokedState {
     channel_state: ChannelState,
     r_other: RevocationSecretKey,
@@ -404,6 +421,7 @@ pub trait NewAddress {
 
 /// All possible messages that can be sent between two parties using this
 /// library.
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Debug, EnumAsInner)]
 pub enum Message {
     Create0(create::Message0),
@@ -417,7 +435,6 @@ pub enum Message {
     Update2(update::ShareCommitEncryptedSignature),
     Update3(update::RevealRevocationSecretKey),
     Close0(close::Message0),
-    Close1(close::Message0),
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -9,12 +9,13 @@ use ecdsa_fun::{
 use sha2::Sha256;
 use std::fmt;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OwnershipKeyPair {
     secret_key: Scalar,
     public_key: Point,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct OwnershipPublicKey(Point);
 
@@ -66,16 +67,18 @@ impl From<Scalar> for OwnershipKeyPair {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RevocationKeyPair {
     secret_key: Scalar,
     public_key: Point,
 }
 
-#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug)]
 pub struct RevocationSecretKey(Scalar);
 
-#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug)]
 pub struct RevocationPublicKey(Point);
 
 impl RevocationKeyPair {
@@ -150,10 +153,11 @@ pub struct PublishingKeyPair {
     public_key: Point,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PublishingSecretKey(Scalar);
 
-#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug)]
 pub struct PublishingPublicKey(Point);
 
 impl PublishingKeyPair {
@@ -211,13 +215,13 @@ impl From<PublishingPublicKey> for Point {
 }
 
 impl fmt::LowerHex for PublishingPublicKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0.to_bytes()))
     }
 }
 
 impl fmt::Display for PublishingPublicKey {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0.to_bytes()))
     }
 }
@@ -270,4 +274,20 @@ pub fn point_from_str(from: &str) -> anyhow::Result<Point> {
         Point::from_bytes(bytes).ok_or_else(|| anyhow::anyhow!("string slice is not a Point"))?;
 
     Ok(point)
+}
+
+#[cfg(feature = "serde")]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ownership_public_key_deser_round() {
+        let pubkey = OwnershipKeyPair::new_random().public();
+
+        let str = serde_json::to_string(&pubkey).unwrap();
+        let res = serde_json::from_str(&str).unwrap();
+
+        assert_eq!(pubkey, res);
+    }
 }
