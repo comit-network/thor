@@ -26,6 +26,8 @@ mod transaction;
 #[cfg(feature = "serde")]
 pub(crate) mod serde;
 
+pub use ::bitcoin;
+
 use crate::{
     create::{BuildFundingPSBT, SignFundingPSBT},
     keys::{
