@@ -40,7 +40,7 @@ impl FundOutput {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct FundingTransaction {
-    inner: Transaction,
+    pub inner: Transaction,
     fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
     amount_a: Amount,
     amount_b: Amount,
