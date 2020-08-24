@@ -14,7 +14,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, RevokedState, SplitOutputs,
+    Balance, Channel, ChannelState, Output, RevokedState, SplitOutputs,
 };
 use anyhow::Context;
 use bitcoin::Address;
@@ -111,8 +111,8 @@ impl Alice0 {
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (self.updated_balance.ours, self.final_address_self.clone()),
-            b: (
+            alice: Output::new(self.updated_balance.ours, self.final_address_self.clone()),
+            bob: Output::new(
                 self.updated_balance.theirs,
                 self.final_address_other.clone(),
             ),
@@ -201,11 +201,11 @@ impl Bob0 {
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (
+            alice: Output::new(
                 self.updated_balance.theirs,
                 self.final_address_other.clone(),
             ),
-            b: (self.updated_balance.ours, self.final_address_self.clone()),
+            bob: Output::new(self.updated_balance.ours, self.final_address_self.clone()),
         });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 

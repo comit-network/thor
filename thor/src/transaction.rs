@@ -3,7 +3,7 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    SplitOutputs, TX_FEE,
+    Output, SplitOutputs, TX_FEE,
 };
 use anyhow::bail;
 use bitcoin::{
@@ -38,11 +38,20 @@ impl FundOutput {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, PartialEq, Debug)]
 pub struct FundingTransaction {
-    inner: Transaction,
+    pub inner: Transaction,
     fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     amount_a: Amount,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     amount_b: Amount,
 }
 
@@ -160,6 +169,7 @@ impl FundingTransaction {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommitTransaction {
     inner: Transaction,
@@ -355,6 +365,7 @@ impl CommitTransaction {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplitTransaction {
     inner: Transaction,
@@ -366,8 +377,16 @@ pub struct SplitTransaction {
 impl SplitTransaction {
     pub fn new(TX_c: &CommitTransaction, outputs: SplitOutputs) -> Self {
         let SplitOutputs {
-            a: (amount_a, address_a),
-            b: (amount_b, address_b),
+            alice:
+                Output {
+                    amount: amount_a,
+                    address: address_a,
+                },
+            bob:
+                Output {
+                    amount: amount_b,
+                    address: address_b,
+                },
         } = outputs.clone();
 
         let input = TX_c.as_txin_for_TX_s();

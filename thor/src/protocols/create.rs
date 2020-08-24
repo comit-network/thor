@@ -5,7 +5,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundOutput, SplitTransaction},
-    Channel, ChannelState, SplitOutputs,
+    Channel, ChannelState, Output, SplitOutputs,
 };
 use anyhow::Context;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
@@ -342,8 +342,8 @@ impl Alice2 {
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (self.TX_f.amount_a(), self.final_address_self.clone()),
-            b: (self.TX_f.amount_b(), self.final_address_other.clone()),
+            alice: Output::new(self.TX_f.amount_a(), self.final_address_self.clone()),
+            bob: Output::new(self.TX_f.amount_b(), self.final_address_other.clone()),
         });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
@@ -405,8 +405,8 @@ impl Bob2 {
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (self.TX_f.amount_a(), self.final_address_other.clone()),
-            b: (self.TX_f.amount_b(), self.final_address_self.clone()),
+            alice: Output::new(self.TX_f.amount_a(), self.final_address_other.clone()),
+            bob: Output::new(self.TX_f.amount_b(), self.final_address_self.clone()),
         });
 
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());

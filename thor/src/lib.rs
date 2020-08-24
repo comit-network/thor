@@ -19,6 +19,8 @@ pub mod protocols;
 mod signature;
 mod transaction;
 
+pub use ::bitcoin;
+
 #[cfg(feature = "serde")]
 pub(crate) mod serde;
 
@@ -43,6 +45,7 @@ use signature::decrypt;
 /// unit used.
 pub const TX_FEE: u64 = 10_000;
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct Channel {
     x_self: OwnershipKeyPair,
@@ -301,14 +304,30 @@ impl Channel {
 
         match outputs {
             SplitOutputs {
-                a: (ours, address_a),
-                b: (theirs, address_b),
+                alice:
+                    Output {
+                        amount: ours,
+                        address: address_a,
+                    },
+                bob:
+                    Output {
+                        amount: theirs,
+                        address: address_b,
+                    },
             } if address_a == self.final_address_self && address_b == self.final_address_other => {
                 Ok(Balance { ours, theirs })
             }
             SplitOutputs {
-                a: (theirs, address_a),
-                b: (ours, address_b),
+                alice:
+                    Output {
+                        amount: theirs,
+                        address: address_a,
+                    },
+                bob:
+                    Output {
+                        amount: ours,
+                        address: address_b,
+                    },
             } if address_a == self.final_address_other && address_b == self.final_address_self => {
                 Ok(Balance { ours, theirs })
             }
@@ -326,6 +345,7 @@ impl Channel {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct ChannelState {
     pub TX_c: CommitTransaction,
@@ -367,6 +387,7 @@ impl ChannelState {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevokedState {
     channel_state: ChannelState,
@@ -399,10 +420,28 @@ impl RevokedState {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplitOutputs {
-    a: (Amount, Address),
-    b: (Amount, Address),
+    alice: Output,
+    bob: Output,
+}
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Output {
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
+    pub amount: Amount,
+    pub address: Address,
+}
+
+impl Output {
+    pub fn new(amount: Amount, address: Address) -> Self {
+        Self { amount, address }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
