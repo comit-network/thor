@@ -45,6 +45,7 @@ use signature::decrypt;
 /// unit used.
 pub const TX_FEE: u64 = 10_000;
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct Channel {
     x_self: OwnershipKeyPair,
@@ -344,6 +345,7 @@ impl Channel {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct ChannelState {
     pub TX_c: CommitTransaction,
@@ -385,6 +387,7 @@ impl ChannelState {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevokedState {
     channel_state: ChannelState,
@@ -417,14 +420,20 @@ impl RevokedState {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplitOutputs {
     alice: Output,
     bob: Output,
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Output {
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     pub amount: Amount,
     pub address: Address,
 }
