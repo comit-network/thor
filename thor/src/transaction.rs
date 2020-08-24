@@ -41,7 +41,7 @@ impl FundOutput {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, PartialEq, Debug)]
 pub struct FundingTransaction {
-    pub inner: Transaction,
+    inner: Transaction,
     fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
     #[cfg_attr(
         feature = "serde",
@@ -143,6 +143,10 @@ impl FundingTransaction {
     pub fn into_psbt(self) -> anyhow::Result<PartiallySignedTransaction> {
         PartiallySignedTransaction::from_unsigned_tx(self.inner)
             .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
+    }
+
+    pub fn txid(&self) -> Txid {
+        self.inner.txid()
     }
 
     fn build_output_descriptor(
