@@ -3,7 +3,7 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    SplitOutputs, TX_FEE,
+    TX_FEE,
 };
 use anyhow::bail;
 use bitcoin::{
@@ -235,7 +235,7 @@ impl CommitTransaction {
                 key: X_b.into(),
             };
 
-            // NOTE: The order hopefully doesn't matter
+            // The order in which these are inserted doesn't matter
             satisfier.insert(X_a, (sig_a.into(), ::bitcoin::SigHashType::All));
             satisfier.insert(X_b, (sig_b.into(), ::bitcoin::SigHashType::All));
 
@@ -360,25 +360,29 @@ pub struct SplitTransaction {
     inner: Transaction,
     input_descriptor: Descriptor<bitcoin::PublicKey>,
     digest: SigHash,
-    outputs: SplitOutputs,
 }
 
 impl SplitTransaction {
-    pub fn new(TX_c: &CommitTransaction, outputs: SplitOutputs) -> Self {
-        let SplitOutputs {
-            a: (amount_a, address_a),
-            b: (amount_b, address_b),
-        } = outputs.clone();
-
+    // TODO: Validate that TX_c as input can pay for outputs + fees.
+    pub fn new(
+        TX_c: &CommitTransaction,
+        amount_a: Amount,
+        address_a: Address,
+        amount_b: Amount,
+        address_b: Address,
+    ) -> Self {
         let input = TX_c.as_txin_for_TX_s();
 
+        // Distribute transaction fee costs evenly between outputs
+        let half_fee = TX_FEE / 2;
+
         let output_a = TxOut {
-            value: amount_a.as_sat() - TX_FEE,
+            value: amount_a.as_sat() - half_fee,
             script_pubkey: address_a.script_pubkey(),
         };
 
         let output_b = TxOut {
-            value: amount_b.as_sat() - TX_FEE,
+            value: amount_b.as_sat() - half_fee,
             script_pubkey: address_b.script_pubkey(),
         };
 
@@ -397,7 +401,6 @@ impl SplitTransaction {
             inner: TX_s,
             input_descriptor,
             digest,
-            outputs,
         }
     }
 
@@ -405,10 +408,7 @@ impl SplitTransaction {
         x_self.sign(self.digest)
     }
 
-    pub fn outputs(&self) -> SplitOutputs {
-        self.outputs.clone()
-    }
-
+    // TODO: Expose verify sig directly on Transaction.
     pub fn digest(&self) -> SigHash {
         self.digest
     }
@@ -573,7 +573,7 @@ impl PunishTransaction {
             };
             let sig_r_other = r_other.sign(digest);
 
-            // NOTE: The order hopefully doesn't matter
+            // The order in which these are inserted doesn't matter
             satisfier.insert(
                 X_self_hash,
                 (X_self, (sig_x_self.into(), ::bitcoin::SigHashType::All)),
@@ -619,12 +619,42 @@ pub struct CloseTransaction {
 }
 
 impl CloseTransaction {
-    pub fn new(TX_f: &FundingTransaction, TX_s: &SplitTransaction) -> Self {
-        let close_transaction = Transaction {
-            version: 2,
-            lock_time: 0,
-            input: vec![TX_f.as_txin()],
-            output: TX_s.inner.output.clone(),
+    pub fn new(
+        TX_f: &FundingTransaction,
+        amount_a: Amount,
+        address_a: Address,
+        amount_b: Amount,
+        address_b: Address,
+    ) -> Self {
+        let input = TX_f.as_txin();
+
+        // Distribute transaction fee costs evenly between outputs
+        let half_fee = TX_FEE / 2;
+
+        let output_a = TxOut {
+            value: amount_a.as_sat() - half_fee,
+            script_pubkey: address_a.script_pubkey(),
+        };
+
+        let output_b = TxOut {
+            value: amount_b.as_sat() - half_fee,
+            script_pubkey: address_b.script_pubkey(),
+        };
+
+        let close_transaction = {
+            let mut output = vec![output_a, output_b];
+
+            // Sort the outputs by ascending lexicographic order of script_pubkey bytes.
+            // Both parties _must_ do this so that they compute the same close transaction
+            // and the signatures they exchange are valid
+            output.sort_by(|a, b| a.script_pubkey.cmp(&b.script_pubkey));
+
+            Transaction {
+                version: 2,
+                lock_time: 0,
+                input: vec![input],
+                output,
+            }
         };
 
         let digest = Self::compute_digest(&close_transaction, &TX_f);
@@ -665,6 +695,7 @@ impl CloseTransaction {
                 key: X_b.into(),
             };
 
+            // The order in which these are inserted doesn't matter
             satisfier.insert(X_a, (sig_a.into(), ::bitcoin::SigHashType::All));
             satisfier.insert(X_b, (sig_b.into(), ::bitcoin::SigHashType::All));
 

@@ -33,7 +33,6 @@ use crate::{
     },
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
-use anyhow::bail;
 use bitcoin::{Address, Amount, Transaction};
 use ecdsa_fun::adaptor::EncryptedSignature;
 use enum_as_inner::EnumAsInner;
@@ -42,8 +41,7 @@ use signature::decrypt;
 
 // TODO: We should handle fees dynamically
 
-/// Flat fee used for all transactions involved in the protocol. Satoshi is the
-/// unit used.
+/// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
 
 #[derive(Clone, Debug)]
@@ -52,8 +50,8 @@ pub struct Channel {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    pub TX_f_body: FundingTransaction,
-    pub current_state: ChannelState,
+    TX_f_body: FundingTransaction,
+    current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
 }
 
@@ -325,24 +323,8 @@ impl Channel {
         Ok(())
     }
 
-    pub fn balance(&self) -> anyhow::Result<Balance> {
-        let outputs = self.current_state.signed_TX_s.outputs();
-
-        match outputs {
-            SplitOutputs {
-                a: (ours, address_a),
-                b: (theirs, address_b),
-            } if address_a == self.final_address_self && address_b == self.final_address_other => {
-                Ok(Balance { ours, theirs })
-            }
-            SplitOutputs {
-                a: (theirs, address_a),
-                b: (ours, address_b),
-            } if address_a == self.final_address_other && address_b == self.final_address_self => {
-                Ok(Balance { ours, theirs })
-            }
-            _ => bail!("split transaction does not pay to expected addresses"),
-        }
+    pub fn balance(&self) -> Balance {
+        self.current_state.balance
     }
 
     /// Retrieve the signed `CommitTransaction` of the state that was revoked
@@ -357,18 +339,22 @@ impl Channel {
 
 #[derive(Clone, Debug)]
 pub struct ChannelState {
-    pub TX_c: CommitTransaction,
-    /// Encrypted signature sent to the counterparty. If the
-    /// counterparty decrypts it with their own `PublishingSecretKey`
-    /// and uses it to sign and broadcast `TX_c`, we will be able to
-    /// extract their `PublishingSecretKey` by using
-    /// `recover_decryption_key`. If said `TX_c` was already revoked,
+    /// Proportion of the coins in the channel that currently belong to either
+    /// party. To actually claim these coins one or more transactions will have
+    /// to be submitted to the blockchain, so in practice the balance will see a
+    /// reduction to pay for transaction fees.
+    balance: Balance,
+    TX_c: CommitTransaction,
+    /// Encrypted signature sent to the counterparty. If the counterparty
+    /// decrypts it with their own `PublishingSecretKey` and uses it to sign and
+    /// broadcast `TX_c`, we will be able to extract their `PublishingSecretKey`
+    /// by using `recover_decryption_key`. If said `TX_c` was already revoked,
     /// we can use it with the `RevocationSecretKey` to punish them.
     pub encsig_TX_c_self: EncryptedSignature,
-    /// Encrypted signature received from the counterparty. It can be
-    /// decrypted using our `PublishingSecretkey` and used to sign
-    /// `TX_c`. Keep in mind, that publishing a revoked `TX_c` will
-    /// allow the counterparty to punish us.
+    /// Encrypted signature received from the counterparty. It can be decrypted
+    /// using our `PublishingSecretkey` and used to sign `TX_c`. Keep in mind,
+    /// that publishing a revoked `TX_c` will allow the counterparty to punish
+    /// us.
     pub encsig_TX_c_other: EncryptedSignature,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
@@ -426,12 +412,6 @@ impl RevokedState {
 
         Ok(signed_TX_c)
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SplitOutputs {
-    a: (Amount, Address),
-    b: (Amount, Address),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
