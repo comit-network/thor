@@ -5,7 +5,7 @@ mod harness;
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
 use harness::{make_transports, make_wallets};
-use thor::{punish, Balance, Channel};
+use thor::{protocols::punish, Balance, Channel};
 
 #[tokio::test]
 async fn e2e_channel_creation() {

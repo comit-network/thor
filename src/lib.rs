@@ -14,12 +14,8 @@
 #![forbid(unsafe_code)]
 #![allow(non_snake_case)]
 
-pub mod close;
-pub mod create;
-pub mod punish;
-pub mod update;
-
 mod keys;
+pub mod protocols;
 mod signature;
 mod transaction;
 
@@ -27,17 +23,18 @@ mod transaction;
 pub(crate) mod serde;
 
 use crate::{
-    create::{BuildFundingPSBT, SignFundingPSBT},
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
+    protocols::create::{BuildFundingPSBT, SignFundingPSBT},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
 use anyhow::bail;
 use bitcoin::{Address, Amount, Transaction};
 use ecdsa_fun::adaptor::EncryptedSignature;
 use enum_as_inner::EnumAsInner;
+use protocols::{close, create, update};
 use signature::decrypt;
 
 // TODO: We should handle fees dynamically
