@@ -5,7 +5,7 @@ mod harness;
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
 use harness::{make_transports, make_wallets};
-use thor::{protocols::punish, Balance, Channel};
+use thor::{Balance, Channel};
 
 #[tokio::test]
 async fn e2e_channel_creation() {
@@ -140,6 +140,9 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
         .await
         .unwrap();
 
+    let after_open_balance_alice = alice_wallet.0.balance().await.unwrap();
+    let after_open_balance_bob = bob_wallet.0.balance().await.unwrap();
+
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
     let payment = Amount::from_btc(0.5).unwrap();
     let alice_balance = fund_amount - payment;
@@ -177,14 +180,23 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
 
     // Bob sees the transaction and punishes Alice
 
-    let bob = punish::State0::from(bob_channel);
-    let TX_p = bob.punish(signed_revoked_TX_c).unwrap();
-
-    bob_wallet
-        .0
-        .send_raw_transaction(TX_p.into())
+    bob_channel
+        .punish(&bob_wallet, signed_revoked_TX_c)
         .await
         .unwrap();
+
+    let after_punish_balance_alice = alice_wallet.0.balance().await.unwrap();
+    let after_punish_balance_bob = bob_wallet.0.balance().await.unwrap();
+
+    assert_eq!(
+        after_punish_balance_alice, after_open_balance_alice,
+        "Alice should get no money back after being punished"
+    );
+    assert_eq!(
+        after_punish_balance_bob,
+        after_open_balance_bob + fund_amount + fund_amount - Amount::from_sat(2 * thor::TX_FEE),
+        "Bob should get all the money back after punishing Alice"
+    );
 }
 
 #[tokio::test]

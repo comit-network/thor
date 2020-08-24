@@ -27,7 +27,10 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    protocols::create::{BuildFundingPSBT, SignFundingPSBT},
+    protocols::{
+        create::{BuildFundingPSBT, SignFundingPSBT},
+        punish::punish,
+    },
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
 use anyhow::bail;
@@ -291,6 +294,32 @@ impl Channel {
         let split_transaction = self.current_state.signed_TX_s.clone();
         wallet
             .broadcast_signed_transaction(split_transaction.clone().into())
+            .await?;
+
+        Ok(())
+    }
+
+    /// Punish the counterparty for publishing a revoked commit transaction.
+    ///
+    /// This effectively closes the channel, as all of the channel's funds go to
+    /// our final address.
+    pub async fn punish<W>(
+        &self,
+        wallet: &W,
+        old_commit_transaction: Transaction,
+    ) -> anyhow::Result<()>
+    where
+        W: BroadcastSignedTransaction,
+    {
+        let punish_transaction = punish(
+            &self.x_self,
+            &self.revoked_states,
+            self.final_address_self.clone(),
+            old_commit_transaction,
+        )?;
+
+        wallet
+            .broadcast_signed_transaction(punish_transaction.into())
             .await?;
 
         Ok(())

@@ -490,12 +490,13 @@ pub enum PunishError {
 
 impl PunishTransaction {
     pub fn new(
-        revoked_TX_c_candidate: Transaction,
-        TX_c: CommitTransaction,
+        x_self: &OwnershipKeyPair,
+        final_address: Address,
+        TX_c: &CommitTransaction,
+        encsig_TX_c_self: &EncryptedSignature,
+        r_other: &RevocationKeyPair,
         Y_other: PublishingPublicKey,
-        encsig_TX_c_self: EncryptedSignature,
-        r_other: RevocationKeyPair,
-        x_self: OwnershipKeyPair,
+        revoked_TX_c_candidate: Transaction,
     ) -> anyhow::Result<Self> {
         let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
@@ -531,10 +532,9 @@ impl PunishTransaction {
             .ok_or_else(|| PunishError::RecoveryFailure)?;
 
         let mut TX_p = {
-            let output_descriptor = PunishTransaction::wpk_descriptor(x_self.public());
             let output = TxOut {
                 value: TX_c.value().as_sat() - TX_FEE,
-                script_pubkey: output_descriptor.script_pubkey(),
+                script_pubkey: final_address.script_pubkey(),
             };
             Transaction {
                 version: 2,
@@ -602,15 +602,6 @@ impl PunishTransaction {
             &TX_c.output_descriptor().witness_script(),
             TX_c.value().as_sat(),
         )
-    }
-
-    fn wpk_descriptor(key: OwnershipPublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
-        let pk = bitcoin::PublicKey {
-            key: key.into(),
-            compressed: true,
-        };
-
-        miniscript::Descriptor::Wpkh(pk)
     }
 }
 
