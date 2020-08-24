@@ -19,9 +19,8 @@ async fn e2e_channel_creation() {
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create =
-        Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
     let (_alice_channel, _bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -40,9 +39,8 @@ async fn e2e_channel_update() {
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create =
-        Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -53,7 +51,7 @@ async fn e2e_channel_update() {
     let alice_balance = fund_amount - payment;
     let bob_balance = fund_amount + payment;
 
-    let alice_update = alice_channel.update_alice(
+    let alice_update = alice_channel.update(
         &mut alice_transport,
         Balance {
             ours: alice_balance,
@@ -61,7 +59,7 @@ async fn e2e_channel_update() {
         },
         time_lock,
     );
-    let bob_update = bob_channel.update_bob(
+    let bob_update = bob_channel.update(
         &mut bob_transport,
         Balance {
             ours: bob_balance,
@@ -95,9 +93,8 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create =
-        Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -111,7 +108,7 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
     let alice_balance = fund_amount - payment;
     let bob_balance = fund_amount + payment;
 
-    let alice_update = alice_channel.update_alice(
+    let alice_update = alice_channel.update(
         &mut alice_transport,
         Balance {
             ours: alice_balance,
@@ -119,7 +116,7 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
         },
         time_lock,
     );
-    let bob_update = bob_channel.update_bob(
+    let bob_update = bob_channel.update(
         &mut bob_transport,
         Balance {
             ours: bob_balance,
@@ -174,9 +171,8 @@ async fn e2e_channel_collaborative_close() {
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create =
-        Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -225,9 +221,8 @@ async fn e2e_force_close_channel() {
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create =
-        Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
     let (mut alice_channel, _bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await

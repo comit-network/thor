@@ -1,12 +1,3 @@
-//! # Channel update protocol
-//!
-//! Alice proposes a channel update to Bob.
-//!
-//! Alice: State0(Channel) --> AliceState0 --> State1 --> State2 --> State3 -->
-//! Channel
-//!
-//! Bob: State0(Channel) --> State1 --> State2 --> State3 --> Channel
-
 use crate::{
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
@@ -50,7 +41,7 @@ pub struct RevealRevocationSecretKey {
 }
 
 #[derive(Debug)]
-pub struct Alice0 {
+pub struct State0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -64,7 +55,7 @@ pub struct Alice0 {
     y_self: PublishingKeyPair,
 }
 
-impl Alice0 {
+impl State0 {
     pub fn new(channel: Channel, updated_balance: Balance, time_lock: u32) -> Self {
         let r_self = RevocationKeyPair::new_random();
         let y_self = PublishingKeyPair::new_random();
@@ -100,12 +91,14 @@ impl Alice0 {
     ) -> anyhow::Result<State1> {
         let TX_c = CommitTransaction::new(
             &self.TX_f_body,
-            (
-                self.x_self.public(),
-                self.r_self.public(),
-                self.y_self.public(),
-            ),
-            (self.X_other.clone(), R_other.clone(), Y_other.clone()),
+            &[
+                (
+                    self.x_self.public(),
+                    self.r_self.public(),
+                    self.y_self.public(),
+                ),
+                (self.X_other.clone(), R_other.clone(), Y_other.clone()),
+            ],
             self.time_lock,
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
@@ -140,99 +133,8 @@ impl Alice0 {
     }
 }
 
-#[derive(Debug)]
-pub struct Bob0 {
-    x_self: OwnershipKeyPair,
-    X_other: OwnershipPublicKey,
-    final_address_self: Address,
-    final_address_other: Address,
-    TX_f_body: FundingTransaction,
-    current_state: ChannelState,
-    revoked_states: Vec<RevokedState>,
-    updated_balance: Balance,
-    time_lock: u32,
-    r_self: RevocationKeyPair,
-    y_self: PublishingKeyPair,
-}
-
-impl Bob0 {
-    pub fn new(channel: Channel, updated_balance: Balance, time_lock: u32) -> Self {
-        let r_self = RevocationKeyPair::new_random();
-        let y_self = PublishingKeyPair::new_random();
-
-        Self {
-            x_self: channel.x_self,
-            X_other: channel.X_other,
-            final_address_self: channel.final_address_self,
-            final_address_other: channel.final_address_other,
-            TX_f_body: channel.TX_f_body,
-            current_state: channel.current_state,
-            revoked_states: channel.revoked_states,
-            updated_balance,
-            time_lock,
-            r_self,
-            y_self,
-        }
-    }
-
-    pub fn compose(&self) -> ShareKeys {
-        ShareKeys {
-            R: self.r_self.public(),
-            Y: self.y_self.public(),
-        }
-    }
-
-    pub fn interpret(
-        self,
-        ShareKeys {
-            R: R_other,
-            Y: Y_other,
-        }: ShareKeys,
-    ) -> anyhow::Result<State1> {
-        let TX_c = CommitTransaction::new(
-            &self.TX_f_body,
-            (self.X_other.clone(), R_other.clone(), Y_other.clone()),
-            (
-                self.x_self.public(),
-                self.r_self.public(),
-                self.y_self.public(),
-            ),
-            self.time_lock,
-        )?;
-        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
-
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            self.updated_balance.theirs,
-            self.final_address_other.clone(),
-            self.updated_balance.ours,
-            self.final_address_self.clone(),
-        );
-        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
-
-        Ok(State1 {
-            x_self: self.x_self,
-            X_other: self.X_other,
-            final_address_self: self.final_address_self,
-            final_address_other: self.final_address_other,
-            TX_f: self.TX_f_body,
-            current_state: self.current_state,
-            revoked_states: self.revoked_states,
-            updated_balance: self.updated_balance,
-            r_self: self.r_self,
-            R_other,
-            y_self: self.y_self,
-            Y_other,
-            TX_c,
-            TX_s,
-            encsig_TX_c_self,
-            sig_TX_s_self,
-        })
-    }
-}
-
-/// A party who has agreed on the terms of a channel update and is
-/// ready to start exchanging signatures.
+/// A party who has exchanged `RevocationPublicKey`s and `PublishingPublicKey`s
+/// with the counterparty and is ready to start exchanging signatures.
 #[derive(Debug)]
 pub struct State1 {
     x_self: OwnershipKeyPair,

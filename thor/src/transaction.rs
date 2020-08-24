@@ -23,18 +23,21 @@ use sha2::Sha256;
 use std::{collections::HashMap, str::FromStr};
 
 #[derive(Clone, Debug)]
-pub struct FundOutput(Address);
+pub struct FundOutput(miniscript::Descriptor<bitcoin::PublicKey>);
 
 impl FundOutput {
-    pub fn new(X_a: OwnershipPublicKey, X_b: OwnershipPublicKey) -> Self {
-        let descriptor = FundingTransaction::build_output_descriptor(&X_a.into(), &X_b.into());
-        let address = descriptor.address(Network::Regtest).expect("cannot fail");
+    pub fn new(Xs: [OwnershipPublicKey; 2]) -> Self {
+        let descriptor = FundingTransaction::build_output_descriptor(Xs);
 
-        Self(address)
+        Self(descriptor)
+    }
+
+    fn descriptor(&self) -> miniscript::Descriptor<bitcoin::PublicKey> {
+        self.0.clone()
     }
 
     pub fn address(&self) -> Address {
-        self.0.clone()
+        self.0.address(Network::Regtest).expect("cannot fail")
     }
 }
 
@@ -57,17 +60,17 @@ pub struct FundingTransaction {
 
 impl FundingTransaction {
     pub fn new(
-        (X_a, tid_a, amount_a): (OwnershipPublicKey, PartiallySignedTransaction, Amount),
-        (X_b, tid_b, amount_b): (OwnershipPublicKey, PartiallySignedTransaction, Amount),
+        (X_0, tid_0, amount_0): (OwnershipPublicKey, PartiallySignedTransaction, Amount),
+        (X_1, tid_1, amount_1): (OwnershipPublicKey, PartiallySignedTransaction, Amount),
     ) -> anyhow::Result<Self> {
-        let fund_output_descriptor =
-            FundingTransaction::build_output_descriptor(&X_a.into(), &X_b.into());
+        let fund_output = FundOutput::new([X_0, X_1]);
+        let fund_output_descriptor = fund_output.descriptor();
 
         let Transaction {
             input: input_a,
             output,
             ..
-        } = tid_a.extract_tx();
+        } = tid_0.extract_tx();
 
         let change_outputs_a = output
             .into_iter()
@@ -78,7 +81,7 @@ impl FundingTransaction {
             input: input_b,
             output,
             ..
-        } = tid_b.extract_tx();
+        } = tid_1.extract_tx();
 
         let change_outputs_b = output
             .into_iter()
@@ -86,28 +89,40 @@ impl FundingTransaction {
             .collect();
 
         let fund_output = TxOut {
-            value: (amount_a + amount_b).as_sat(),
+            value: (amount_0 + amount_1).as_sat(),
             script_pubkey: fund_output_descriptor.script_pubkey(),
         };
 
-        let TX_f = Transaction {
-            version: 2,
-            lock_time: 0,
-            input: vec![input_a, input_b].concat(),
-            output: vec![vec![fund_output], change_outputs_a, change_outputs_b].concat(),
+        let TX_f = {
+            // Sort the inputs by ascending order of previous_outputs (this order is defined
+            // by rust-bitcoin as lexicographical order of txid and, if needed, numerical
+            // order of vout). Both parties _must_ do this so that they compute the same
+            // funding transaction
+            let mut input = vec![input_a, input_b].concat();
+            input.sort_by(|a, b| a.previous_output.cmp(&b.previous_output));
+
+            // Sort the outputs by ascending lexicographical order of script_pubkey bytes.
+            // Both parties _must_ do this so that they compute the same funding transaction
+            let mut output = vec![vec![fund_output], change_outputs_a, change_outputs_b].concat();
+            output.sort_by(|a, b| a.script_pubkey.cmp(&b.script_pubkey));
+
+            Transaction {
+                version: 2,
+                lock_time: 0,
+                input,
+                output,
+            }
         };
 
         Ok(Self {
             inner: TX_f,
             fund_output_descriptor,
-            amount_a,
-            amount_b,
+            amount_a: amount_0,
+            amount_b: amount_1,
         })
     }
 
     pub fn as_txin(&self) -> TxIn {
-        // A funding transaction should have 2 outputs at most (one for the channel, one
-        // for change)
         #[allow(clippy::cast_possible_truncation)]
         let fund_output_index = self
             .inner
@@ -150,20 +165,26 @@ impl FundingTransaction {
     }
 
     fn build_output_descriptor(
-        X_a: &secp256k1::PublicKey,
-        X_b: &secp256k1::PublicKey,
+        mut Xs: [OwnershipPublicKey; 2],
     ) -> miniscript::Descriptor<bitcoin::PublicKey> {
-        // Describes the spending policy of the channel fund transaction TX_f.
-        // For now we use `and(X_a, X_b)` - eventually we might want to replace this
-        // with a threshold signature.
-        const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_a),pk_k(X_b))";
+        // Decide which subscript (either `_0` or `_1`) to assign to each ownership
+        // public key based on their ascending lexicographical order of bytes. Both
+        // parties _must_ do this so that they compute the same fund transaction output
+        // descriptor
+        Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
+        let [X_0, X_1] = Xs;
 
-        let X_a = hex::encode(X_a.serialize().to_vec());
-        let X_b = hex::encode(X_b.serialize().to_vec());
+        // Describes the spending policy of the channel fund transaction TX_f.
+        // For now we use `and(X_0, X_1)` - eventually we might want to replace this
+        // with a threshold signature.
+        const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_0),pk_k(X_1))";
+
+        let X_0 = hex::encode(secp256k1::PublicKey::from(X_0).serialize().to_vec());
+        let X_1 = hex::encode(secp256k1::PublicKey::from(X_1).serialize().to_vec());
 
         let miniscript = MINISCRIPT_TEMPLATE
-            .replace("X_a", &X_a)
-            .replace("X_b", &X_b);
+            .replace("X_0", &X_0)
+            .replace("X_1", &X_1);
 
         let miniscript =
             miniscript::Miniscript::<bitcoin::PublicKey, Segwitv0>::from_str(&miniscript)
@@ -186,12 +207,10 @@ pub struct CommitTransaction {
 impl CommitTransaction {
     pub fn new(
         TX_f: &FundingTransaction,
-        (X_a, R_a, Y_a): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
-        (X_b, R_b, Y_b): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
+        keys: &[(OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey); 2],
         time_lock: u32,
     ) -> anyhow::Result<Self> {
-        let output_descriptor =
-            Self::build_descriptor((X_a, R_a, Y_a), (X_b, R_b, Y_b), time_lock)?;
+        let output_descriptor = Self::build_descriptor(keys, time_lock)?;
 
         let input = TX_f.as_txin();
         let TX_c = Transaction {
@@ -234,24 +253,24 @@ impl CommitTransaction {
     /// Add signatures to CommitTransaction.
     pub fn add_signatures(
         self,
-        (X_a, sig_a): (OwnershipPublicKey, Signature),
-        (X_b, sig_b): (OwnershipPublicKey, Signature),
+        (X_0, sig_0): (OwnershipPublicKey, Signature),
+        (X_1, sig_1): (OwnershipPublicKey, Signature),
     ) -> anyhow::Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
-            let X_a = ::bitcoin::PublicKey {
+            let X_0 = ::bitcoin::PublicKey {
                 compressed: true,
-                key: X_a.into(),
+                key: X_0.into(),
             };
-            let X_b = ::bitcoin::PublicKey {
+            let X_1 = ::bitcoin::PublicKey {
                 compressed: true,
-                key: X_b.into(),
+                key: X_1.into(),
             };
 
             // The order in which these are inserted doesn't matter
-            satisfier.insert(X_a, (sig_a.into(), ::bitcoin::SigHashType::All));
-            satisfier.insert(X_b, (sig_b.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_0, (sig_0.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_1, (sig_1.into(), ::bitcoin::SigHashType::All));
 
             satisfier
         };
@@ -265,8 +284,8 @@ impl CommitTransaction {
 
     /// Use `CommitTransaction` as a Transaction Input for the
     /// `SplitTransaction`. The sequence number is set to the value of
-    /// `time_lock` since the `SplitTransaction` uses the
-    /// time-locked path of the `CommitTransaction`'s script.
+    /// `time_lock` since the `SplitTransaction` uses the time-locked path
+    /// of the `CommitTransaction`'s script.
     pub fn as_txin_for_TX_s(&self) -> TxIn {
         TxIn {
             previous_output: OutPoint::new(self.inner.txid(), 0),
@@ -314,17 +333,36 @@ impl CommitTransaction {
     }
 
     fn build_descriptor(
-        (X_0, R_0, Y_0): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
-        (X_1, R_1, Y_1): (OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey),
+        keys: &[(OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey); 2],
         time_lock: u32,
     ) -> anyhow::Result<Descriptor<bitcoin::PublicKey>> {
-        let X_0 = bitcoin::secp256k1::PublicKey::from(X_0);
-        let R_0 = bitcoin::secp256k1::PublicKey::from(R_0);
-        let Y_0 = bitcoin::secp256k1::PublicKey::from(Y_0);
+        // Decide which subscript (either `_0` or `_1`) to assign to each group of keys
+        // based on comparing the ownership public keys in ascending
+        // lexicographical order of bytes. Both parties _must_ do this so that
+        // they compute the same commit transaction output descriptor
+        let (X, R, Y) = match keys[0]
+            .0
+            .partial_cmp(&keys[1].0)
+            .expect("comparison is possible")
+        {
+            std::cmp::Ordering::Less => (
+                (keys[0].0.clone(), keys[1].0.clone()),
+                (keys[0].1.clone(), keys[1].1.clone()),
+                (keys[0].2.clone(), keys[1].2.clone()),
+            ),
+            _ => (
+                (keys[1].0.clone(), keys[0].0.clone()),
+                (keys[1].1.clone(), keys[0].1.clone()),
+                (keys[1].2.clone(), keys[0].2.clone()),
+            ),
+        };
 
-        let X_1 = bitcoin::secp256k1::PublicKey::from(X_1);
-        let R_1 = bitcoin::secp256k1::PublicKey::from(R_1);
-        let Y_1 = bitcoin::secp256k1::PublicKey::from(Y_1);
+        let X_0 = bitcoin::secp256k1::PublicKey::from(X.0);
+        let X_1 = bitcoin::secp256k1::PublicKey::from(X.1);
+        let R_0 = bitcoin::secp256k1::PublicKey::from(R.0);
+        let R_1 = bitcoin::secp256k1::PublicKey::from(R.1);
+        let Y_0 = bitcoin::secp256k1::PublicKey::from(Y.0);
+        let Y_1 = bitcoin::secp256k1::PublicKey::from(Y.1);
 
         let X_0_hash = hash160::Hash::hash(&X_0.serialize()[..]);
         let X_0 = hex::encode(X_0.serialize().to_vec());
@@ -337,12 +375,12 @@ impl CommitTransaction {
         let Y_0_hash = hash160::Hash::hash(&Y_0.serialize()[..]);
         let Y_1_hash = hash160::Hash::hash(&Y_1.serialize()[..]);
 
-        // Describes the spending policy of the channel commit transaction T_c.
-        // There are possible way to spend this transaction:
-        // 1. Channel state: It is correctly signed w.r.t pk_0, pk_1 and after relative
+        // Describes the spending policy of the channel commit transaction TX_c.
+        // There are three possible way to spend this transaction:
+        // 1. Channel state: It is correctly signed w.r.t X_0, X_1 and after relative
         // timelock
-        // 2. Punish 0: It is correctly signed w.r.t pk_1, Y_0, R_0
-        // 3. Punish 1: It is correctly signed w.r.t pk_0, Y_1, R_1
+        // 2. Punish 0: It is correctly signed w.r.t X_1, Y_0, R_0
+        // 3. Punish 1: It is correctly signed w.r.t X_0, Y_1, R_1
 
         // Policy is or(and(older(144),and(pk(X0),pk(X1))),or(and(pk(X1),and(pk(Y0),
         // pk(R0))),and(pk(X0),and(pk(Y1),pk(R1)))))
@@ -401,11 +439,18 @@ impl SplitTransaction {
             script_pubkey: address_b.script_pubkey(),
         };
 
-        let TX_s = Transaction {
-            version: 2,
-            lock_time: 0,
-            input: vec![input],
-            output: vec![output_a, output_b],
+        let TX_s = {
+            // Sort the outputs by ascending lexicographical order of script_pubkey bytes.
+            // Both parties _must_ do this so that they compute the same funding transaction
+            let mut output = vec![output_a, output_b];
+            output.sort_by(|a, b| a.script_pubkey.cmp(&b.script_pubkey));
+
+            Transaction {
+                version: 2,
+                lock_time: 0,
+                input: vec![input],
+                output,
+            }
         };
 
         let digest = Self::compute_digest(&TX_s, TX_c);
@@ -431,8 +476,8 @@ impl SplitTransaction {
     /// Add signatures to SplitTransaction.
     pub fn add_signatures(
         &mut self,
-        (X_a, sig_a): (OwnershipPublicKey, Signature),
-        (X_b, sig_b): (OwnershipPublicKey, Signature),
+        (X_0, sig_0): (OwnershipPublicKey, Signature),
+        (X_1, sig_1): (OwnershipPublicKey, Signature),
     ) -> anyhow::Result<()> {
         struct Satisfier {
             a: (bitcoin::PublicKey, bitcoin::secp256k1::Signature),
@@ -457,18 +502,18 @@ impl SplitTransaction {
             }
         }
 
-        let X_a = ::bitcoin::PublicKey {
+        let X_0 = ::bitcoin::PublicKey {
             compressed: true,
-            key: X_a.into(),
+            key: X_0.into(),
         };
-        let X_b = ::bitcoin::PublicKey {
+        let X_1 = ::bitcoin::PublicKey {
             compressed: true,
-            key: X_b.into(),
+            key: X_1.into(),
         };
 
         let satisfier = Satisfier {
-            a: (X_a, sig_a.into()),
-            b: (X_b, sig_b.into()),
+            a: (X_0, sig_0.into()),
+            b: (X_1, sig_1.into()),
         };
 
         self.input_descriptor
@@ -659,9 +704,8 @@ impl CloseTransaction {
         let close_transaction = {
             let mut output = vec![output_a, output_b];
 
-            // Sort the outputs by ascending lexicographic order of script_pubkey bytes.
+            // Sort the outputs by ascending lexicographical order of script_pubkey bytes.
             // Both parties _must_ do this so that they compute the same close transaction
-            // and the signatures they exchange are valid
             output.sort_by(|a, b| a.script_pubkey.cmp(&b.script_pubkey));
 
             Transaction {
@@ -695,24 +739,24 @@ impl CloseTransaction {
 
     pub fn add_signatures(
         self,
-        (X_a, sig_a): (OwnershipPublicKey, Signature),
-        (X_b, sig_b): (OwnershipPublicKey, Signature),
+        (X_0, sig_0): (OwnershipPublicKey, Signature),
+        (X_1, sig_1): (OwnershipPublicKey, Signature),
     ) -> anyhow::Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
-            let X_a = ::bitcoin::PublicKey {
+            let X_0 = ::bitcoin::PublicKey {
                 compressed: true,
-                key: X_a.into(),
+                key: X_0.into(),
             };
-            let X_b = ::bitcoin::PublicKey {
+            let X_1 = ::bitcoin::PublicKey {
                 compressed: true,
-                key: X_b.into(),
+                key: X_1.into(),
             };
 
             // The order in which these are inserted doesn't matter
-            satisfier.insert(X_a, (sig_a.into(), ::bitcoin::SigHashType::All));
-            satisfier.insert(X_b, (sig_b.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_0, (sig_0.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_1, (sig_1.into(), ::bitcoin::SigHashType::All));
 
             satisfier
         };
@@ -758,15 +802,15 @@ mod tests {
 
     #[test]
     fn funding_descriptor_to_witness_script() {
-        let X_0 = secp256k1::PublicKey::from_str(
-            "0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166",
-        )
-        .expect("key 0");
-        let X_1 = secp256k1::PublicKey::from_str(
-            "022222222222222222222222222222222222222222222222222222222222222222",
-        )
-        .expect("key 1");
-        let descriptor = FundingTransaction::build_output_descriptor(&X_0, &X_1);
+        let X_0 =
+            point_from_str("0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166")
+                .unwrap()
+                .into();
+        let X_1 =
+            point_from_str("022222222222222222222222222222222222222222222222222222222222222222")
+                .unwrap()
+                .into();
+        let descriptor = FundingTransaction::build_output_descriptor([X_0, X_1]);
 
         let witness_script = format!("{}", descriptor.witness_script());
         assert_eq!(witness_script, "Script(OP_PUSHBYTES_33 0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166 OP_CHECKSIGVERIFY OP_PUSHBYTES_33 022222222222222222222222222222222222222222222222222222222222222222 OP_CHECKSIG)");
@@ -801,7 +845,7 @@ mod tests {
         let time_lock = 144;
 
         let descriptor =
-            CommitTransaction::build_descriptor((X_0, R_0, Y_0), (X_1, R_1, Y_1), time_lock)
+            CommitTransaction::build_descriptor(&[(X_0, R_0, Y_0), (X_1, R_1, Y_1)], time_lock)
                 .unwrap();
 
         let witness_script = format!("{}", descriptor.witness_script());
