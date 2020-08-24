@@ -14,7 +14,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, RevokedState, SplitOutputs,
+    Balance, Channel, ChannelState, Output, RevokedState, SplitOutputs,
 };
 use anyhow::Context;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
@@ -106,8 +106,8 @@ impl Alice0 {
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (self.updated_balance.ours, self.x_self.public()),
-            b: (self.updated_balance.theirs, self.X_other.clone()),
+            alice: Output::new(self.updated_balance.ours, self.x_self.public()),
+            bob: Output::new(self.updated_balance.theirs, self.X_other.clone()),
         });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
@@ -187,8 +187,8 @@ impl Bob0 {
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            a: (self.updated_balance.theirs, self.X_other.clone()),
-            b: (self.updated_balance.ours, self.x_self.public()),
+            alice: Output::new(self.updated_balance.theirs, self.X_other.clone()),
+            bob: Output::new(self.updated_balance.ours, self.x_self.public()),
         });
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 

@@ -263,12 +263,28 @@ impl Channel {
 
         match outputs {
             SplitOutputs {
-                a: (ours, X_a),
-                b: (theirs, X_b),
+                alice:
+                    Output {
+                        amount: ours,
+                        public_key: X_a,
+                    },
+                bob:
+                    Output {
+                        amount: theirs,
+                        public_key: X_b,
+                    },
             } if X_a == self.x_self.public() && X_b == self.X_other => Ok(Balance { ours, theirs }),
             SplitOutputs {
-                a: (theirs, X_a),
-                b: (ours, X_b),
+                alice:
+                    Output {
+                        amount: theirs,
+                        public_key: X_a,
+                    },
+                bob:
+                    Output {
+                        amount: ours,
+                        public_key: X_b,
+                    },
             } if X_a == self.X_other && X_b == self.x_self.public() => Ok(Balance { ours, theirs }),
             _ => bail!("split transaction does not pay to X_self and X_other"),
         }
@@ -341,8 +357,20 @@ impl RevokedState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplitOutputs {
-    a: (Amount, OwnershipPublicKey),
-    b: (Amount, OwnershipPublicKey),
+    alice: Output,
+    bob: Output,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Output {
+    pub amount: Amount,
+    pub public_key: OwnershipPublicKey,
+}
+
+impl Output {
+    pub fn new(amount: Amount, public_key: OwnershipPublicKey) -> Self {
+        Self { amount, public_key }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -3,7 +3,7 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    SplitOutputs, TX_FEE,
+    Output, SplitOutputs, TX_FEE,
 };
 use anyhow::bail;
 use bitcoin::{
@@ -369,8 +369,16 @@ pub struct SplitTransaction {
 impl SplitTransaction {
     pub fn new(TX_c: &CommitTransaction, outputs: SplitOutputs) -> Self {
         let SplitOutputs {
-            a: (amount_a, X_a),
-            b: (amount_b, X_b),
+            alice:
+                Output {
+                    amount: amount_a,
+                    public_key: X_a,
+                },
+            bob:
+                Output {
+                    amount: amount_b,
+                    public_key: X_b,
+                },
         } = outputs.clone();
 
         let input = TX_c.as_txin_for_TX_s();

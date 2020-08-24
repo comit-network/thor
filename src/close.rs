@@ -2,7 +2,7 @@ use crate::{
     keys::{OwnershipKeyPair, OwnershipPublicKey},
     signature::verify_sig,
     transaction::{CloseTransaction, FundingTransaction, SplitTransaction},
-    Channel,
+    Channel, Output,
 };
 use anyhow::Context;
 use bitcoin::{Address, Transaction};
@@ -108,8 +108,14 @@ impl State1 {
     }
 
     fn create_close_transaction(&self) -> anyhow::Result<CloseTransaction> {
-        let (amount_a, X_a) = self.TX_s.outputs().a;
-        let (amount_b, X_b) = self.TX_s.outputs().b;
+        let Output {
+            amount: amount_a,
+            public_key: X_a,
+        } = self.TX_s.outputs().alice;
+        let Output {
+            amount: amount_b,
+            public_key: X_b,
+        } = self.TX_s.outputs().bob;
 
         let (output_a, output_b) = if X_a == self.x_self.public() {
             (
