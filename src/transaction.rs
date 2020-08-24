@@ -38,11 +38,20 @@ impl FundOutput {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, PartialEq, Debug)]
 pub struct FundingTransaction {
     pub inner: Transaction,
     fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     amount_a: Amount,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     amount_b: Amount,
 }
 
@@ -160,6 +169,7 @@ impl FundingTransaction {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommitTransaction {
     inner: Transaction,
@@ -355,6 +365,7 @@ impl CommitTransaction {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplitTransaction {
     #[cfg(test)]
