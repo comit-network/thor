@@ -19,6 +19,8 @@ pub mod protocols;
 mod signature;
 mod transaction;
 
+pub use ::bitcoin;
+
 #[cfg(feature = "serde")]
 pub(crate) mod serde;
 
