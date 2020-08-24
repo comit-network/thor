@@ -357,9 +357,6 @@ impl CommitTransaction {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplitTransaction {
-    #[cfg(test)]
-    pub inner: Transaction,
-    #[cfg(not(test))]
     inner: Transaction,
     input_descriptor: Descriptor<bitcoin::PublicKey>,
     digest: SigHash,
@@ -369,24 +366,20 @@ pub struct SplitTransaction {
 impl SplitTransaction {
     pub fn new(TX_c: &CommitTransaction, outputs: SplitOutputs) -> Self {
         let SplitOutputs {
-            a: (amount_a, X_a),
-            b: (amount_b, X_b),
+            a: (amount_a, address_a),
+            b: (amount_b, address_b),
         } = outputs.clone();
 
         let input = TX_c.as_txin_for_TX_s();
 
-        // TODO: Maybe we should spend directly to an address owned by the wallet
-
-        let descriptor = SplitTransaction::wpk_descriptor(X_a);
         let output_a = TxOut {
             value: amount_a.as_sat() - TX_FEE,
-            script_pubkey: descriptor.script_pubkey(),
+            script_pubkey: address_a.script_pubkey(),
         };
 
-        let descriptor = SplitTransaction::wpk_descriptor(X_b);
         let output_b = TxOut {
             value: amount_b.as_sat() - TX_FEE,
-            script_pubkey: descriptor.script_pubkey(),
+            script_pubkey: address_b.script_pubkey(),
         };
 
         let TX_s = Transaction {
@@ -469,21 +462,18 @@ impl SplitTransaction {
         Ok(())
     }
 
-    fn wpk_descriptor(key: OwnershipPublicKey) -> miniscript::Descriptor<bitcoin::PublicKey> {
-        let pk = bitcoin::PublicKey {
-            key: key.into(),
-            compressed: true,
-        };
-
-        miniscript::Descriptor::Wpkh(pk)
-    }
-
     fn compute_digest(TX_s: &Transaction, TX_c: &CommitTransaction) -> SigHash {
         SighashComponents::new(&TX_s).sighash_all(
             &TX_c.as_txin_for_TX_s(),
             &TX_c.output_descriptor().witness_script(),
             TX_c.value().as_sat(),
         )
+    }
+}
+
+impl From<SplitTransaction> for Transaction {
+    fn from(from: SplitTransaction) -> Self {
+        from.inner
     }
 }
 
@@ -638,39 +628,25 @@ pub struct CloseTransaction {
 }
 
 impl CloseTransaction {
-    pub fn new(
-        TX_f: &FundingTransaction,
-        (amount_a, output_a): (Amount, Address),
-        (amount_b, output_b): (Amount, Address),
-    ) -> Self {
-        let output_a = TxOut {
-            value: amount_a.as_sat() - 10_000,
-            script_pubkey: output_a.script_pubkey(),
-        };
-
-        let output_b = TxOut {
-            value: amount_b.as_sat() - 10_000,
-            script_pubkey: output_b.script_pubkey(),
-        };
-
-        let closing_transaction = Transaction {
+    pub fn new(TX_f: &FundingTransaction, TX_s: &SplitTransaction) -> Self {
+        let close_transaction = Transaction {
             version: 2,
             lock_time: 0,
             input: vec![TX_f.as_txin()],
-            output: vec![output_a, output_b],
+            output: TX_s.inner.output.clone(),
         };
 
-        let digest = Self::compute_digest(&closing_transaction, TX_f);
+        let digest = Self::compute_digest(&close_transaction, &TX_f);
 
         Self {
-            inner: closing_transaction,
+            inner: close_transaction,
             input_descriptor: TX_f.fund_output_descriptor(),
             digest,
         }
     }
 
-    fn compute_digest(closing_transaction: &Transaction, TX_f: &FundingTransaction) -> SigHash {
-        SighashComponents::new(&closing_transaction).sighash_all(
+    fn compute_digest(close_transaction: &Transaction, TX_f: &FundingTransaction) -> SigHash {
+        SighashComponents::new(&close_transaction).sighash_all(
             &TX_f.as_txin(),
             &TX_f.fund_output_descriptor().witness_script(),
             TX_f.value().as_sat(),
@@ -704,11 +680,11 @@ impl CloseTransaction {
             satisfier
         };
 
-        let mut closing_transaction = self.inner;
+        let mut close_transaction = self.inner;
         self.input_descriptor
-            .satisfy(&mut closing_transaction.input[0], satisfier)?;
+            .satisfy(&mut close_transaction.input[0], satisfier)?;
 
-        Ok(closing_transaction)
+        Ok(close_transaction)
     }
 
     pub fn sign_once(&self, x_self: OwnershipKeyPair) -> Signature {
@@ -722,31 +698,6 @@ pub enum Error {
     MiniscriptCompiler(#[from] miniscript::policy::compiler::CompilerError),
     #[error("Miniscript: ")]
     Miniscript(#[from] miniscript::Error),
-}
-
-#[cfg(test)]
-pub fn input_psbt(
-    output_amount: Amount,
-    X_alice: OwnershipPublicKey,
-    X_bob: OwnershipPublicKey,
-) -> PartiallySignedTransaction {
-    let output = FundOutput::new(X_alice, X_bob);
-    let transaction = Transaction {
-        version: 2,
-        lock_time: 0,
-        input: vec![TxIn {
-            previous_output: OutPoint::default(),
-            script_sig: Script::new(),
-            sequence: 0xFFFF_FFFF,
-            witness: Vec::new(),
-        }],
-        output: vec![TxOut {
-            value: output_amount.as_sat(),
-            script_pubkey: output.address().script_pubkey(),
-        }],
-    };
-
-    PartiallySignedTransaction::from_unsigned_tx(transaction).unwrap()
 }
 
 #[cfg(test)]
