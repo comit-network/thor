@@ -29,11 +29,13 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    protocols::create::{BuildFundingPSBT, SignFundingPSBT},
+    protocols::{
+        create::{BuildFundingPSBT, SignFundingPSBT},
+        punish::punish,
+    },
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
-use anyhow::bail;
-use bitcoin::{Address, Amount, Transaction};
+use bitcoin::{Address, Amount, Transaction, Txid};
 use ecdsa_fun::adaptor::EncryptedSignature;
 use enum_as_inner::EnumAsInner;
 use protocols::{close, create, update};
@@ -41,8 +43,7 @@ use signature::decrypt;
 
 // TODO: We should handle fees dynamically
 
-/// Flat fee used for all transactions involved in the protocol. Satoshi is the
-/// unit used.
+/// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
@@ -52,8 +53,8 @@ pub struct Channel {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    pub TX_f_body: FundingTransaction,
-    pub current_state: ChannelState,
+    TX_f_body: FundingTransaction,
+    current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
 }
 
@@ -299,40 +300,38 @@ impl Channel {
         Ok(())
     }
 
-    pub fn balance(&self) -> anyhow::Result<Balance> {
-        let outputs = self.current_state.signed_TX_s.outputs();
+    /// Punish the counterparty for publishing a revoked commit transaction.
+    ///
+    /// This effectively closes the channel, as all of the channel's funds go to
+    /// our final address.
+    pub async fn punish<W>(
+        &self,
+        wallet: &W,
+        old_commit_transaction: Transaction,
+    ) -> anyhow::Result<()>
+    where
+        W: BroadcastSignedTransaction,
+    {
+        let punish_transaction = punish(
+            &self.x_self,
+            &self.revoked_states,
+            self.final_address_self.clone(),
+            old_commit_transaction,
+        )?;
 
-        match outputs {
-            SplitOutputs {
-                alice:
-                    Output {
-                        amount: ours,
-                        address: address_a,
-                    },
-                bob:
-                    Output {
-                        amount: theirs,
-                        address: address_b,
-                    },
-            } if address_a == self.final_address_self && address_b == self.final_address_other => {
-                Ok(Balance { ours, theirs })
-            }
-            SplitOutputs {
-                alice:
-                    Output {
-                        amount: theirs,
-                        address: address_a,
-                    },
-                bob:
-                    Output {
-                        amount: ours,
-                        address: address_b,
-                    },
-            } if address_a == self.final_address_other && address_b == self.final_address_self => {
-                Ok(Balance { ours, theirs })
-            }
-            _ => bail!("split transaction does not pay to expected addresses"),
-        }
+        wallet
+            .broadcast_signed_transaction(punish_transaction.into())
+            .await?;
+
+        Ok(())
+    }
+
+    pub fn balance(&self) -> Balance {
+        self.current_state.balance
+    }
+
+    pub fn TX_f_txid(&self) -> Txid {
+        self.TX_f_body.txid()
     }
 
     /// Retrieve the signed `CommitTransaction` of the state that was revoked
@@ -348,18 +347,22 @@ impl Channel {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct ChannelState {
-    pub TX_c: CommitTransaction,
-    /// Encrypted signature sent to the counterparty. If the
-    /// counterparty decrypts it with their own `PublishingSecretKey`
-    /// and uses it to sign and broadcast `TX_c`, we will be able to
-    /// extract their `PublishingSecretKey` by using
-    /// `recover_decryption_key`. If said `TX_c` was already revoked,
+    /// Proportion of the coins in the channel that currently belong to either
+    /// party. To actually claim these coins one or more transactions will have
+    /// to be submitted to the blockchain, so in practice the balance will see a
+    /// reduction to pay for transaction fees.
+    balance: Balance,
+    TX_c: CommitTransaction,
+    /// Encrypted signature sent to the counterparty. If the counterparty
+    /// decrypts it with their own `PublishingSecretKey` and uses it to sign and
+    /// broadcast `TX_c`, we will be able to extract their `PublishingSecretKey`
+    /// by using `recover_decryption_key`. If said `TX_c` was already revoked,
     /// we can use it with the `RevocationSecretKey` to punish them.
     pub encsig_TX_c_self: EncryptedSignature,
-    /// Encrypted signature received from the counterparty. It can be
-    /// decrypted using our `PublishingSecretkey` and used to sign
-    /// `TX_c`. Keep in mind, that publishing a revoked `TX_c` will
-    /// allow the counterparty to punish us.
+    /// Encrypted signature received from the counterparty. It can be decrypted
+    /// using our `PublishingSecretkey` and used to sign `TX_c`. Keep in mind,
+    /// that publishing a revoked `TX_c` will allow the counterparty to punish
+    /// us.
     pub encsig_TX_c_other: EncryptedSignature,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
@@ -421,32 +424,17 @@ impl RevokedState {
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[derive(Clone, Debug, PartialEq)]
-pub struct SplitOutputs {
-    alice: Output,
-    bob: Output,
-}
-
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Output {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Balance {
     #[cfg_attr(
         feature = "serde",
         serde(with = "bitcoin::util::amount::serde::as_sat")
     )]
-    pub amount: Amount,
-    pub address: Address,
-}
-
-impl Output {
-    pub fn new(amount: Amount, address: Address) -> Self {
-        Self { amount, address }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Balance {
     pub ours: Amount,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     pub theirs: Amount,
 }
 

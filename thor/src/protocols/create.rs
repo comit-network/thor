@@ -5,7 +5,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundOutput, SplitTransaction},
-    Channel, ChannelState, Output, SplitOutputs,
+    Balance, Channel, ChannelState,
 };
 use anyhow::Context;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
@@ -123,13 +123,17 @@ impl Alice0 {
             .build_funding_psbt(fund_output.address(), self.fund_amount_self)
             .await?;
 
+        let balance = Balance {
+            ours: self.fund_amount_self,
+            theirs: fund_amount_other,
+        };
+
         Ok(Alice1 {
             x_self: self.x_self,
             X_other,
             final_address_self: self.final_address_self,
             final_address_other,
-            fund_amount_self: self.fund_amount_self,
-            fund_amount_other,
+            balance,
             tid_self,
             time_lock: self.time_lock,
         })
@@ -185,13 +189,17 @@ impl Bob0 {
             .build_funding_psbt(fund_output.address(), self.fund_amount_self)
             .await?;
 
+        let balance = Balance {
+            ours: self.fund_amount_self,
+            theirs: fund_amount_other,
+        };
+
         Ok(Bob1 {
             x_self: self.x_self,
             X_other,
             final_address_self: self.final_address_self,
             final_address_other,
-            fund_amount_self: self.fund_amount_self,
-            fund_amount_other,
+            balance,
             tid_self,
             time_lock: self.time_lock,
         })
@@ -204,8 +212,7 @@ pub struct Alice1 {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    fund_amount_self: Amount,
-    fund_amount_other: Amount,
+    balance: Balance,
     tid_self: PartiallySignedTransaction,
     time_lock: u32,
 }
@@ -222,9 +229,9 @@ impl Alice1 {
             (
                 self.x_self.public(),
                 self.tid_self.clone(),
-                self.fund_amount_self,
+                self.balance.ours,
             ),
-            (self.X_other.clone(), tid_other, self.fund_amount_other),
+            (self.X_other.clone(), tid_other, self.balance.theirs),
         )
         .context("failed to build funding transaction")?;
 
@@ -236,6 +243,7 @@ impl Alice1 {
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
+            balance: self.balance,
             time_lock: self.time_lock,
             r_self: r,
             y_self: y,
@@ -250,8 +258,7 @@ pub struct Bob1 {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    fund_amount_self: Amount,
-    fund_amount_other: Amount,
+    balance: Balance,
     tid_self: PartiallySignedTransaction,
     time_lock: u32,
 }
@@ -265,11 +272,11 @@ impl Bob1 {
 
     pub fn receive(self, Message1 { tid: tid_other }: Message1) -> anyhow::Result<Bob2> {
         let TX_f = FundingTransaction::new(
-            (self.X_other.clone(), tid_other, self.fund_amount_other),
+            (self.X_other.clone(), tid_other, self.balance.theirs),
             (
                 self.x_self.public(),
                 self.tid_self.clone(),
-                self.fund_amount_self,
+                self.balance.ours,
             ),
         )
         .context("failed to build funding transaction")?;
@@ -282,6 +289,7 @@ impl Bob1 {
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
+            balance: self.balance,
             time_lock: self.time_lock,
             r_self: r,
             y_self: y,
@@ -308,6 +316,7 @@ pub struct Alice2 {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
+    balance: Balance,
     time_lock: u32,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
@@ -341,10 +350,14 @@ impl Alice2 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            alice: Output::new(self.TX_f.amount_a(), self.final_address_self.clone()),
-            bob: Output::new(self.TX_f.amount_b(), self.final_address_other.clone()),
-        });
+        let half_amount = TX_c.value() / 2;
+        let TX_s = SplitTransaction::new(
+            &TX_c,
+            half_amount,
+            self.final_address_self.clone(),
+            half_amount,
+            self.final_address_other.clone(),
+        );
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party3 {
@@ -352,6 +365,7 @@ impl Alice2 {
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
+            balance: self.balance,
             r_self: self.r_self,
             R_other,
             y_self: self.y_self,
@@ -371,6 +385,7 @@ pub struct Bob2 {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
+    balance: Balance,
     time_lock: u32,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
@@ -404,10 +419,14 @@ impl Bob2 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            alice: Output::new(self.TX_f.amount_a(), self.final_address_other.clone()),
-            bob: Output::new(self.TX_f.amount_b(), self.final_address_self.clone()),
-        });
+        let half_amount = TX_c.value() / 2;
+        let TX_s = SplitTransaction::new(
+            &TX_c,
+            half_amount,
+            self.final_address_other.clone(),
+            half_amount,
+            self.final_address_self.clone(),
+        );
 
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
@@ -416,6 +435,7 @@ impl Bob2 {
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
+            balance: self.balance,
             r_self: self.r_self,
             R_other,
             y_self: self.y_self,
@@ -423,8 +443,8 @@ impl Bob2 {
             TX_f: self.TX_f,
             TX_c,
             TX_s,
-            sig_TX_s_self,
             encsig_TX_c_self,
+            sig_TX_s_self,
         })
     }
 }
@@ -435,6 +455,7 @@ pub struct Party3 {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
+    balance: Balance,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -472,6 +493,7 @@ impl Party3 {
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
+            balance: self.balance,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -490,6 +512,7 @@ pub struct Party4 {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
+    balance: Balance,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -526,6 +549,7 @@ impl Party4 {
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
+            balance: self.balance,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -545,6 +569,7 @@ pub struct Party5 {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
+    balance: Balance,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -591,6 +616,7 @@ impl Party5 {
                 final_address_other: self.final_address_other,
                 TX_f_body: self.TX_f,
                 current_state: ChannelState {
+                    balance: self.balance,
                     TX_c: self.TX_c,
                     encsig_TX_c_self: self.encsig_TX_c_self,
                     encsig_TX_c_other: self.encsig_TX_c_other,

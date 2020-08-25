@@ -14,7 +14,7 @@ use crate::{
     },
     signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, Output, RevokedState, SplitOutputs,
+    Balance, Channel, ChannelState, RevokedState,
 };
 use anyhow::Context;
 use bitcoin::Address;
@@ -110,13 +110,13 @@ impl Alice0 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            alice: Output::new(self.updated_balance.ours, self.final_address_self.clone()),
-            bob: Output::new(
-                self.updated_balance.theirs,
-                self.final_address_other.clone(),
-            ),
-        });
+        let TX_s = SplitTransaction::new(
+            &TX_c,
+            self.updated_balance.ours,
+            self.final_address_self.clone(),
+            self.updated_balance.theirs,
+            self.final_address_other.clone(),
+        );
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(State1 {
@@ -127,6 +127,7 @@ impl Alice0 {
             TX_f: self.TX_f_body,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
+            updated_balance: self.updated_balance,
             r_self: self.r_self,
             R_other,
             y_self: self.y_self,
@@ -200,13 +201,13 @@ impl Bob0 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, SplitOutputs {
-            alice: Output::new(
-                self.updated_balance.theirs,
-                self.final_address_other.clone(),
-            ),
-            bob: Output::new(self.updated_balance.ours, self.final_address_self.clone()),
-        });
+        let TX_s = SplitTransaction::new(
+            &TX_c,
+            self.updated_balance.theirs,
+            self.final_address_other.clone(),
+            self.updated_balance.ours,
+            self.final_address_self.clone(),
+        );
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(State1 {
@@ -217,6 +218,7 @@ impl Bob0 {
             TX_f: self.TX_f_body,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
+            updated_balance: self.updated_balance,
             r_self: self.r_self,
             R_other,
             y_self: self.y_self,
@@ -240,6 +242,7 @@ pub struct State1 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
+    updated_balance: Balance,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -279,6 +282,7 @@ impl State1 {
             TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
+            updated_balance: self.updated_balance,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -302,6 +306,7 @@ pub struct State2 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
+    updated_balance: Balance,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -340,6 +345,7 @@ impl State2 {
             TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
+            updated_balance: self.updated_balance,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -364,6 +370,7 @@ pub struct State3 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
+    updated_balance: Balance,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -397,6 +404,7 @@ impl State3 {
         revoked_states.push(revoked_state);
 
         let current_state = ChannelState {
+            balance: self.updated_balance,
             TX_c: self.TX_c,
             encsig_TX_c_self: self.encsig_TX_c_other,
             encsig_TX_c_other: self.encsig_TX_c_self,

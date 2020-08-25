@@ -5,7 +5,7 @@ mod harness;
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
 use harness::{make_transports, make_wallets};
-use thor::{protocols::punish, Balance, Channel};
+use thor::{Balance, Channel};
 
 #[tokio::test]
 async fn e2e_channel_creation() {
@@ -23,27 +23,9 @@ async fn e2e_channel_creation() {
         Channel::create_alice(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
     let bob_create = Channel::create_bob(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
 
-    let (alice_channel, bob_channel) = futures::future::try_join(alice_create, bob_create)
+    let (_alice_channel, _bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
         .unwrap();
-
-    assert_eq!(alice_channel.TX_f_body, bob_channel.TX_f_body);
-    assert_eq!(
-        alice_channel.current_state.TX_c,
-        bob_channel.current_state.TX_c
-    );
-    assert_eq!(
-        alice_channel.current_state.encsig_TX_c_self,
-        bob_channel.current_state.encsig_TX_c_other
-    );
-    assert_eq!(
-        alice_channel.current_state.encsig_TX_c_other,
-        bob_channel.current_state.encsig_TX_c_self
-    );
-    assert_eq!(
-        alice_channel.current_state.signed_TX_s,
-        bob_channel.current_state.signed_TX_s
-    );
 }
 
 #[tokio::test]
@@ -94,30 +76,11 @@ async fn e2e_channel_update() {
 
     // Assert expected balance changes
 
-    assert_eq!(alice_channel.balance().unwrap().ours, alice_balance);
-    assert_eq!(alice_channel.balance().unwrap().theirs, bob_balance);
+    assert_eq!(alice_channel.balance().ours, alice_balance);
+    assert_eq!(alice_channel.balance().theirs, bob_balance);
 
-    assert_eq!(bob_channel.balance().unwrap().ours, bob_balance);
-    assert_eq!(bob_channel.balance().unwrap().theirs, alice_balance);
-
-    // Assert new channel states match between parties
-
-    assert_eq!(
-        alice_channel.current_state.TX_c,
-        bob_channel.current_state.TX_c
-    );
-    assert_eq!(
-        alice_channel.current_state.encsig_TX_c_self,
-        bob_channel.current_state.encsig_TX_c_other
-    );
-    assert_eq!(
-        alice_channel.current_state.encsig_TX_c_other,
-        bob_channel.current_state.encsig_TX_c_self
-    );
-    assert_eq!(
-        alice_channel.current_state.signed_TX_s,
-        bob_channel.current_state.signed_TX_s
-    );
+    assert_eq!(bob_channel.balance().ours, bob_balance);
+    assert_eq!(bob_channel.balance().theirs, alice_balance);
 }
 
 #[tokio::test]
@@ -139,6 +102,9 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
         .unwrap();
+
+    let after_open_balance_alice = alice_wallet.0.balance().await.unwrap();
+    let after_open_balance_bob = bob_wallet.0.balance().await.unwrap();
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
     let payment = Amount::from_btc(0.5).unwrap();
@@ -177,14 +143,23 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
 
     // Bob sees the transaction and punishes Alice
 
-    let bob = punish::State0::from(bob_channel);
-    let TX_p = bob.punish(signed_revoked_TX_c).unwrap();
-
-    bob_wallet
-        .0
-        .send_raw_transaction(TX_p.into())
+    bob_channel
+        .punish(&bob_wallet, signed_revoked_TX_c)
         .await
         .unwrap();
+
+    let after_punish_balance_alice = alice_wallet.0.balance().await.unwrap();
+    let after_punish_balance_bob = bob_wallet.0.balance().await.unwrap();
+
+    assert_eq!(
+        after_punish_balance_alice, after_open_balance_alice,
+        "Alice should get no money back after being punished"
+    );
+    assert_eq!(
+        after_punish_balance_bob,
+        after_open_balance_bob + fund_amount * 2 - Amount::from_sat(thor::TX_FEE) * 2,
+        "Bob should get all the money back after punishing Alice"
+    );
 }
 
 #[tokio::test]
@@ -220,14 +195,20 @@ async fn e2e_channel_collaborative_close() {
     let after_close_balance_alice = alice_wallet.0.balance().await.unwrap();
     let after_close_balance_bob = bob_wallet.0.balance().await.unwrap();
 
+    // We pay half a `thor::TX_FEE` per output in fees for each transaction after
+    // the `FundingTransaction`. Collaboratively closing the channel requires
+    // publishing a single `CloseTransaction`, so each party pays
+    // one half `thor::TX_FEE`, which is deducted from their output.
+    let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE) / 2;
+
     assert_eq!(
         after_close_balance_alice,
-        after_open_balance_alice + fund_amount - Amount::from_sat(thor::TX_FEE),
+        after_open_balance_alice + fund_amount - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus transaction fees"
     );
     assert_eq!(
         after_close_balance_bob,
-        after_open_balance_bob + fund_amount - Amount::from_sat(thor::TX_FEE),
+        after_open_balance_bob + fund_amount - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus transaction fees"
     );
 }
@@ -260,14 +241,20 @@ async fn e2e_force_close_channel() {
     let after_close_balance_alice = alice_wallet.0.balance().await.unwrap();
     let after_close_balance_bob = bob_wallet.0.balance().await.unwrap();
 
+    // We pay half a `thor::TX_FEE` per output in fees for each transaction after
+    // the `FundingTransaction`. Force closing the channel requires publishing
+    // both the `CommitTransaction` and the `SplitTransaction`, so each party pays
+    // one `thor::TX_FEE`, which is deducted from their output.
+    let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE);
+
     assert_eq!(
         after_close_balance_alice,
-        after_open_balance_alice + fund_amount - Amount::from_sat(thor::TX_FEE),
+        after_open_balance_alice + fund_amount - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus transaction fees"
     );
     assert_eq!(
         after_close_balance_bob,
-        after_open_balance_bob + fund_amount - Amount::from_sat(thor::TX_FEE),
+        after_open_balance_bob + fund_amount - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus transaction fees"
     );
 }

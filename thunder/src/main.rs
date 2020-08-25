@@ -50,6 +50,6 @@ trait ChannelId {
 
 impl ChannelId for Channel {
     fn channel_id(&self) -> channel::Id {
-        channel::Id::new(self.TX_f_body.txid())
+        channel::Id::new(self.TX_f_txid())
     }
 }
