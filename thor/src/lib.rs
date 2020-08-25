@@ -205,7 +205,7 @@ impl Channel {
     {
         let state0 = close::State0::new(&self);
 
-        let msg0_self = state0.compose();
+        let msg0_self = state0.compose()?;
         transport.send_message(Message::Close0(msg0_self)).await?;
 
         let msg0_other = map_err(transport.receive_message().await?.into_close0())?;

@@ -3,7 +3,6 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundOutput, SplitTransaction},
     Balance, Channel, ChannelState,
 };
@@ -33,7 +32,7 @@ pub struct Message1 {
         feature = "serde",
         serde(with = "crate::serde::partially_signed_transaction")
     )]
-    tid: PartiallySignedTransaction,
+    input_psbt: PartiallySignedTransaction,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -119,8 +118,7 @@ impl State0 {
         check_timelocks(self.time_lock, time_lock_other)?;
 
         let fund_output = FundOutput::new([self.x_self.public(), X_other.clone()]);
-        dbg!(&fund_output);
-        let tid_self = wallet
+        let input_psbt_self = wallet
             .build_funding_psbt(fund_output.address(), self.fund_amount_self)
             .await?;
 
@@ -135,7 +133,7 @@ impl State0 {
             final_address_self: self.final_address_self,
             final_address_other,
             balance,
-            tid_self,
+            input_psbt_self,
             time_lock: self.time_lock,
         })
     }
@@ -160,29 +158,32 @@ pub struct State1 {
     final_address_self: Address,
     final_address_other: Address,
     balance: Balance,
-    tid_self: PartiallySignedTransaction,
+    input_psbt_self: PartiallySignedTransaction,
     time_lock: u32,
 }
 
 impl State1 {
     pub fn next_message(&self) -> Message1 {
         Message1 {
-            tid: self.tid_self.clone(),
+            input_psbt: self.input_psbt_self.clone(),
         }
     }
 
-    pub fn receive(self, Message1 { tid: tid_other }: Message1) -> anyhow::Result<State2> {
-        let TX_f = FundingTransaction::new(
+    pub fn receive(
+        self,
+        Message1 {
+            input_psbt: input_pstb_other,
+        }: Message1,
+    ) -> anyhow::Result<State2> {
+        let TX_f = FundingTransaction::new([
             (
                 self.x_self.public(),
-                self.tid_self.clone(),
+                self.input_psbt_self.clone(),
                 self.balance.ours,
             ),
-            (self.X_other.clone(), tid_other, self.balance.theirs),
-        )
+            (self.X_other.clone(), input_pstb_other, self.balance.theirs),
+        ])
         .context("failed to build funding transaction")?;
-
-        dbg!(&TX_f);
 
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
@@ -231,7 +232,7 @@ impl State2 {
     ) -> anyhow::Result<Party3> {
         let TX_c = CommitTransaction::new(
             &self.TX_f,
-            &[
+            [
                 (
                     self.x_self.public(),
                     self.r_self.public(),
@@ -241,17 +242,14 @@ impl State2 {
             ],
             self.time_lock,
         )?;
-        let encsig_TX_c_self = dbg!(&TX_c).encsign_once(self.x_self.clone(), Y_other.clone());
+        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let half_amount = TX_c.value() / 2;
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            half_amount,
-            self.final_address_self.clone(),
-            half_amount,
-            self.final_address_other.clone(),
-        );
-        let sig_TX_s_self = dbg!(&TX_s).sign_once(self.x_self.clone());
+        let TX_s = SplitTransaction::new(&TX_c, [
+            (half_amount, self.final_address_self.clone()),
+            (half_amount, self.final_address_other.clone()),
+        ])?;
+        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party3 {
             x_self: self.x_self,
@@ -303,7 +301,8 @@ impl Party3 {
             sig_TX_s: sig_TX_s_other,
         }: Message3,
     ) -> anyhow::Result<Party4> {
-        verify_sig(self.X_other.clone(), &self.TX_s.digest(), &sig_TX_s_other)
+        self.TX_s
+            .verify_sig(self.X_other.clone(), &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
 
         self.TX_s.add_signatures(
@@ -359,13 +358,13 @@ impl Party4 {
             encsig_TX_c: encsig_TX_c_other,
         }: Message4,
     ) -> anyhow::Result<Party5> {
-        verify_encsig(
-            self.X_other.clone(),
-            self.y_self.public(),
-            &self.TX_c,
-            &encsig_TX_c_other,
-        )
-        .context("failed to verify encsig_TX_c sent by counterparty")?;
+        self.TX_c
+            .verify_encsig(
+                self.X_other.clone(),
+                self.y_self.public(),
+                &encsig_TX_c_other,
+            )
+            .context("failed to verify encsig_TX_c sent by counterparty")?;
 
         Ok(Party5 {
             x_self: self.x_self,

@@ -3,7 +3,6 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
     Balance, Channel, ChannelState, RevokedState,
 };
@@ -91,7 +90,7 @@ impl State0 {
     ) -> anyhow::Result<State1> {
         let TX_c = CommitTransaction::new(
             &self.TX_f_body,
-            &[
+            [
                 (
                     self.x_self.public(),
                     self.r_self.public(),
@@ -103,13 +102,13 @@ impl State0 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            self.updated_balance.ours,
-            self.final_address_self.clone(),
-            self.updated_balance.theirs,
-            self.final_address_other.clone(),
-        );
+        let TX_s = SplitTransaction::new(&TX_c, [
+            (self.updated_balance.ours, self.final_address_self.clone()),
+            (
+                self.updated_balance.theirs,
+                self.final_address_other.clone(),
+            ),
+        ])?;
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(State1 {
@@ -168,7 +167,8 @@ impl State1 {
             sig_TX_s: sig_TX_s_other,
         }: ShareSplitSignature,
     ) -> anyhow::Result<State2> {
-        verify_sig(self.X_other.clone(), &self.TX_s.digest(), &sig_TX_s_other)
+        self.TX_s
+            .verify_sig(self.X_other.clone(), &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
 
         self.TX_s.add_signatures(
@@ -231,13 +231,13 @@ impl State2 {
             encsig_TX_c: encsig_TX_c_other,
         }: ShareCommitEncryptedSignature,
     ) -> anyhow::Result<State3> {
-        verify_encsig(
-            self.X_other.clone(),
-            self.y_self.public(),
-            &self.TX_c,
-            &encsig_TX_c_other,
-        )
-        .context("failed to verify encsig_TX_c sent by counterparty")?;
+        self.TX_c
+            .verify_encsig(
+                self.X_other.clone(),
+                self.y_self.public(),
+                &encsig_TX_c_other,
+            )
+            .context("failed to verify encsig_TX_c sent by counterparty")?;
 
         Ok(State3 {
             x_self: self.x_self,
