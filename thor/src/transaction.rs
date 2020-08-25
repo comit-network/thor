@@ -5,7 +5,6 @@ use crate::{
     },
     signature, TX_FEE,
 };
-use anyhow::bail;
 use arrayvec::ArrayVec;
 use bitcoin::{
     hashes::{hash160, Hash},
@@ -23,6 +22,8 @@ use miniscript::{self, Descriptor, Segwitv0};
 use sha2::Sha256;
 use signature::{verify_encsig, verify_sig};
 use std::{collections::HashMap, str::FromStr};
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Debug)]
 pub struct FundOutput(miniscript::Descriptor<bitcoin::PublicKey>);
@@ -68,7 +69,7 @@ pub struct FundingTransaction {
 impl FundingTransaction {
     pub fn new(
         mut args: [(OwnershipPublicKey, PartiallySignedTransaction, Amount); 2],
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         // Sort the tuples of arguments based on the ascending lexicographical order of
         // bytes of each ownership public key. Both parties _must_ do this so that they
         // compute the same funding transaction
@@ -147,9 +148,8 @@ impl FundingTransaction {
         self.fund_output_descriptor.clone()
     }
 
-    pub fn into_psbt(self) -> anyhow::Result<PartiallySignedTransaction> {
-        PartiallySignedTransaction::from_unsigned_tx(self.inner)
-            .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
+    pub fn into_psbt(self) -> Result<PartiallySignedTransaction> {
+        PartiallySignedTransaction::from_unsigned_tx(self.inner).map_err(|_| Error::PsbtConversion)
     }
 
     pub fn txid(&self) -> Txid {
@@ -200,7 +200,7 @@ impl CommitTransaction {
         TX_f: &FundingTransaction,
         keys: [(OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey); 2],
         time_lock: u32,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let output_descriptor = Self::build_descriptor(keys, time_lock)?;
 
         let input = TX_f.as_txin();
@@ -246,7 +246,7 @@ impl CommitTransaction {
         self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -312,7 +312,7 @@ impl CommitTransaction {
         verification_key: OwnershipPublicKey,
         encryption_key: PublishingPublicKey,
         encsig: &EncryptedSignature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_encsig(verification_key, encryption_key, &self.digest, encsig)?;
 
         Ok(())
@@ -337,7 +337,7 @@ impl CommitTransaction {
     fn build_descriptor(
         mut keys: [(OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey); 2],
         time_lock: u32,
-    ) -> anyhow::Result<Descriptor<bitcoin::PublicKey>> {
+    ) -> Result<Descriptor<bitcoin::PublicKey>> {
         // Sort the tuples of arguments based on the ascending lexicographical order of
         // bytes of each ownership public key. Both parties _must_ do this so that they
         // build the same commit transaction descriptor
@@ -407,23 +407,13 @@ pub struct SplitTransaction {
     digest: SigHash,
 }
 
-#[derive(Clone, Copy, Debug, thiserror::Error)]
-#[error("input amount {input} does not cover total transaction output amount {output}")]
-pub struct InsufficientFunds {
-    input: Amount,
-    output: Amount,
-}
-
 impl SplitTransaction {
-    pub fn new(
-        TX_c: &CommitTransaction,
-        mut outputs: [(Amount, Address); 2],
-    ) -> Result<Self, InsufficientFunds> {
+    pub fn new(TX_c: &CommitTransaction, mut outputs: [(Amount, Address); 2]) -> Result<Self> {
         let total_input = TX_c.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|(amount, _)| amount.as_sat()).sum());
         if total_input < total_output - TX_c.fee() {
-            return Err(InsufficientFunds {
+            return Err(Error::InsufficientFunds {
                 input: total_input,
                 output: total_output,
             });
@@ -480,7 +470,7 @@ impl SplitTransaction {
         &self,
         verification_key: OwnershipPublicKey,
         signature: &Signature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_sig(verification_key, &self.digest, signature)?;
 
         Ok(())
@@ -491,7 +481,7 @@ impl SplitTransaction {
         &mut self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         struct Satisfier {
             a: (bitcoin::PublicKey, bitcoin::secp256k1::Signature),
             b: (bitcoin::PublicKey, bitcoin::secp256k1::Signature),
@@ -553,14 +543,6 @@ impl From<SplitTransaction> for Transaction {
 #[derive(Clone, Debug)]
 pub struct PunishTransaction(Transaction);
 
-#[derive(Debug, thiserror::Error)]
-pub enum PunishError {
-    #[error("no signatures found in witness stack")]
-    NoSignatures,
-    #[error("could not recover PublishingSecretKey from signatures in transaction")]
-    RecoveryFailure,
-}
-
 impl PunishTransaction {
     pub fn new(
         x_self: &OwnershipKeyPair,
@@ -570,7 +552,7 @@ impl PunishTransaction {
         r_other: &RevocationKeyPair,
         Y_other: PublishingPublicKey,
         revoked_TX_c_candidate: Transaction,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
         // CommitTransaction's only have one input
@@ -591,7 +573,7 @@ impl PunishTransaction {
         }
 
         if sigs.is_empty() {
-            bail!(PunishError::NoSignatures)
+            return Err(Error::NoSignatures);
         }
 
         // Attempt to extract y_other from every signature
@@ -602,7 +584,7 @@ impl PunishTransaction {
                     .recover_decryption_key(&Y_other.clone().into(), &sig.into(), &encsig_TX_c_self)
                     .map(PublishingKeyPair::from)
             })
-            .ok_or_else(|| PunishError::RecoveryFailure)?;
+            .ok_or_else(|| Error::RecoveryFailure)?;
 
         let mut TX_p = {
             let output = TxOut {
@@ -692,15 +674,12 @@ pub struct CloseTransaction {
 }
 
 impl CloseTransaction {
-    pub fn new(
-        TX_f: &FundingTransaction,
-        mut outputs: [(Amount, Address); 2],
-    ) -> Result<Self, InsufficientFunds> {
+    pub fn new(TX_f: &FundingTransaction, mut outputs: [(Amount, Address); 2]) -> Result<Self> {
         let total_input = TX_f.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|(amount, _)| amount.as_sat()).sum());
         if total_input < total_output {
-            return Err(InsufficientFunds {
+            return Err(Error::InsufficientFunds {
                 input: total_input,
                 output: total_output,
             });
@@ -757,7 +736,7 @@ impl CloseTransaction {
         &self,
         verification_key: OwnershipPublicKey,
         signature: &Signature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_sig(verification_key, &self.digest, signature)?;
 
         Ok(())
@@ -767,7 +746,7 @@ impl CloseTransaction {
         self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -805,6 +784,18 @@ pub enum Error {
     MiniscriptCompiler(#[from] miniscript::policy::compiler::CompilerError),
     #[error("Miniscript: ")]
     Miniscript(#[from] miniscript::Error),
+    #[error("could not convert to psbt")]
+    PsbtConversion,
+    #[error("input amount {input} does not cover total transaction output amount {output}")]
+    InsufficientFunds { input: Amount, output: Amount },
+    #[error("Encrypted Signature: ")]
+    InvalidEncSignature(#[from] signature::InvalidEncryptedSignature),
+    #[error("Signature: ")]
+    InvalidSignature(#[from] signature::InvalidSignature),
+    #[error("no signatures found in witness stack")]
+    NoSignatures,
+    #[error("could not recover PublishingSecretKey from signatures in transaction")]
+    RecoveryFailure,
 }
 
 #[cfg(test)]
