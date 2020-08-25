@@ -38,11 +38,20 @@ impl FundOutput {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, PartialEq, Debug)]
 pub struct FundingTransaction {
     inner: Transaction,
     fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     amount_a: Amount,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     amount_b: Amount,
 }
 
@@ -136,6 +145,10 @@ impl FundingTransaction {
             .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
     }
 
+    pub fn txid(&self) -> Txid {
+        self.inner.txid()
+    }
+
     fn build_output_descriptor(
         X_a: &secp256k1::PublicKey,
         X_b: &secp256k1::PublicKey,
@@ -160,6 +173,7 @@ impl FundingTransaction {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommitTransaction {
     inner: Transaction,
@@ -355,6 +369,7 @@ impl CommitTransaction {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplitTransaction {
     inner: Transaction,

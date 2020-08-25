@@ -9,6 +9,7 @@ use ecdsa_fun::{
 use sha2::Sha256;
 use std::fmt;
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct OwnershipKeyPair {
     secret_key: Scalar,
@@ -67,6 +68,7 @@ impl From<Scalar> for OwnershipKeyPair {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevocationKeyPair {
     secret_key: Scalar,
@@ -147,6 +149,7 @@ impl From<RevocationSecretKey> for RevocationKeyPair {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct PublishingKeyPair {
     secret_key: Scalar,

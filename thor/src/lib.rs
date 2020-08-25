@@ -19,6 +19,8 @@ pub mod protocols;
 mod signature;
 mod transaction;
 
+pub use ::bitcoin;
+
 #[cfg(feature = "serde")]
 pub(crate) mod serde;
 
@@ -33,7 +35,7 @@ use crate::{
     },
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
-use bitcoin::{Address, Amount, Transaction};
+use bitcoin::{Address, Amount, Transaction, Txid};
 use ecdsa_fun::adaptor::EncryptedSignature;
 use enum_as_inner::EnumAsInner;
 use protocols::{close, create, update};
@@ -44,6 +46,7 @@ use signature::decrypt;
 /// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct Channel {
     x_self: OwnershipKeyPair,
@@ -327,6 +330,10 @@ impl Channel {
         self.current_state.balance
     }
 
+    pub fn TX_f_txid(&self) -> Txid {
+        self.TX_f_body.txid()
+    }
+
     /// Retrieve the signed `CommitTransaction` of the state that was revoked
     /// during the last channel update.
     pub fn latest_revoked_signed_TX_c(&self) -> anyhow::Result<Option<Transaction>> {
@@ -337,6 +344,7 @@ impl Channel {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct ChannelState {
     /// Proportion of the coins in the channel that currently belong to either
@@ -382,6 +390,7 @@ impl ChannelState {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevokedState {
     channel_state: ChannelState,
@@ -414,9 +423,18 @@ impl RevokedState {
     }
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Balance {
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     pub ours: Amount,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
     pub theirs: Amount,
 }
 
