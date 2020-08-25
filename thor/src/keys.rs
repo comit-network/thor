@@ -1,4 +1,3 @@
-use anyhow::bail;
 use bitcoin::{hashes::Hash, SigHash};
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
@@ -8,6 +7,19 @@ use ecdsa_fun::{
 };
 use sha2::Sha256;
 use std::fmt;
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+pub enum Error {
+    #[error("revocation secret key does not match revocation public key")]
+    WrongRevocationSecretKey,
+    #[error("From Hex: ")]
+    Hex(#[from] hex::FromHexError),
+    #[cfg(test)]
+    #[error("string slice is not a Point")]
+    PointDeser,
+}
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug)]
@@ -108,17 +120,10 @@ impl RevocationKeyPair {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("revocation secret key does not match revocation public key")]
-pub struct WrongRevocationSecretKey;
-
 impl RevocationPublicKey {
-    pub fn verify_revocation_secret_key(
-        &self,
-        secret_key: &RevocationSecretKey,
-    ) -> anyhow::Result<()> {
+    pub fn verify_revocation_secret_key(&self, secret_key: &RevocationSecretKey) -> Result<()> {
         if self.0 != public_key(&secret_key.0) {
-            bail!(WrongRevocationSecretKey)
+            return Err(Error::WrongRevocationSecretKey);
         }
 
         Ok(())
@@ -273,14 +278,13 @@ fn sign(secret_key: &Scalar, digest: SigHash) -> Signature {
 }
 
 #[cfg(test)]
-pub fn point_from_str(from: &str) -> anyhow::Result<Point> {
+pub fn point_from_str(from: &str) -> Result<Point> {
     let point = hex::decode(from)?;
 
     let mut bytes = [0u8; 33];
     bytes.copy_from_slice(point.as_slice());
 
-    let point =
-        Point::from_bytes(bytes).ok_or_else(|| anyhow::anyhow!("string slice is not a Point"))?;
+    let point = Point::from_bytes(bytes).ok_or_else(|| Error::PointDeser)?;
 
     Ok(point)
 }
