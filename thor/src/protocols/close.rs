@@ -1,6 +1,5 @@
 use crate::{
     keys::{OwnershipKeyPair, OwnershipPublicKey},
-    signature::verify_sig,
     transaction::{CloseTransaction, FundingTransaction},
     Balance, Channel,
 };
@@ -36,19 +35,16 @@ impl State0 {
         }
     }
 
-    pub fn compose(&self) -> Message0 {
-        let close_transaction = CloseTransaction::new(
-            &self.TX_f,
-            self.balance.ours,
-            self.final_address_self.clone(),
-            self.balance.theirs,
-            self.final_address_other.clone(),
-        );
+    pub fn compose(&self) -> anyhow::Result<Message0> {
+        let close_transaction = CloseTransaction::new(&self.TX_f, [
+            (self.balance.ours, self.final_address_self.clone()),
+            (self.balance.theirs, self.final_address_other.clone()),
+        ])?;
         let sig_close_transaction = close_transaction.sign_once(self.x_self.clone());
 
-        Message0 {
+        Ok(Message0 {
             sig_close_transaction,
-        }
+        })
     }
 
     pub fn interpret(
@@ -57,20 +53,14 @@ impl State0 {
             sig_close_transaction: sig_close_transaction_other,
         }: Message0,
     ) -> anyhow::Result<Transaction> {
-        let close_transaction = CloseTransaction::new(
-            &self.TX_f,
-            self.balance.ours,
-            self.final_address_self,
-            self.balance.theirs,
-            self.final_address_other,
-        );
+        let close_transaction = CloseTransaction::new(&self.TX_f, [
+            (self.balance.ours, self.final_address_self),
+            (self.balance.theirs, self.final_address_other),
+        ])?;
 
-        verify_sig(
-            self.X_other.clone(),
-            &close_transaction.digest(),
-            &sig_close_transaction_other,
-        )
-        .context("failed to verify close transaction signature sent by counterparty")?;
+        close_transaction
+            .verify_sig(self.X_other.clone(), &sig_close_transaction_other)
+            .context("failed to verify close transaction signature sent by counterparty")?;
 
         let sig_close_transaction_self = close_transaction.sign_once(self.x_self.clone());
         let close_transaction = close_transaction.add_signatures(

@@ -3,7 +3,6 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    signature::{verify_encsig, verify_sig},
     transaction::{CommitTransaction, FundOutput, SplitTransaction},
     Balance, Channel, ChannelState,
 };
@@ -33,7 +32,7 @@ pub struct Message1 {
         feature = "serde",
         serde(with = "crate::serde::partially_signed_transaction")
     )]
-    tid: PartiallySignedTransaction,
+    input_psbt: PartiallySignedTransaction,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -66,7 +65,7 @@ pub struct Message5 {
 }
 
 #[derive(Debug)]
-pub struct Alice0 {
+pub struct State0 {
     x_self: OwnershipKeyPair,
     final_address_self: Address,
     fund_amount_self: Amount,
@@ -82,7 +81,7 @@ pub trait BuildFundingPSBT {
     ) -> anyhow::Result<PartiallySignedTransaction>;
 }
 
-impl Alice0 {
+impl State0 {
     pub fn new(fund_amount: Amount, time_lock: u32, final_address: Address) -> Self {
         let x_self = OwnershipKeyPair::new_random();
 
@@ -112,14 +111,14 @@ impl Alice0 {
             time_lock: time_lock_other,
         }: Message0,
         wallet: &impl BuildFundingPSBT,
-    ) -> anyhow::Result<Alice1> {
+    ) -> anyhow::Result<State1> {
         // NOTE: A real application would also verify that the amount
         // provided by the other party is satisfactory, together with
         // the time_lock
         check_timelocks(self.time_lock, time_lock_other)?;
 
-        let fund_output = FundOutput::new(self.x_self.public(), X_other.clone());
-        let tid_self = wallet
+        let fund_output = FundOutput::new([self.x_self.public(), X_other.clone()]);
+        let input_psbt_self = wallet
             .build_funding_psbt(fund_output.address(), self.fund_amount_self)
             .await?;
 
@@ -128,172 +127,14 @@ impl Alice0 {
             theirs: fund_amount_other,
         };
 
-        Ok(Alice1 {
+        Ok(State1 {
             x_self: self.x_self,
             X_other,
             final_address_self: self.final_address_self,
             final_address_other,
             balance,
-            tid_self,
+            input_psbt_self,
             time_lock: self.time_lock,
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct Bob0 {
-    x_self: OwnershipKeyPair,
-    final_address_self: Address,
-    fund_amount_self: Amount,
-    time_lock: u32,
-}
-
-impl Bob0 {
-    pub fn new(fund_amount: Amount, time_lock: u32, final_address: Address) -> Self {
-        let x_self = OwnershipKeyPair::new_random();
-
-        Self {
-            x_self,
-            final_address_self: final_address,
-            fund_amount_self: fund_amount,
-            time_lock,
-        }
-    }
-
-    pub fn next_message(&self) -> Message0 {
-        Message0 {
-            X: self.x_self.public(),
-            final_address: self.final_address_self.clone(),
-            fund_amount: self.fund_amount_self,
-            time_lock: self.time_lock,
-        }
-    }
-
-    pub async fn receive(
-        self,
-        Message0 {
-            X: X_other,
-            final_address: final_address_other,
-            fund_amount: fund_amount_other,
-            time_lock: time_lock_other,
-        }: Message0,
-        wallet: &impl BuildFundingPSBT,
-    ) -> anyhow::Result<Bob1> {
-        // NOTE: A real application would also verify that the amount
-        // provided by the other party is satisfactory, together with
-        // the time_lock
-        check_timelocks(self.time_lock, time_lock_other)?;
-
-        let fund_output = FundOutput::new(X_other.clone(), self.x_self.public());
-        let tid_self = wallet
-            .build_funding_psbt(fund_output.address(), self.fund_amount_self)
-            .await?;
-
-        let balance = Balance {
-            ours: self.fund_amount_self,
-            theirs: fund_amount_other,
-        };
-
-        Ok(Bob1 {
-            x_self: self.x_self,
-            X_other,
-            final_address_self: self.final_address_self,
-            final_address_other,
-            balance,
-            tid_self,
-            time_lock: self.time_lock,
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct Alice1 {
-    x_self: OwnershipKeyPair,
-    X_other: OwnershipPublicKey,
-    final_address_self: Address,
-    final_address_other: Address,
-    balance: Balance,
-    tid_self: PartiallySignedTransaction,
-    time_lock: u32,
-}
-
-impl Alice1 {
-    pub fn next_message(&self) -> Message1 {
-        Message1 {
-            tid: self.tid_self.clone(),
-        }
-    }
-
-    pub fn receive(self, Message1 { tid: tid_other }: Message1) -> anyhow::Result<Alice2> {
-        let TX_f = FundingTransaction::new(
-            (
-                self.x_self.public(),
-                self.tid_self.clone(),
-                self.balance.ours,
-            ),
-            (self.X_other.clone(), tid_other, self.balance.theirs),
-        )
-        .context("failed to build funding transaction")?;
-
-        let r = RevocationKeyPair::new_random();
-        let y = PublishingKeyPair::new_random();
-
-        Ok(Alice2 {
-            x_self: self.x_self,
-            X_other: self.X_other,
-            final_address_self: self.final_address_self,
-            final_address_other: self.final_address_other,
-            balance: self.balance,
-            time_lock: self.time_lock,
-            r_self: r,
-            y_self: y,
-            TX_f,
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct Bob1 {
-    x_self: OwnershipKeyPair,
-    X_other: OwnershipPublicKey,
-    final_address_self: Address,
-    final_address_other: Address,
-    balance: Balance,
-    tid_self: PartiallySignedTransaction,
-    time_lock: u32,
-}
-
-impl Bob1 {
-    pub fn next_message(&self) -> Message1 {
-        Message1 {
-            tid: self.tid_self.clone(),
-        }
-    }
-
-    pub fn receive(self, Message1 { tid: tid_other }: Message1) -> anyhow::Result<Bob2> {
-        let TX_f = FundingTransaction::new(
-            (self.X_other.clone(), tid_other, self.balance.theirs),
-            (
-                self.x_self.public(),
-                self.tid_self.clone(),
-                self.balance.ours,
-            ),
-        )
-        .context("failed to build funding transaction")?;
-
-        let r = RevocationKeyPair::new_random();
-        let y = PublishingKeyPair::new_random();
-
-        Ok(Bob2 {
-            x_self: self.x_self,
-            X_other: self.X_other,
-            final_address_self: self.final_address_self,
-            final_address_other: self.final_address_other,
-            balance: self.balance,
-            time_lock: self.time_lock,
-            r_self: r,
-            y_self: y,
-            TX_f,
         })
     }
 }
@@ -310,77 +151,59 @@ fn check_timelocks(time_lock_self: u32, time_lock_other: u32) -> Result<(), Inco
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Alice2 {
+#[derive(Debug)]
+pub struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
     balance: Balance,
+    input_psbt_self: PartiallySignedTransaction,
     time_lock: u32,
-    r_self: RevocationKeyPair,
-    y_self: PublishingKeyPair,
-    TX_f: FundingTransaction,
 }
 
-impl Alice2 {
-    pub fn next_message(&self) -> Message2 {
-        Message2 {
-            R: self.r_self.public(),
-            Y: self.y_self.public(),
+impl State1 {
+    pub fn next_message(&self) -> Message1 {
+        Message1 {
+            input_psbt: self.input_psbt_self.clone(),
         }
     }
 
     pub fn receive(
         self,
-        Message2 {
-            R: R_other,
-            Y: Y_other,
-        }: Message2,
-    ) -> anyhow::Result<Party3> {
-        let TX_c = CommitTransaction::new(
-            &self.TX_f,
+        Message1 {
+            input_psbt: input_pstb_other,
+        }: Message1,
+    ) -> anyhow::Result<State2> {
+        let TX_f = FundingTransaction::new([
             (
                 self.x_self.public(),
-                self.r_self.public(),
-                self.y_self.public(),
+                self.input_psbt_self.clone(),
+                self.balance.ours,
             ),
-            (self.X_other.clone(), R_other.clone(), Y_other.clone()),
-            self.time_lock,
-        )?;
-        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
+            (self.X_other.clone(), input_pstb_other, self.balance.theirs),
+        ])
+        .context("failed to build funding transaction")?;
 
-        let half_amount = TX_c.value() / 2;
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            half_amount,
-            self.final_address_self.clone(),
-            half_amount,
-            self.final_address_other.clone(),
-        );
-        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
+        let r = RevocationKeyPair::new_random();
+        let y = PublishingKeyPair::new_random();
 
-        Ok(Party3 {
+        Ok(State2 {
             x_self: self.x_self,
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
             balance: self.balance,
-            r_self: self.r_self,
-            R_other,
-            y_self: self.y_self,
-            Y_other,
-            TX_f: self.TX_f,
-            TX_c,
-            TX_s,
-            encsig_TX_c_self,
-            sig_TX_s_self,
+            time_lock: self.time_lock,
+            r_self: r,
+            y_self: y,
+            TX_f,
         })
     }
 }
 
-#[derive(Debug)]
-pub struct Bob2 {
+#[derive(Clone, Debug)]
+pub struct State2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -392,7 +215,7 @@ pub struct Bob2 {
     TX_f: FundingTransaction,
 }
 
-impl Bob2 {
+impl State2 {
     pub fn next_message(&self) -> Message2 {
         Message2 {
             R: self.r_self.public(),
@@ -409,25 +232,23 @@ impl Bob2 {
     ) -> anyhow::Result<Party3> {
         let TX_c = CommitTransaction::new(
             &self.TX_f,
-            (self.X_other.clone(), R_other.clone(), Y_other.clone()),
-            (
-                self.x_self.public(),
-                self.r_self.public(),
-                self.y_self.public(),
-            ),
+            [
+                (
+                    self.x_self.public(),
+                    self.r_self.public(),
+                    self.y_self.public(),
+                ),
+                (self.X_other.clone(), R_other.clone(), Y_other.clone()),
+            ],
             self.time_lock,
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let half_amount = TX_c.value() / 2;
-        let TX_s = SplitTransaction::new(
-            &TX_c,
-            half_amount,
-            self.final_address_other.clone(),
-            half_amount,
-            self.final_address_self.clone(),
-        );
-
+        let TX_s = SplitTransaction::new(&TX_c, [
+            (half_amount, self.final_address_self.clone()),
+            (half_amount, self.final_address_other.clone()),
+        ])?;
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(Party3 {
@@ -480,7 +301,8 @@ impl Party3 {
             sig_TX_s: sig_TX_s_other,
         }: Message3,
     ) -> anyhow::Result<Party4> {
-        verify_sig(self.X_other.clone(), &self.TX_s.digest(), &sig_TX_s_other)
+        self.TX_s
+            .verify_sig(self.X_other.clone(), &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
 
         self.TX_s.add_signatures(
@@ -536,13 +358,13 @@ impl Party4 {
             encsig_TX_c: encsig_TX_c_other,
         }: Message4,
     ) -> anyhow::Result<Party5> {
-        verify_encsig(
-            self.X_other.clone(),
-            self.y_self.public(),
-            &self.TX_c,
-            &encsig_TX_c_other,
-        )
-        .context("failed to verify encsig_TX_c sent by counterparty")?;
+        self.TX_c
+            .verify_encsig(
+                self.X_other.clone(),
+                self.y_self.public(),
+                &encsig_TX_c_other,
+            )
+            .context("failed to verify encsig_TX_c sent by counterparty")?;
 
         Ok(Party5 {
             x_self: self.x_self,

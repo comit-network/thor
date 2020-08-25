@@ -14,25 +14,23 @@
 #![forbid(unsafe_code)]
 #![allow(non_snake_case)]
 
+#[cfg(feature = "serde")]
+pub(crate) mod serde;
+
 mod keys;
-pub mod protocols;
+mod protocols;
 mod signature;
 mod transaction;
 
 pub use ::bitcoin;
-
-#[cfg(feature = "serde")]
-pub(crate) mod serde;
+pub use protocols::create::{BuildFundingPSBT, SignFundingPSBT};
 
 use crate::{
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    protocols::{
-        create::{BuildFundingPSBT, SignFundingPSBT},
-        punish::punish,
-    },
+    protocols::punish::punish,
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
 use bitcoin::{Address, Amount, Transaction, Txid};
@@ -59,6 +57,11 @@ pub struct Channel {
 }
 
 #[async_trait::async_trait]
+pub trait NewAddress {
+    async fn new_address(&self) -> anyhow::Result<Address>;
+}
+
+#[async_trait::async_trait]
 pub trait BroadcastSignedTransaction {
     async fn broadcast_signed_transaction(&self, transaction: Transaction) -> anyhow::Result<()>;
 }
@@ -74,15 +77,16 @@ pub trait ReceiveMessage {
 }
 
 impl Channel {
-    /// Create a channel in the role of Alice.
+    /// Create a channel.
     ///
-    /// The `fund_amount` represents how much Bitcoin Alice will contribute to
-    /// the channel. Bob will contribute the _same_ amount as Alice.
+    /// The `fund_amount` represents how much Bitcoin either party will
+    /// contribute to the channel. This means both parties contribute the same
+    /// amount.
     ///
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
-    /// on the `transport` they provide, allowing Alice to communicate with
-    /// Bob.
-    pub async fn create_alice<T, W>(
+    /// on the `transport` they provide, allowing the parties to communicate
+    /// with each other.
+    pub async fn create<T, W>(
         transport: &mut T,
         wallet: &W,
         fund_amount: Amount,
@@ -93,80 +97,26 @@ impl Channel {
         T: SendMessage + ReceiveMessage,
     {
         let final_address = wallet.new_address().await?;
-        let alice0 = create::Alice0::new(fund_amount, time_lock, final_address);
+        let state0 = create::State0::new(fund_amount, time_lock, final_address);
 
-        let msg0_alice = alice0.next_message();
-        transport.send_message(Message::Create0(msg0_alice)).await?;
+        let msg0_self = state0.next_message();
+        transport.send_message(Message::Create0(msg0_self)).await?;
 
-        let msg0_bob = map_err(transport.receive_message().await?.into_create0())?;
-        let alice1 = alice0.receive(msg0_bob, wallet).await?;
+        let msg0_other = map_err(transport.receive_message().await?.into_create0())?;
+        let state1 = state0.receive(msg0_other, wallet).await?;
 
-        let msg1_alice = alice1.next_message();
-        transport.send_message(Message::Create1(msg1_alice)).await?;
+        let msg1_self = state1.next_message();
+        transport.send_message(Message::Create1(msg1_self)).await?;
 
-        let msg1_bob = map_err(transport.receive_message().await?.into_create1())?;
-        let alice2 = alice1.receive(msg1_bob)?;
+        let msg1_other = map_err(transport.receive_message().await?.into_create1())?;
+        let state2 = state1.receive(msg1_other)?;
 
-        let msg2_alice = alice2.next_message();
-        transport.send_message(Message::Create2(msg2_alice)).await?;
+        let msg2_self = state2.next_message();
+        transport.send_message(Message::Create2(msg2_self)).await?;
 
-        let msg2_bob = map_err(transport.receive_message().await?.into_create2())?;
+        let msg2_other = map_err(transport.receive_message().await?.into_create2())?;
+        let state3 = state2.receive(msg2_other)?;
 
-        let alice3 = alice2.receive(msg2_bob)?;
-
-        Self::create(transport, wallet, alice3).await
-    }
-
-    /// Create a channel in the role of Bob.
-    ///
-    /// The `fund_amount` represents how much Bitcoin Bob will contribute to
-    /// the channel. Alice will contribute the _same_ amount as Bob.
-    ///
-    /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
-    /// on the `transport` they provide, allowing Bob to communicate with Alice.
-    pub async fn create_bob<T, W>(
-        transport: &mut T,
-        wallet: &W,
-        fund_amount: Amount,
-        time_lock: u32,
-    ) -> anyhow::Result<Self>
-    where
-        W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
-        T: SendMessage + ReceiveMessage,
-    {
-        let final_address = wallet.new_address().await?;
-        let bob0 = create::Bob0::new(fund_amount, time_lock, final_address);
-
-        let msg0_bob = bob0.next_message();
-        transport.send_message(Message::Create0(msg0_bob)).await?;
-
-        let msg0_alice = map_err(transport.receive_message().await?.into_create0())?;
-        let bob1 = bob0.receive(msg0_alice, wallet).await?;
-
-        let msg1_bob = bob1.next_message();
-        transport.send_message(Message::Create1(msg1_bob)).await?;
-
-        let msg1_alice = map_err(transport.receive_message().await?.into_create1())?;
-        let bob2 = bob1.receive(msg1_alice)?;
-
-        let msg2_bob = bob2.next_message();
-        transport.send_message(Message::Create2(msg2_bob)).await?;
-
-        let msg2_alice = map_err(transport.receive_message().await?.into_create2())?;
-        let bob3 = bob2.receive(msg2_alice)?;
-
-        Self::create(transport, wallet, bob3).await
-    }
-
-    async fn create<W, T>(
-        transport: &mut T,
-        wallet: &W,
-        state3: create::Party3,
-    ) -> anyhow::Result<Self>
-    where
-        W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction,
-        T: SendMessage + ReceiveMessage,
-    {
         let msg3_self = state3.next_message();
         transport.send_message(Message::Create3(msg3_self)).await?;
 
@@ -191,7 +141,16 @@ impl Channel {
         Ok(channel)
     }
 
-    pub async fn update_alice<T>(
+    /// Update the distribution of coins in the channel.
+    ///
+    /// It assumes that the counterparty has already agreed to update the
+    /// channel with the `new_balance` and the same `timelock` and will call
+    /// the same API (or an equivalent one).
+    ///
+    /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
+    /// on the `transport` they provide, allowing the parties to communicate
+    /// with each other.
+    pub async fn update<T>(
         &mut self,
         transport: &mut T,
         new_balance: Balance,
@@ -200,41 +159,14 @@ impl Channel {
     where
         T: SendMessage + ReceiveMessage,
     {
-        let alice0 = update::Alice0::new(self.clone(), new_balance, time_lock);
+        let state0 = update::State0::new(self.clone(), new_balance, time_lock);
 
-        let msg0_alice = alice0.compose();
-        transport.send_message(Message::Update0(msg0_alice)).await?;
+        let msg0_self = state0.compose();
+        transport.send_message(Message::Update0(msg0_self)).await?;
 
-        let msg0_bob = map_err(transport.receive_message().await?.into_update0())?;
-        let alice1 = alice0.interpret(msg0_bob)?;
+        let msg0_other = map_err(transport.receive_message().await?.into_update0())?;
+        let state1 = state0.interpret(msg0_other)?;
 
-        self.update(transport, alice1).await
-    }
-
-    pub async fn update_bob<T>(
-        &mut self,
-        transport: &mut T,
-        new_balance: Balance,
-        time_lock: u32,
-    ) -> anyhow::Result<()>
-    where
-        T: SendMessage + ReceiveMessage,
-    {
-        let bob0 = update::Bob0::new(self.clone(), new_balance, time_lock);
-
-        let msg0_bob = bob0.compose();
-        transport.send_message(Message::Update0(msg0_bob)).await?;
-
-        let msg0_alice = map_err(transport.receive_message().await?.into_update0())?;
-        let bob1 = bob0.interpret(msg0_alice)?;
-
-        self.update(transport, bob1).await
-    }
-
-    async fn update<T>(&mut self, transport: &mut T, state1: update::State1) -> anyhow::Result<()>
-    where
-        T: SendMessage + ReceiveMessage,
-    {
         let msg1_self = state1.compose();
         transport.send_message(Message::Update1(msg1_self)).await?;
 
@@ -258,9 +190,14 @@ impl Channel {
         Ok(())
     }
 
-    /// Close the channel collaboratively. It assumes that the counterparty has
-    /// already agreed to close the channel and will call the same API (or an
-    /// equivalent one).
+    /// Close the channel collaboratively.
+    ///
+    /// It assumes that the counterparty has already agreed to close the channel
+    /// and will call the same API (or an equivalent one).
+    ///
+    /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
+    /// on the `transport` they provide, allowing the parties to communicate
+    /// with each other.
     pub async fn close<T, W>(&mut self, transport: &mut T, wallet: &W) -> anyhow::Result<()>
     where
         T: SendMessage + ReceiveMessage,
@@ -268,7 +205,7 @@ impl Channel {
     {
         let state0 = close::State0::new(&self);
 
-        let msg0_self = state0.compose();
+        let msg0_self = state0.compose()?;
         transport.send_message(Message::Close0(msg0_self)).await?;
 
         let msg0_other = map_err(transport.receive_message().await?.into_close0())?;
@@ -358,18 +295,18 @@ pub struct ChannelState {
     /// broadcast `TX_c`, we will be able to extract their `PublishingSecretKey`
     /// by using `recover_decryption_key`. If said `TX_c` was already revoked,
     /// we can use it with the `RevocationSecretKey` to punish them.
-    pub encsig_TX_c_self: EncryptedSignature,
+    encsig_TX_c_self: EncryptedSignature,
     /// Encrypted signature received from the counterparty. It can be decrypted
     /// using our `PublishingSecretkey` and used to sign `TX_c`. Keep in mind,
     /// that publishing a revoked `TX_c` will allow the counterparty to punish
     /// us.
-    pub encsig_TX_c_other: EncryptedSignature,
+    encsig_TX_c_other: EncryptedSignature,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
     /// Signed split transaction.
-    pub signed_TX_s: SplitTransaction,
+    signed_TX_s: SplitTransaction,
 }
 
 impl ChannelState {
@@ -436,11 +373,6 @@ pub struct Balance {
         serde(with = "bitcoin::util::amount::serde::as_sat")
     )]
     pub theirs: Amount,
-}
-
-#[async_trait::async_trait]
-pub trait NewAddress {
-    async fn new_address(&self) -> anyhow::Result<Address>;
 }
 
 /// All possible messages that can be sent between two parties using this

@@ -1,10 +1,7 @@
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
-use thor::{
-    protocols::create::{BuildFundingPSBT, SignFundingPSBT},
-    BroadcastSignedTransaction, NewAddress,
-};
+use thor::{BroadcastSignedTransaction, BuildFundingPSBT, NewAddress, SignFundingPSBT};
 
 pub struct Wallet(pub bitcoin_harness::Wallet);
 

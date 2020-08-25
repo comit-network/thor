@@ -1,7 +1,4 @@
-use crate::{
-    keys::{OwnershipPublicKey, PublishingPublicKey, PublishingSecretKey},
-    transaction::CommitTransaction,
-};
+use crate::keys::{OwnershipPublicKey, PublishingPublicKey, PublishingSecretKey};
 use bitcoin::hashes::Hash;
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
@@ -18,14 +15,14 @@ pub struct InvalidSignature;
 
 pub fn verify_sig(
     verification_key: OwnershipPublicKey,
-    transaction_sig_hash: &SigHash,
+    transaction_sighash: &SigHash,
     signature: &Signature,
 ) -> Result<(), InvalidSignature> {
     let ecdsa = ECDSA::verify_only();
 
     if ecdsa.verify(
         &verification_key.into(),
-        &transaction_sig_hash.into_inner(),
+        &transaction_sighash.into_inner(),
         &signature,
     ) {
         Ok(())
@@ -41,7 +38,7 @@ pub struct InvalidEncryptedSignature;
 pub fn verify_encsig(
     verification_key: OwnershipPublicKey,
     encryption_key: PublishingPublicKey,
-    TX_c: &CommitTransaction,
+    transaction_sighash: &SigHash,
     encsig: &EncryptedSignature,
 ) -> Result<(), InvalidEncryptedSignature> {
     let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
@@ -49,7 +46,7 @@ pub fn verify_encsig(
     if adaptor.verify_encrypted_signature(
         &verification_key.into(),
         &encryption_key.into(),
-        &TX_c.digest().into_inner(),
+        &transaction_sighash.into_inner(),
         &encsig,
     ) {
         Ok(())

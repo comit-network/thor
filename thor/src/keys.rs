@@ -45,6 +45,12 @@ impl OwnershipKeyPair {
     }
 }
 
+impl PartialOrd for OwnershipPublicKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.0.to_bytes().cmp(&other.0.to_bytes()))
+    }
+}
+
 impl From<Point> for OwnershipPublicKey {
     fn from(public_key: Point) -> Self {
         Self(public_key)
