@@ -3,9 +3,8 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    protocols::Result,
     transaction::{CommitTransaction, FundOutput, SplitTransaction},
-    Balance, BuildFundingPSBT, Channel, ChannelState, Error, SignFundingPSBT,
+    Balance, BuildFundingPSBT, Channel, ChannelState, Error, Result, SignFundingPSBT,
 };
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};

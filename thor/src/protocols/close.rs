@@ -1,8 +1,7 @@
 use crate::{
     keys::{OwnershipKeyPair, OwnershipPublicKey},
-    protocols::Result,
     transaction::{CloseTransaction, FundingTransaction},
-    Balance, Channel, Error,
+    Balance, Channel, Error, Result,
 };
 use bitcoin::{Address, Transaction};
 use ecdsa_fun::Signature;

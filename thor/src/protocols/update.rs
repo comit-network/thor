@@ -3,9 +3,8 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    protocols::Result,
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, Error, RevokedState,
+    Balance, Channel, ChannelState, Error, Result, RevokedState,
 };
 use bitcoin::Address;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};

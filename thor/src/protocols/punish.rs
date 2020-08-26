@@ -1,5 +1,5 @@
 use crate::{
-    keys::OwnershipKeyPair, protocols::Result, transaction::PunishTransaction, ChannelState, Error,
+    keys::OwnershipKeyPair, transaction::PunishTransaction, ChannelState, Error, Result,
     RevokedState,
 };
 use bitcoin::{Address, Transaction};
