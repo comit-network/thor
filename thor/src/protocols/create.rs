@@ -5,7 +5,7 @@ use crate::{
     },
     protocols::Result,
     transaction::{CommitTransaction, FundOutput, SplitTransaction},
-    Balance, Channel, ChannelState, Error,
+    Balance, BuildFundingPSBT, Channel, ChannelState, Error, SignFundingPSBT,
 };
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
@@ -70,17 +70,6 @@ pub struct State0 {
     final_address_self: Address,
     fund_amount_self: Amount,
     time_lock: u32,
-}
-
-#[async_trait::async_trait]
-pub trait BuildFundingPSBT {
-    type Error: std::fmt::Display;
-
-    async fn build_funding_psbt(
-        &self,
-        output_address: Address,
-        output_amount: Amount,
-    ) -> std::result::Result<PartiallySignedTransaction, Self::Error>;
 }
 
 impl State0 {
@@ -400,17 +389,6 @@ pub struct Party5 {
     signed_TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
     encsig_TX_c_other: EncryptedSignature,
-}
-
-/// Sign one of the inputs of the `FundingTransaction`.
-#[async_trait::async_trait]
-pub trait SignFundingPSBT {
-    type Error: std::fmt::Display;
-
-    async fn sign_funding_psbt(
-        &self,
-        psbt: PartiallySignedTransaction,
-    ) -> std::result::Result<PartiallySignedTransaction, Self::Error>;
 }
 
 impl Party5 {

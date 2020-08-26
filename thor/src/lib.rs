@@ -20,10 +20,14 @@ pub(crate) mod serde;
 mod keys;
 mod protocols;
 mod signature;
+mod traits;
 mod transaction;
 
 pub use ::bitcoin;
-pub use protocols::create::{BuildFundingPSBT, SignFundingPSBT};
+pub use traits::{
+    BroadcastSignedTransaction, BuildFundingPSBT, NewAddress, ReceiveMessage, SendMessage,
+    SignFundingPSBT,
+};
 
 use crate::{
     keys::{
@@ -54,26 +58,6 @@ pub struct Channel {
     TX_f_body: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-}
-
-#[async_trait::async_trait]
-pub trait NewAddress {
-    async fn new_address(&self) -> anyhow::Result<Address>;
-}
-
-#[async_trait::async_trait]
-pub trait BroadcastSignedTransaction {
-    async fn broadcast_signed_transaction(&self, transaction: Transaction) -> anyhow::Result<()>;
-}
-
-#[async_trait::async_trait]
-pub trait SendMessage {
-    async fn send_message(&mut self, message: Message) -> anyhow::Result<()>;
-}
-
-#[async_trait::async_trait]
-pub trait ReceiveMessage {
-    async fn receive_message(&mut self) -> anyhow::Result<Message>;
 }
 
 impl Channel {
