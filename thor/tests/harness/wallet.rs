@@ -77,6 +77,8 @@ impl SignFundingPSBT for Wallet {
 
 #[async_trait::async_trait]
 impl BroadcastSignedTransaction for Wallet {
+    type Error = anyhow::Error;
+
     async fn broadcast_signed_transaction(
         &self,
         transaction: bitcoin::Transaction,
@@ -95,6 +97,8 @@ impl BroadcastSignedTransaction for Wallet {
 
 #[async_trait::async_trait]
 impl NewAddress for Wallet {
+    type Error = anyhow::Error;
+
     async fn new_address(&self) -> anyhow::Result<Address> {
         self.0.new_address().await.map_err(Into::into)
     }

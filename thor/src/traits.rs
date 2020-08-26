@@ -3,12 +3,19 @@ use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transacti
 
 #[async_trait::async_trait]
 pub trait NewAddress {
-    async fn new_address(&self) -> anyhow::Result<Address>;
+    type Error: std::fmt::Display;
+
+    async fn new_address(&self) -> Result<Address, Self::Error>;
 }
 
 #[async_trait::async_trait]
 pub trait BroadcastSignedTransaction {
-    async fn broadcast_signed_transaction(&self, transaction: Transaction) -> anyhow::Result<()>;
+    type Error: std::fmt::Display;
+
+    async fn broadcast_signed_transaction(
+        &self,
+        transaction: Transaction,
+    ) -> Result<(), Self::Error>;
 }
 
 /// Sign one of the inputs of the `FundingTransaction`.
@@ -35,10 +42,14 @@ pub trait BuildFundingPSBT {
 
 #[async_trait::async_trait]
 pub trait SendMessage {
-    async fn send_message(&mut self, message: Message) -> anyhow::Result<()>;
+    type Error: std::fmt::Display;
+
+    async fn send_message(&mut self, message: Message) -> Result<(), Self::Error>;
 }
 
 #[async_trait::async_trait]
 pub trait ReceiveMessage {
-    async fn receive_message(&mut self) -> anyhow::Result<Message>;
+    type Error: std::fmt::Display;
+
+    async fn receive_message(&mut self) -> Result<Message, Self::Error>;
 }

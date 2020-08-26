@@ -43,6 +43,8 @@ use enum_as_inner::EnumAsInner;
 use protocols::{close, create, update};
 use signature::decrypt;
 
+pub type Result<T> = std::result::Result<T, Error>;
+
 // TODO: We should handle fees dynamically
 
 /// Flat fee used for all transactions involved in the protocol, in satoshi.
@@ -75,52 +77,112 @@ impl Channel {
         wallet: &W,
         fund_amount: Amount,
         time_lock: u32,
-    ) -> anyhow::Result<Self>
+    ) -> Result<Self>
     where
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
         T: SendMessage + ReceiveMessage,
     {
-        let final_address = wallet.new_address().await?;
+        let final_address = wallet
+            .new_address()
+            .await
+            .map_err(|err| Error::Wallet(format!("Could not get new address: {}", err)))?;
         let state0 = create::State0::new(fund_amount, time_lock, final_address);
 
         let msg0_self = state0.next_message();
-        transport.send_message(Message::Create0(msg0_self)).await?;
+        transport
+            .send_message(Message::Create0(msg0_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg0_other = map_err(transport.receive_message().await?.into_create0())?;
+        let msg0_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_create0(),
+        )?;
         let state1 = state0.receive(msg0_other, wallet).await?;
 
         let msg1_self = state1.next_message();
-        transport.send_message(Message::Create1(msg1_self)).await?;
+        transport
+            .send_message(Message::Create1(msg1_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg1_other = map_err(transport.receive_message().await?.into_create1())?;
+        let msg1_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_create1(),
+        )?;
         let state2 = state1.receive(msg1_other)?;
 
         let msg2_self = state2.next_message();
-        transport.send_message(Message::Create2(msg2_self)).await?;
+        transport
+            .send_message(Message::Create2(msg2_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg2_other = map_err(transport.receive_message().await?.into_create2())?;
+        let msg2_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_create2(),
+        )?;
         let state3 = state2.receive(msg2_other)?;
 
         let msg3_self = state3.next_message();
-        transport.send_message(Message::Create3(msg3_self)).await?;
+        transport
+            .send_message(Message::Create3(msg3_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg3_other = map_err(transport.receive_message().await?.into_create3())?;
+        let msg3_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_create3(),
+        )?;
         let state_4 = state3.receive(msg3_other)?;
 
         let msg4_self = state_4.next_message();
-        transport.send_message(Message::Create4(msg4_self)).await?;
+        transport
+            .send_message(Message::Create4(msg4_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg4_other = map_err(transport.receive_message().await?.into_create4())?;
+        let msg4_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_create4(),
+        )?;
         let state5 = state_4.receive(msg4_other)?;
 
         let msg5_self = state5.next_message(wallet).await?;
-        transport.send_message(Message::Create5(msg5_self)).await?;
+        transport
+            .send_message(Message::Create5(msg5_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg5_other = map_err(transport.receive_message().await?.into_create5())?;
+        let msg5_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_create5(),
+        )?;
 
         let (channel, transaction) = state5.receive(msg5_other, wallet).await?;
 
-        wallet.broadcast_signed_transaction(transaction).await?;
+        wallet
+            .broadcast_signed_transaction(transaction)
+            .await
+            .map_err(Error::wallet)?;
 
         Ok(channel)
     }
@@ -139,34 +201,70 @@ impl Channel {
         transport: &mut T,
         new_balance: Balance,
         time_lock: u32,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
     {
         let state0 = update::State0::new(self.clone(), new_balance, time_lock);
 
         let msg0_self = state0.compose();
-        transport.send_message(Message::Update0(msg0_self)).await?;
+        transport
+            .send_message(Message::Update0(msg0_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg0_other = map_err(transport.receive_message().await?.into_update0())?;
+        let msg0_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_update0(),
+        )?;
         let state1 = state0.interpret(msg0_other)?;
 
         let msg1_self = state1.compose();
-        transport.send_message(Message::Update1(msg1_self)).await?;
+        transport
+            .send_message(Message::Update1(msg1_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg1_other = map_err(transport.receive_message().await?.into_update1())?;
+        let msg1_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_update1(),
+        )?;
         let state2 = state1.interpret(msg1_other)?;
 
         let msg2_self = state2.compose();
-        transport.send_message(Message::Update2(msg2_self)).await?;
+        transport
+            .send_message(Message::Update2(msg2_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg2_other = map_err(transport.receive_message().await?.into_update2())?;
+        let msg2_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_update2(),
+        )?;
         let state3 = state2.interpret(msg2_other)?;
 
         let msg3_self = state3.compose();
-        transport.send_message(Message::Update3(msg3_self)).await?;
+        transport
+            .send_message(Message::Update3(msg3_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg3_other = map_err(transport.receive_message().await?.into_update3())?;
+        let msg3_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_update3(),
+        )?;
         let updated_channel = state3.interpret(msg3_other)?;
 
         *self = updated_channel;
@@ -182,7 +280,7 @@ impl Channel {
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
     /// on the `transport` they provide, allowing the parties to communicate
     /// with each other.
-    pub async fn close<T, W>(&mut self, transport: &mut T, wallet: &W) -> anyhow::Result<()>
+    pub async fn close<T, W>(&mut self, transport: &mut T, wallet: &W) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
@@ -190,19 +288,29 @@ impl Channel {
         let state0 = close::State0::new(&self);
 
         let msg0_self = state0.compose()?;
-        transport.send_message(Message::Close0(msg0_self)).await?;
+        transport
+            .send_message(Message::Close0(msg0_self))
+            .await
+            .map_err(Error::transport)?;
 
-        let msg0_other = map_err(transport.receive_message().await?.into_close0())?;
+        let msg0_other = map_msg_err(
+            transport
+                .receive_message()
+                .await
+                .map_err(Error::transport)?
+                .into_close0(),
+        )?;
         let close_transaction = state0.interpret(msg0_other)?;
 
         wallet
             .broadcast_signed_transaction(close_transaction)
-            .await?;
+            .await
+            .map_err(Error::wallet)?;
 
         Ok(())
     }
 
-    pub async fn force_close<W>(&mut self, wallet: &W) -> anyhow::Result<()>
+    pub async fn force_close<W>(&mut self, wallet: &W) -> Result<()>
     where
         W: NewAddress + BroadcastSignedTransaction,
     {
@@ -211,12 +319,14 @@ impl Channel {
             .signed_TX_c(&self.x_self, &self.X_other)?;
         wallet
             .broadcast_signed_transaction(commit_transaction)
-            .await?;
+            .await
+            .map_err(Error::wallet)?;
 
         let split_transaction = self.current_state.signed_TX_s.clone();
         wallet
             .broadcast_signed_transaction(split_transaction.clone().into())
-            .await?;
+            .await
+            .map_err(Error::wallet)?;
 
         Ok(())
     }
@@ -225,11 +335,7 @@ impl Channel {
     ///
     /// This effectively closes the channel, as all of the channel's funds go to
     /// our final address.
-    pub async fn punish<W>(
-        &self,
-        wallet: &W,
-        old_commit_transaction: Transaction,
-    ) -> anyhow::Result<()>
+    pub async fn punish<W>(&self, wallet: &W, old_commit_transaction: Transaction) -> Result<()>
     where
         W: BroadcastSignedTransaction,
     {
@@ -242,7 +348,8 @@ impl Channel {
 
         wallet
             .broadcast_signed_transaction(punish_transaction.into())
-            .await?;
+            .await
+            .map_err(Error::wallet)?;
 
         Ok(())
     }
@@ -257,7 +364,7 @@ impl Channel {
 
     /// Retrieve the signed `CommitTransaction` of the state that was revoked
     /// during the last channel update.
-    pub fn latest_revoked_signed_TX_c(&self) -> anyhow::Result<Option<Transaction>> {
+    pub fn latest_revoked_signed_TX_c(&self) -> Result<Option<Transaction>> {
         self.revoked_states
             .last()
             .map(|state| state.signed_TX_c(self.x_self.clone(), self.X_other.clone()))
@@ -298,7 +405,7 @@ impl ChannelState {
         &self,
         x_self: &OwnershipKeyPair,
         X_other: &OwnershipPublicKey,
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let sig_self = self.TX_c.sign(x_self);
         let sig_other = decrypt(self.y_self.clone().into(), self.encsig_TX_c_other.clone());
 
@@ -327,7 +434,7 @@ impl RevokedState {
         &self,
         x_self: keys::OwnershipKeyPair,
         X_other: OwnershipPublicKey,
-    ) -> anyhow::Result<bitcoin::Transaction> {
+    ) -> Result<bitcoin::Transaction> {
         let sig_TX_c_other = signature::decrypt(
             self.channel_state.y_self.clone().into(),
             self.channel_state.encsig_TX_c_other.clone(),
@@ -379,24 +486,38 @@ pub enum Message {
 
 #[derive(Debug, thiserror::Error)]
 #[error("expected message of type {expected_type}, got {received:?}")]
-pub struct UnexpecteMessage {
+pub struct UnexpectedMessage {
     expected_type: String,
     received: Message,
 }
 
-impl UnexpecteMessage {
-    pub fn new<T>(received: Message) -> Self {
+impl Error {
+    pub fn unexpected_message<T>(received: Message) -> Self {
         let expected_type = std::any::type_name::<T>();
 
-        Self {
+        Error::UnexpectedMessage(Box::new(UnexpectedMessage {
             expected_type: expected_type.to_string(),
             received,
-        }
+        }))
+    }
+
+    pub fn transport<E>(error: E) -> Self
+    where
+        E: std::fmt::Display,
+    {
+        Self::Transport(error.to_string())
+    }
+
+    pub fn wallet<E>(error: E) -> Self
+    where
+        E: std::fmt::Display,
+    {
+        Self::Wallet(error.to_string())
     }
 }
 
-fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpecteMessage> {
-    res.map_err(UnexpecteMessage::new::<T>)
+fn map_msg_err<T>(res: std::result::Result<T, Message>) -> Result<T> {
+    res.map_err(Error::unexpected_message::<T>)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -417,6 +538,12 @@ pub enum Error {
     VerifyReceivedEncSigTXc(crate::transaction::Error),
     #[error("Transaction cannot be punished")]
     NotOldCommitTransaction,
+    #[error("{0}")]
+    UnexpectedMessage(Box<UnexpectedMessage>),
+    #[error("Transport: {0}")]
+    Transport(String),
+    #[error("Wallet: {0}")]
+    Wallet(String),
     #[error("{0}")]
     Custom(String),
 }

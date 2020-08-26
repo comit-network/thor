@@ -34,6 +34,8 @@ pub fn make_transports() -> (Transport, Transport) {
 
 #[async_trait::async_trait]
 impl SendMessage for Transport {
+    type Error = anyhow::Error;
+
     async fn send_message(&mut self, message: Message) -> anyhow::Result<()> {
         let str = serde_json::to_string(&message).context("failed to encode message")?;
         self.sender
@@ -45,6 +47,8 @@ impl SendMessage for Transport {
 
 #[async_trait::async_trait]
 impl ReceiveMessage for Transport {
+    type Error = anyhow::Error;
+
     async fn receive_message(&mut self) -> anyhow::Result<Message> {
         let str = self
             .receiver
