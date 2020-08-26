@@ -38,6 +38,8 @@ pub async fn make_wallets(
 
 #[async_trait::async_trait]
 impl BuildFundingPSBT for Wallet {
+    type Error = anyhow::Error;
+
     async fn build_funding_psbt(
         &self,
         output_address: Address,
@@ -54,6 +56,8 @@ impl BuildFundingPSBT for Wallet {
 
 #[async_trait::async_trait]
 impl SignFundingPSBT for Wallet {
+    type Error = anyhow::Error;
+
     async fn sign_funding_psbt(
         &self,
         psbt: PartiallySignedTransaction,

@@ -3,10 +3,10 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
+    protocols::Result,
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, RevokedState,
+    Balance, Channel, ChannelState, Error, RevokedState,
 };
-use anyhow::Context;
 use bitcoin::Address;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
@@ -87,7 +87,7 @@ impl State0 {
             R: R_other,
             Y: Y_other,
         }: ShareKeys,
-    ) -> anyhow::Result<State1> {
+    ) -> Result<State1> {
         let TX_c = CommitTransaction::new(
             &self.TX_f_body,
             [
@@ -166,10 +166,10 @@ impl State1 {
         ShareSplitSignature {
             sig_TX_s: sig_TX_s_other,
         }: ShareSplitSignature,
-    ) -> anyhow::Result<State2> {
+    ) -> Result<State2> {
         self.TX_s
             .verify_sig(self.X_other.clone(), &sig_TX_s_other)
-            .context("failed to verify sig_TX_s sent by counterparty")?;
+            .map_err(Error::VerifyReceivedSigTXs)?;
 
         self.TX_s.add_signatures(
             (self.x_self.public(), self.sig_TX_s_self),
@@ -230,14 +230,14 @@ impl State2 {
         ShareCommitEncryptedSignature {
             encsig_TX_c: encsig_TX_c_other,
         }: ShareCommitEncryptedSignature,
-    ) -> anyhow::Result<State3> {
+    ) -> Result<State3> {
         self.TX_c
             .verify_encsig(
                 self.X_other.clone(),
                 self.y_self.public(),
                 &encsig_TX_c_other,
             )
-            .context("failed to verify encsig_TX_c sent by counterparty")?;
+            .map_err(Error::VerifyReceivedEncSigTXc)?;
 
         Ok(State3 {
             x_self: self.x_self,
@@ -293,7 +293,7 @@ impl State3 {
     pub fn interpret(
         self,
         RevealRevocationSecretKey { r: r_other }: RevealRevocationSecretKey,
-    ) -> anyhow::Result<Channel> {
+    ) -> Result<Channel> {
         self.current_state
             .R_other
             .verify_revocation_secret_key(&r_other)?;

@@ -3,10 +3,10 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
+    protocols::Result,
     transaction::{CommitTransaction, FundOutput, SplitTransaction},
-    Balance, Channel, ChannelState,
+    Balance, Channel, ChannelState, Error,
 };
-use anyhow::Context;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
@@ -74,11 +74,13 @@ pub struct State0 {
 
 #[async_trait::async_trait]
 pub trait BuildFundingPSBT {
+    type Error: std::fmt::Display;
+
     async fn build_funding_psbt(
         &self,
         output_address: Address,
         output_amount: Amount,
-    ) -> anyhow::Result<PartiallySignedTransaction>;
+    ) -> std::result::Result<PartiallySignedTransaction, Self::Error>;
 }
 
 impl State0 {
@@ -111,7 +113,7 @@ impl State0 {
             time_lock: time_lock_other,
         }: Message0,
         wallet: &impl BuildFundingPSBT,
-    ) -> anyhow::Result<State1> {
+    ) -> Result<State1> {
         // NOTE: A real application would also verify that the amount
         // provided by the other party is satisfactory, together with
         // the time_lock
@@ -120,7 +122,8 @@ impl State0 {
         let fund_output = FundOutput::new([self.x_self.public(), X_other.clone()]);
         let input_psbt_self = wallet
             .build_funding_psbt(fund_output.address(), self.fund_amount_self)
-            .await?;
+            .await
+            .map_err(|err| Error::Custom(err.to_string()))?;
 
         let balance = Balance {
             ours: self.fund_amount_self,
@@ -139,13 +142,9 @@ impl State0 {
     }
 }
 
-#[derive(Clone, Copy, Debug, thiserror::Error)]
-#[error("time_locks are not equal")]
-pub struct IncompatibleTimeLocks;
-
-fn check_timelocks(time_lock_self: u32, time_lock_other: u32) -> Result<(), IncompatibleTimeLocks> {
+fn check_timelocks(time_lock_self: u32, time_lock_other: u32) -> Result<()> {
     if time_lock_self != time_lock_other {
-        Err(IncompatibleTimeLocks)
+        Err(Error::IncompatibleTimeLocks)
     } else {
         Ok(())
     }
@@ -174,7 +173,7 @@ impl State1 {
         Message1 {
             input_psbt: input_pstb_other,
         }: Message1,
-    ) -> anyhow::Result<State2> {
+    ) -> Result<State2> {
         let TX_f = FundingTransaction::new([
             (
                 self.x_self.public(),
@@ -183,7 +182,7 @@ impl State1 {
             ),
             (self.X_other.clone(), input_pstb_other, self.balance.theirs),
         ])
-        .context("failed to build funding transaction")?;
+        .map_err(Error::BuildFundTransaction)?;
 
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
@@ -229,7 +228,7 @@ impl State2 {
             R: R_other,
             Y: Y_other,
         }: Message2,
-    ) -> anyhow::Result<Party3> {
+    ) -> Result<Party3> {
         let TX_c = CommitTransaction::new(
             &self.TX_f,
             [
@@ -300,10 +299,10 @@ impl Party3 {
         Message3 {
             sig_TX_s: sig_TX_s_other,
         }: Message3,
-    ) -> anyhow::Result<Party4> {
+    ) -> Result<Party4> {
         self.TX_s
             .verify_sig(self.X_other.clone(), &sig_TX_s_other)
-            .context("failed to verify sig_TX_s sent by counterparty")?;
+            .map_err(Error::VerifyReceivedSigTXs)?;
 
         self.TX_s.add_signatures(
             (self.x_self.public(), self.sig_TX_s_self),
@@ -357,14 +356,14 @@ impl Party4 {
         Message4 {
             encsig_TX_c: encsig_TX_c_other,
         }: Message4,
-    ) -> anyhow::Result<Party5> {
+    ) -> Result<Party5> {
         self.TX_c
             .verify_encsig(
                 self.X_other.clone(),
                 self.y_self.public(),
                 &encsig_TX_c_other,
             )
-            .context("failed to verify encsig_TX_c sent by counterparty")?;
+            .map_err(Error::VerifyReceivedEncSigTXc)?;
 
         Ok(Party5 {
             x_self: self.x_self,
@@ -406,17 +405,20 @@ pub struct Party5 {
 /// Sign one of the inputs of the `FundingTransaction`.
 #[async_trait::async_trait]
 pub trait SignFundingPSBT {
+    type Error: std::fmt::Display;
+
     async fn sign_funding_psbt(
         &self,
         psbt: PartiallySignedTransaction,
-    ) -> anyhow::Result<PartiallySignedTransaction>;
+    ) -> std::result::Result<PartiallySignedTransaction, Self::Error>;
 }
 
 impl Party5 {
-    pub async fn next_message(&self, wallet: &impl SignFundingPSBT) -> anyhow::Result<Message5> {
+    pub async fn next_message(&self, wallet: &impl SignFundingPSBT) -> Result<Message5> {
         let TX_f_signed_once = wallet
             .sign_funding_psbt(self.TX_f.clone().into_psbt()?)
-            .await?;
+            .await
+            .map_err(|err| Error::Custom(err.to_string()))?;
 
         Ok(Message5 { TX_f_signed_once })
     }
@@ -426,8 +428,11 @@ impl Party5 {
         self,
         Message5 { TX_f_signed_once }: Message5,
         wallet: &impl SignFundingPSBT,
-    ) -> anyhow::Result<(Channel, Transaction)> {
-        let signed_TX_f = wallet.sign_funding_psbt(TX_f_signed_once).await?;
+    ) -> Result<(Channel, Transaction)> {
+        let signed_TX_f = wallet
+            .sign_funding_psbt(TX_f_signed_once)
+            .await
+            .map_err(|err| Error::Custom(err.to_string()))?;
         let signed_TX_f = signed_TX_f.extract_tx();
 
         Ok((

@@ -9,7 +9,7 @@ use ecdsa_fun::{
 use bitcoin::SigHash;
 use sha2::Sha256;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Copy, Clone, Debug, thiserror::Error)]
 #[error("signature is invalid")]
 pub struct InvalidSignature;
 
@@ -31,7 +31,7 @@ pub fn verify_sig(
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Copy, Clone, Debug, thiserror::Error)]
 #[error("encrypted signature is invalid")]
 pub struct InvalidEncryptedSignature;
 

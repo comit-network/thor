@@ -1,9 +1,9 @@
 use crate::{
     keys::{OwnershipKeyPair, OwnershipPublicKey},
+    protocols::Result,
     transaction::{CloseTransaction, FundingTransaction},
-    Balance, Channel,
+    Balance, Channel, Error,
 };
-use anyhow::Context;
 use bitcoin::{Address, Transaction};
 use ecdsa_fun::Signature;
 
@@ -35,7 +35,7 @@ impl State0 {
         }
     }
 
-    pub fn compose(&self) -> anyhow::Result<Message0> {
+    pub fn compose(&self) -> Result<Message0> {
         let close_transaction = CloseTransaction::new(&self.TX_f, [
             (self.balance.ours, self.final_address_self.clone()),
             (self.balance.theirs, self.final_address_other.clone()),
@@ -52,7 +52,7 @@ impl State0 {
         Message0 {
             sig_close_transaction: sig_close_transaction_other,
         }: Message0,
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let close_transaction = CloseTransaction::new(&self.TX_f, [
             (self.balance.ours, self.final_address_self),
             (self.balance.theirs, self.final_address_other),
@@ -60,7 +60,7 @@ impl State0 {
 
         close_transaction
             .verify_sig(self.X_other.clone(), &sig_close_transaction_other)
-            .context("failed to verify close transaction signature sent by counterparty")?;
+            .map_err(Error::CloseTransactionSignature)?;
 
         let sig_close_transaction_self = close_transaction.sign_once(self.x_self.clone());
         let close_transaction = close_transaction.add_signatures(

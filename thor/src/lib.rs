@@ -414,3 +414,25 @@ impl UnexpecteMessage {
 fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpecteMessage> {
     res.map_err(UnexpecteMessage::new::<T>)
 }
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Transaction: ")]
+    Transaction(#[from] crate::transaction::Error),
+    #[error("Keys: ")]
+    Keys(#[from] crate::keys::Error),
+    #[error("Failed to verify close transaction signature sent by counterparty: ")]
+    CloseTransactionSignature(crate::transaction::Error),
+    #[error("Timelocks are not equal")]
+    IncompatibleTimeLocks,
+    #[error("Failed to build funding transaction: ")]
+    BuildFundTransaction(crate::transaction::Error),
+    #[error("Failed to verify sig_TX_s sent by counterparty: ")]
+    VerifyReceivedSigTXs(crate::transaction::Error),
+    #[error("Failed to verify encsig_TX_c sent by counterparty: ")]
+    VerifyReceivedEncSigTXc(crate::transaction::Error),
+    #[error("Transaction cannot be punished")]
+    NotOldCommitTransaction,
+    #[error("{0}")]
+    Custom(String),
+}
