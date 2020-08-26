@@ -38,17 +38,20 @@ pub async fn make_wallets(
 
 #[async_trait::async_trait]
 impl BuildFundingPSBT for Wallet {
-    type Error = anyhow::Error;
-
     async fn build_funding_psbt(
         &self,
         output_address: Address,
         output_amount: Amount,
-    ) -> anyhow::Result<PartiallySignedTransaction> {
-        let psbt = self.0.fund_psbt(output_address, output_amount).await?;
-        let as_hex = base64::decode(psbt)?;
+    ) -> thor::Result<PartiallySignedTransaction> {
+        let psbt = self
+            .0
+            .fund_psbt(output_address, output_amount)
+            .await
+            .map_err(|err| thor::Error::custom(err.to_string()))?;
+        let as_hex = base64::decode(psbt).map_err(|err| thor::Error::custom(err.to_string()))?;
 
-        let psbt = bitcoin::consensus::deserialize(&as_hex)?;
+        let psbt = bitcoin::consensus::deserialize(&as_hex)
+            .map_err(|err| thor::Error::custom(err.to_string()))?;
 
         Ok(psbt)
     }
@@ -56,20 +59,24 @@ impl BuildFundingPSBT for Wallet {
 
 #[async_trait::async_trait]
 impl SignFundingPSBT for Wallet {
-    type Error = anyhow::Error;
-
     async fn sign_funding_psbt(
         &self,
         psbt: PartiallySignedTransaction,
-    ) -> anyhow::Result<PartiallySignedTransaction> {
+    ) -> thor::Result<PartiallySignedTransaction> {
         let psbt = bitcoin::consensus::serialize(&psbt);
         let as_base64 = base64::encode(psbt);
 
-        let psbt = self.0.wallet_process_psbt(PsbtBase64(as_base64)).await?;
+        let psbt = self
+            .0
+            .wallet_process_psbt(PsbtBase64(as_base64))
+            .await
+            .map_err(|err| thor::Error::custom(err.to_string()))?;
         let PsbtBase64(signed_psbt) = PsbtBase64::from(psbt);
 
-        let as_hex = base64::decode(signed_psbt)?;
-        let psbt = bitcoin::consensus::deserialize(&as_hex)?;
+        let as_hex =
+            base64::decode(signed_psbt).map_err(|err| thor::Error::custom(err.to_string()))?;
+        let psbt = bitcoin::consensus::deserialize(&as_hex)
+            .map_err(|err| thor::Error::custom(err.to_string()))?;
 
         Ok(psbt)
     }
@@ -77,13 +84,15 @@ impl SignFundingPSBT for Wallet {
 
 #[async_trait::async_trait]
 impl BroadcastSignedTransaction for Wallet {
-    type Error = anyhow::Error;
-
     async fn broadcast_signed_transaction(
         &self,
         transaction: bitcoin::Transaction,
-    ) -> anyhow::Result<()> {
-        let _txid = self.0.send_raw_transaction(transaction).await?;
+    ) -> thor::Result<()> {
+        let _txid = self
+            .0
+            .send_raw_transaction(transaction)
+            .await
+            .map_err(|err| thor::Error::custom(err.to_string()))?;
 
         // TODO: Instead of guessing how long it will take for the transaction to be
         // mined we should ask bitcoind for the number of confirmations on `txid`
@@ -97,9 +106,10 @@ impl BroadcastSignedTransaction for Wallet {
 
 #[async_trait::async_trait]
 impl NewAddress for Wallet {
-    type Error = anyhow::Error;
-
-    async fn new_address(&self) -> anyhow::Result<Address> {
-        self.0.new_address().await.map_err(Into::into)
+    async fn new_address(&self) -> thor::Result<Address> {
+        self.0
+            .new_address()
+            .await
+            .map_err(|err| thor::Error::custom(err.to_string()))
     }
 }

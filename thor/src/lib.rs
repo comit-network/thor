@@ -89,93 +89,39 @@ impl Channel {
         let state0 = create::State0::new(fund_amount, time_lock, final_address);
 
         let msg0_self = state0.next_message();
-        transport
-            .send_message(Message::Create0(msg0_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Create0(msg0_self)).await?;
 
-        let msg0_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_create0(),
-        )?;
+        let msg0_other = map_msg_err(transport.receive_message().await?.into_create0())?;
         let state1 = state0.receive(msg0_other, wallet).await?;
 
         let msg1_self = state1.next_message();
-        transport
-            .send_message(Message::Create1(msg1_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Create1(msg1_self)).await?;
 
-        let msg1_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_create1(),
-        )?;
+        let msg1_other = map_msg_err(transport.receive_message().await?.into_create1())?;
         let state2 = state1.receive(msg1_other)?;
 
         let msg2_self = state2.next_message();
-        transport
-            .send_message(Message::Create2(msg2_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Create2(msg2_self)).await?;
 
-        let msg2_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_create2(),
-        )?;
+        let msg2_other = map_msg_err(transport.receive_message().await?.into_create2())?;
         let state3 = state2.receive(msg2_other)?;
 
         let msg3_self = state3.next_message();
-        transport
-            .send_message(Message::Create3(msg3_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Create3(msg3_self)).await?;
 
-        let msg3_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_create3(),
-        )?;
+        let msg3_other = map_msg_err(transport.receive_message().await?.into_create3())?;
         let state_4 = state3.receive(msg3_other)?;
 
         let msg4_self = state_4.next_message();
-        transport
-            .send_message(Message::Create4(msg4_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Create4(msg4_self)).await?;
 
-        let msg4_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_create4(),
-        )?;
+        let msg4_other = map_msg_err(transport.receive_message().await?.into_create4())?;
         let state5 = state_4.receive(msg4_other)?;
 
         let msg5_self = state5.next_message(wallet).await?;
-        transport
-            .send_message(Message::Create5(msg5_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Create5(msg5_self)).await?;
 
-        let msg5_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_create5(),
-        )?;
+        let msg5_other = map_msg_err(transport.receive_message().await?.into_create5())?;
 
         let (channel, transaction) = state5.receive(msg5_other, wallet).await?;
 
@@ -208,63 +154,27 @@ impl Channel {
         let state0 = update::State0::new(self.clone(), new_balance, time_lock);
 
         let msg0_self = state0.compose();
-        transport
-            .send_message(Message::Update0(msg0_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Update0(msg0_self)).await?;
 
-        let msg0_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_update0(),
-        )?;
+        let msg0_other = map_msg_err(transport.receive_message().await?.into_update0())?;
         let state1 = state0.interpret(msg0_other)?;
 
         let msg1_self = state1.compose();
-        transport
-            .send_message(Message::Update1(msg1_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Update1(msg1_self)).await?;
 
-        let msg1_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_update1(),
-        )?;
+        let msg1_other = map_msg_err(transport.receive_message().await?.into_update1())?;
         let state2 = state1.interpret(msg1_other)?;
 
         let msg2_self = state2.compose();
-        transport
-            .send_message(Message::Update2(msg2_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Update2(msg2_self)).await?;
 
-        let msg2_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_update2(),
-        )?;
+        let msg2_other = map_msg_err(transport.receive_message().await?.into_update2())?;
         let state3 = state2.interpret(msg2_other)?;
 
         let msg3_self = state3.compose();
-        transport
-            .send_message(Message::Update3(msg3_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Update3(msg3_self)).await?;
 
-        let msg3_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_update3(),
-        )?;
+        let msg3_other = map_msg_err(transport.receive_message().await?.into_update3())?;
         let updated_channel = state3.interpret(msg3_other)?;
 
         *self = updated_channel;
@@ -288,18 +198,9 @@ impl Channel {
         let state0 = close::State0::new(&self);
 
         let msg0_self = state0.compose()?;
-        transport
-            .send_message(Message::Close0(msg0_self))
-            .await
-            .map_err(Error::transport)?;
+        transport.send_message(Message::Close0(msg0_self)).await?;
 
-        let msg0_other = map_msg_err(
-            transport
-                .receive_message()
-                .await
-                .map_err(Error::transport)?
-                .into_close0(),
-        )?;
+        let msg0_other = map_msg_err(transport.receive_message().await?.into_close0())?;
         let close_transaction = state0.interpret(msg0_other)?;
 
         wallet
@@ -501,11 +402,8 @@ impl Error {
         }))
     }
 
-    pub fn transport<E>(error: E) -> Self
-    where
-        E: std::fmt::Display,
-    {
-        Self::Transport(error.to_string())
+    pub fn custom(error: String) -> Self {
+        Self::Custom(error)
     }
 
     pub fn wallet<E>(error: E) -> Self
@@ -540,8 +438,6 @@ pub enum Error {
     NotOldCommitTransaction,
     #[error("{0}")]
     UnexpectedMessage(Box<UnexpectedMessage>),
-    #[error("Transport: {0}")]
-    Transport(String),
     #[error("Wallet: {0}")]
     Wallet(String),
     #[error("{0}")]

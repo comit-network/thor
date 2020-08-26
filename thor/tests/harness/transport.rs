@@ -1,4 +1,3 @@
-use anyhow::Context;
 use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
@@ -34,28 +33,26 @@ pub fn make_transports() -> (Transport, Transport) {
 
 #[async_trait::async_trait]
 impl SendMessage for Transport {
-    type Error = anyhow::Error;
-
-    async fn send_message(&mut self, message: Message) -> anyhow::Result<()> {
-        let str = serde_json::to_string(&message).context("failed to encode message")?;
+    async fn send_message(&mut self, message: Message) -> thor::Result<()> {
+        let str = serde_json::to_string(&message)
+            .map_err(|err| thor::Error::custom(format!("failed to encode message: {}", err)))?;
         self.sender
             .send(str)
             .await
-            .map_err(|_| anyhow::anyhow!("failed to send message"))
+            .map_err(|_| thor::Error::custom("failed to send message".to_string()))
     }
 }
 
 #[async_trait::async_trait]
 impl ReceiveMessage for Transport {
-    type Error = anyhow::Error;
-
-    async fn receive_message(&mut self) -> anyhow::Result<Message> {
+    async fn receive_message(&mut self) -> thor::Result<Message> {
         let str = self
             .receiver
             .next()
             .await
-            .ok_or_else(|| anyhow::anyhow!("failed to receive message"))?;
-        let message = serde_json::from_str(&str).context("failed to decode message")?;
+            .ok_or_else(|| thor::Error::custom("failed to receive message".to_string()))?;
+        let message = serde_json::from_str(&str)
+            .map_err(|err| thor::Error::custom(format!("failed to decode message: {}", err)))?;
         Ok(message)
     }
 }
