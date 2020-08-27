@@ -175,7 +175,7 @@ impl State1 {
             input_psbt: input_pstb_other,
         }: Message1,
     ) -> anyhow::Result<State2> {
-        let TX_f = FundingTransaction::new([self.input_psbt_self.clone(), input_pstb_other], [
+        let TX_f = FundingTransaction::new(vec![self.input_psbt_self.clone(), input_pstb_other], [
             (self.x_self.public(), self.balance.ours),
             (self.X_other.clone(), self.balance.theirs),
         ])
