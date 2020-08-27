@@ -8,6 +8,7 @@ use crate::{
 use anyhow::bail;
 use arrayvec::ArrayVec;
 use bitcoin::{
+    consensus::encode::serialize,
     hashes::{hash160, Hash},
     secp256k1,
     util::{bip143::SighashComponents, psbt::PartiallySignedTransaction},
@@ -87,14 +88,20 @@ pub struct FundingTransaction {
 /// - Channel: (me: 0BTC, you: 0.75BTC)
 impl FundingTransaction {
     pub fn new(
-        mut args: [(OwnershipPublicKey, PartiallySignedTransaction, Amount); 2],
+        mut inputs: [PartiallySignedTransaction; 2],
+        channel_balance: [(OwnershipPublicKey, Amount); 2],
     ) -> anyhow::Result<Self> {
         // Sort the tuples of arguments based on the ascending lexicographical order of
-        // bytes of each ownership public key. Both parties _must_ do this so that they
-        // compute the same funding transaction
-        args.sort_by(|a, b| a.0.partial_cmp(&b.0).expect("comparison is possible"));
+        // bytes of each consensus encoded PSBT. Both parties _must_ do this so that
+        // they compute the same funding transaction
+        inputs.sort_by(|a, b| {
+            serialize(a)
+                .partial_cmp(&serialize(b))
+                .expect("comparison is possible")
+        });
 
-        let [(X_0, input_psbt_0, amount_0), (X_1, input_psbt_1, amount_1)] = args;
+        let [input_psbt_0, input_psbt_1] = inputs;
+        let [(X_0, amount_0), (X_1, amount_1)] = channel_balance;
 
         let fund_output = FundOutput::new([X_0, X_1]);
         let fund_output_descriptor = fund_output.descriptor();
