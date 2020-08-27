@@ -65,6 +65,26 @@ pub struct FundingTransaction {
     amount_1: Amount,
 }
 
+/// Scenario:
+
+/// Redeem + Funding
+/// Ins:
+/// - HTLC 1BTC
+/// - You: 0.5BTC
+/// Outs:
+/// - Onchain me: 1BTC
+/// - Channel (me: 0BTC, you: 0.5BTC)
+
+/// Atomic swaps in channel
+/// Balance: (me: 0.5BTC, you :0BTC)
+
+/// Rebalance
+/// Ins:
+/// - previous_TXf
+/// [- You: 0.75BTC]
+/// Outs:
+/// [- Onchain me: 0.5 BTC]
+/// - Channel: (me: 0BTC, you: 0.75BTC)
 impl FundingTransaction {
     pub fn new(
         mut args: [(OwnershipPublicKey, PartiallySignedTransaction, Amount); 2],
