@@ -36,7 +36,7 @@ use crate::{
 use bitcoin::{Address, Amount, Transaction, Txid};
 use ecdsa_fun::adaptor::EncryptedSignature;
 use enum_as_inner::EnumAsInner;
-use protocols::{close, create, update};
+use protocols::{close, create, recycle, update};
 use signature::decrypt;
 
 // TODO: We should handle fees dynamically
@@ -279,6 +279,63 @@ impl Channel {
             .map(|state| state.signed_TX_c(self.x_self.clone(), self.X_other.clone()))
             .transpose()
     }
+
+    /// Recycle a channel.
+    ///
+    /// Create a new funding transaction using a previous funding transaction as
+    /// input This is useless in this state :]
+    pub async fn recycle<T, W>(self, transport: &mut T, wallet: &W) -> anyhow::Result<Self>
+    where
+        W: BroadcastSignedTransaction,
+        T: SendMessage + ReceiveMessage,
+    {
+        // Re-use timelock, final addresses, balance, ownership keys
+        let final_address_self = self.final_address_self;
+        let final_address_other = self.final_address_other;
+        let time_lock = self.current_state.time_lock();
+        let balance = self.current_state.balance;
+        let x_self = self.x_self;
+        let X_other = self.X_other;
+
+        let state0 = recycle::State0::new(
+            time_lock,
+            final_address_self,
+            final_address_other,
+            balance,
+            self.TX_f_body,
+            x_self,
+            X_other,
+        )?;
+
+        let msg0_self = state0.next_message();
+        transport.send_message(Message::Recycle0(msg0_self)).await?;
+
+        let msg0_other = map_err(transport.receive_message().await?.into_recycle0())?;
+        let state1 = state0.receive(msg0_other)?;
+
+        let msg1_self = state1.next_message();
+        transport.send_message(Message::Recycle1(msg1_self)).await?;
+
+        let msg1_other = map_err(transport.receive_message().await?.into_recycle1())?;
+        let state2 = state1.receive(msg1_other)?;
+
+        let msg2_self = state2.next_message();
+        transport.send_message(Message::Recycle2(msg2_self)).await?;
+
+        let msg2_other = map_err(transport.receive_message().await?.into_recycle2())?;
+        let state3 = state2.receive(msg2_other)?;
+
+        let msg3_self = state3.next_message().await?;
+        transport.send_message(Message::Recycle3(msg3_self)).await?;
+
+        let msg3_other = map_err(transport.receive_message().await?.into_recycle3())?;
+
+        let (channel, transaction) = state3.receive(msg3_other)?;
+
+        wallet.broadcast_signed_transaction(transaction).await?;
+
+        Ok(channel)
+    }
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
@@ -324,6 +381,10 @@ impl ChannelState {
             .add_signatures((x_self.public(), sig_self), (X_other.clone(), sig_other))?;
 
         Ok(signed_TX_c)
+    }
+
+    pub fn time_lock(&self) -> u32 {
+        self.TX_c.time_lock()
     }
 }
 
@@ -391,6 +452,10 @@ pub enum Message {
     Update2(update::ShareCommitEncryptedSignature),
     Update3(update::RevealRevocationSecretKey),
     Close0(close::Message0),
+    Recycle0(recycle::Message0),
+    Recycle1(recycle::Message1),
+    Recycle2(recycle::Message2),
+    Recycle3(recycle::Message3),
 }
 
 #[derive(Debug, thiserror::Error)]

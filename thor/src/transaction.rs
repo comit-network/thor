@@ -183,6 +183,54 @@ impl FundingTransaction {
         self.inner.txid()
     }
 
+    fn compute_digest(recycle_tx: &Transaction, previous_TX_f: &FundingTransaction) -> SigHash {
+        SighashComponents::new(&recycle_tx).sighash_all(
+            &previous_TX_f.as_txin(),
+            &previous_TX_f.fund_output_descriptor().witness_script(),
+            previous_TX_f.value().as_sat(),
+        )
+    }
+
+    pub fn sign_once(
+        &self,
+        x_self: OwnershipKeyPair,
+        previous_TX_f: &FundingTransaction,
+    ) -> Signature {
+        let digest = Self::compute_digest(&self.inner, previous_TX_f);
+        x_self.sign(digest)
+    }
+
+    pub fn add_signatures(
+        self,
+        input_descriptor: Descriptor<bitcoin::PublicKey>,
+        (X_0, sig_0): (OwnershipPublicKey, Signature),
+        (X_1, sig_1): (OwnershipPublicKey, Signature),
+    ) -> anyhow::Result<Transaction> {
+        let satisfier = {
+            let mut satisfier = HashMap::with_capacity(2);
+
+            let X_0 = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_0.into(),
+            };
+            let X_1 = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_1.into(),
+            };
+
+            // The order in which these are inserted doesn't matter
+            satisfier.insert(X_0, (sig_0.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_1, (sig_1.into(), ::bitcoin::SigHashType::All));
+
+            satisfier
+        };
+
+        let mut transaction = self.inner;
+        input_descriptor.satisfy(&mut transaction.input[0], satisfier)?;
+
+        Ok(transaction)
+    }
+
     fn build_output_descriptor(
         X_0: OwnershipPublicKey,
         X_1: OwnershipPublicKey,
@@ -347,6 +395,10 @@ impl CommitTransaction {
 
     pub fn txid(&self) -> Txid {
         self.inner.txid()
+    }
+
+    pub fn time_lock(&self) -> u32 {
+        self.time_lock
     }
 
     fn fee(&self) -> Amount {
