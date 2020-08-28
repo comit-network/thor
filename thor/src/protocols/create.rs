@@ -244,10 +244,9 @@ impl State2 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let half_amount = TX_c.value() / 2;
         let TX_s = SplitTransaction::new(&TX_c, [
-            (half_amount, self.final_address_self.clone()),
-            (half_amount, self.final_address_other.clone()),
+            (self.balance.ours, self.final_address_self.clone()),
+            (self.balance.theirs, self.final_address_other.clone()),
         ])?;
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
