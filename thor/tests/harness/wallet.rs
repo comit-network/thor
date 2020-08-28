@@ -18,19 +18,17 @@ impl Wallet {
 /// account for transaction fees.
 pub async fn make_wallets(
     bitcoind: &Bitcoind<'_>,
-    channel_fund_amount: Amount,
+    fund_amount_alice: Amount,
+    fund_amount_bob: Amount,
 ) -> anyhow::Result<(Wallet, Wallet)> {
     let alice = Wallet::new("alice", bitcoind.node_url.clone()).await?;
     let bob = Wallet::new("bob", bitcoind.node_url.clone()).await?;
 
     let buffer = Amount::from_btc(1.0).unwrap();
 
-    for wallet in vec![&alice, &bob].iter() {
+    for (wallet, amount) in vec![(&alice, fund_amount_alice), (&bob, fund_amount_bob)].iter() {
         let address = wallet.0.new_address().await.unwrap();
-        bitcoind
-            .mint(address, channel_fund_amount + buffer)
-            .await
-            .unwrap();
+        bitcoind.mint(address, *amount + buffer).await.unwrap();
     }
 
     Ok((alice, bob))

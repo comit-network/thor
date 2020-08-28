@@ -23,6 +23,7 @@ mod signature;
 mod transaction;
 
 pub use ::bitcoin;
+pub use keys::{PtlcPoint, PtlcSecret};
 pub use protocols::create::{BuildFundingPSBT, SignFundingPSBT};
 
 use crate::{
@@ -33,11 +34,15 @@ use crate::{
     protocols::punish::punish,
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
+use anyhow::bail;
 use bitcoin::{Address, Amount, Transaction, Txid};
-use ecdsa_fun::adaptor::EncryptedSignature;
+use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
+use futures::{future::Either, pin_mut, Future};
+use genawaiter::sync::Gen;
 use protocols::{close, create, recycle, update};
 use signature::decrypt;
+use transaction::ptlc;
 
 // TODO: We should handle fees dynamically
 
@@ -79,25 +84,21 @@ pub trait ReceiveMessage {
 impl Channel {
     /// Create a channel.
     ///
-    /// The `fund_amount` represents how much Bitcoin either party will
-    /// contribute to the channel. This means both parties contribute the same
-    /// amount.
-    ///
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
     /// on the `transport` they provide, allowing the parties to communicate
     /// with each other.
     pub async fn create<T, W>(
         transport: &mut T,
         wallet: &W,
-        fund_amount: Amount,
+        balance: Balance,
         time_lock: u32,
     ) -> anyhow::Result<Self>
     where
-        W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
         T: SendMessage + ReceiveMessage,
+        W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
     {
         let final_address = wallet.new_address().await?;
-        let state0 = create::State0::new(fund_amount, time_lock, final_address);
+        let state0 = create::State0::new(balance, time_lock, final_address);
 
         let msg0_self = state0.next_message();
         transport.send_message(Message::Create0(msg0_self)).await?;
@@ -144,22 +145,258 @@ impl Channel {
     /// Update the distribution of coins in the channel.
     ///
     /// It assumes that the counterparty has already agreed to update the
-    /// channel with the `new_balance` and the same `timelock` and will call
-    /// the same API (or an equivalent one).
+    /// channel with the same balance and `timelock` and will call the same API
+    /// (or an equivalent one).
     ///
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
     /// on the `transport` they provide, allowing the parties to communicate
     /// with each other.
-    pub async fn update<T>(
+    pub async fn update_balance<T>(
         &mut self,
         transport: &mut T,
-        new_balance: Balance,
+        Balance { ours, theirs }: Balance,
         time_lock: u32,
     ) -> anyhow::Result<()>
     where
         T: SendMessage + ReceiveMessage,
     {
-        let state0 = update::State0::new(self.clone(), new_balance, time_lock);
+        let split_output_self = SplitOutput::Balance {
+            amount: ours,
+            address: self.final_address_self.clone(),
+        };
+
+        let split_output_other = SplitOutput::Balance {
+            amount: theirs,
+            address: self.final_address_other.clone(),
+        };
+
+        self.update(
+            transport,
+            vec![split_output_self, split_output_other],
+            time_lock,
+        )
+        .await
+    }
+
+    /// Perform an atomic swap with a thor channel as beta ledger in the
+    /// role of Alice.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn swap_beta_ptlc_alice<T, W>(
+        &mut self,
+        transport: &mut T,
+        wallet: &W,
+        ptlc_amount: Amount,
+        secret: PtlcSecret,
+        _alpha_absolute_expiry: u32,
+        TX_s_time_lock: u32,
+        ptlc_refund_time_lock: u32,
+    ) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+        W: NewAddress + BroadcastSignedTransaction,
+    {
+        // TODO: Think about how to handle the three expiries. See
+        // https://github.com/comit-network/thor/pull/47#discussion_r480822913.
+
+        let Balance { ours, theirs } = self.balance();
+
+        let theirs = theirs.checked_sub(ptlc_amount).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Bob's {} balance cannot cover PTLC output amount: {}",
+                theirs,
+                ptlc_amount
+            )
+        })?;
+
+        let balance_output_self = SplitOutput::Balance {
+            amount: ours,
+            address: self.final_address_self.clone(),
+        };
+
+        let balance_output_other = SplitOutput::Balance {
+            amount: theirs,
+            address: self.final_address_other.clone(),
+        };
+
+        let ptlc_output = SplitOutput::Ptlc(Ptlc {
+            amount: ptlc_amount,
+            X_funder: self.X_other.clone(),
+            X_redeemer: self.x_self.public(),
+            role: Role::Alice {
+                secret: secret.clone(),
+            },
+            refund_time_lock: ptlc_refund_time_lock,
+        });
+
+        self.update(
+            transport,
+            vec![balance_output_self, balance_output_other, ptlc_output],
+            TX_s_time_lock,
+        )
+        .await?;
+
+        transport
+            .send_message(Message::Secret(secret.clone()))
+            .await?;
+
+        // Attempt to perform a channel update to merge PTLC output into Alice's balance
+        // output
+
+        let balance_output_self = SplitOutput::Balance {
+            amount: ours + ptlc_amount,
+            address: self.final_address_self.clone(),
+        };
+
+        let balance_output_other = SplitOutput::Balance {
+            amount: theirs,
+            address: self.final_address_other.clone(),
+        };
+
+        let channel = self.clone();
+        let final_update = self.update(
+            transport,
+            vec![balance_output_self, balance_output_other],
+            TX_s_time_lock,
+        );
+
+        // TODO: Configure timeout based on expiries
+        let timeout = tokio::time::delay_for(std::time::Duration::from_secs(5));
+
+        pin_mut!(final_update);
+        pin_mut!(timeout);
+
+        // If the channel update isn't finished before `timeout`, force close and
+        // publish `TX_ptlc_redeem`.
+        match futures::future::select(final_update, timeout).await {
+            Either::Left((Ok(_), _)) => (),
+            Either::Left((Err(_), _)) | Either::Right(_) => {
+                // TODO: Have we dropped the other future execution if we reach this block?
+                let (_, _, TX_ptlc_redeem, _, encsig_funder, sig_redeemer, ..) = channel
+                    .current_state
+                    .clone()
+                    .into_with_ptlc()
+                    .expect("current state must contain PTLC output");
+
+                let sig_funder = signature::decrypt(secret.into(), encsig_funder);
+
+                let TX_ptlc_redeem = TX_ptlc_redeem.add_signatures(
+                    (channel.x_self.public(), sig_redeemer),
+                    (channel.X_other.clone(), sig_funder),
+                )?;
+
+                channel.force_close(wallet).await?;
+
+                wallet.broadcast_signed_transaction(TX_ptlc_redeem).await?;
+            }
+        };
+
+        Ok(())
+    }
+
+    /// Perform an atomic swap with a thor channel as beta ledger in the
+    /// role of Bob.
+    ///
+    /// Calling this function should only take place once the counterparty has
+    /// funded the alpha asset.
+    #[warn(clippy::too_many_arguments)]
+    pub fn swap_beta_ptlc_bob<'a, T>(
+        &'a mut self,
+        transport: &'a mut T,
+        ptlc_amount: Amount,
+        point: PtlcPoint,
+        _alpha_absolute_expiry: u32,
+        TX_s_time_lock: u32,
+        ptlc_refund_time_lock: u32,
+    ) -> Gen<PtlcSecret, (), impl Future<Output = anyhow::Result<()>> + 'a>
+    where
+        T: SendMessage + ReceiveMessage,
+    {
+        Gen::new(|co| async move {
+            let Balance { ours, theirs } = self.balance();
+
+            let ours = ours.checked_sub(ptlc_amount).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Bob's {} balance cannot cover PTLC output amount: {}",
+                    ours,
+                    ptlc_amount
+                )
+            })?;
+
+            let balance_output_self = SplitOutput::Balance {
+                amount: ours,
+                address: self.final_address_self.clone(),
+            };
+
+            let balance_output_other = SplitOutput::Balance {
+                amount: theirs,
+                address: self.final_address_other.clone(),
+            };
+
+            let ptlc_output = SplitOutput::Ptlc(Ptlc {
+                amount: ptlc_amount,
+                X_funder: self.x_self.public(),
+                X_redeemer: self.X_other.clone(),
+                role: Role::Bob {
+                    point: point.clone(),
+                },
+                refund_time_lock: ptlc_refund_time_lock,
+            });
+
+            self.update(
+                transport,
+                vec![balance_output_self, balance_output_other, ptlc_output],
+                TX_s_time_lock,
+            )
+            .await?;
+
+            // Wait for Alice to send over the `secret`.
+
+            // TODO: If Alice doesn't reveal the secret and we're approaching
+            // `alpha_absolute_expiry` force close the channel. Now monitor the
+            // Bitcoin blockchain for Alice revealing the `secret` by publishing
+            // `TX_ptlc_redeem`. If she does yield the `secret`. If she doesn't do it before
+            // `ptlc_refund_time_lock`, publish `TX_ptlc_refund`.
+            let secret = map_err(transport.receive_message().await?.into_secret())?;
+
+            if secret.point() != point {
+                bail!("Alice sent incorrect secret")
+            }
+
+            co.yield_(secret).await;
+
+            // Perform a channel update to merge PTLC output into Alice's balance output
+
+            let balance_output_self = SplitOutput::Balance {
+                amount: ours,
+                address: self.final_address_self.clone(),
+            };
+
+            let balance_output_other = SplitOutput::Balance {
+                amount: theirs + ptlc_amount,
+                address: self.final_address_other.clone(),
+            };
+
+            self.update(
+                transport,
+                vec![balance_output_self, balance_output_other],
+                TX_s_time_lock,
+            )
+            .await?;
+
+            Ok(())
+        })
+    }
+
+    async fn update<T>(
+        &mut self,
+        transport: &mut T,
+        new_split_outputs: Vec<SplitOutput>,
+        time_lock: u32,
+    ) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+    {
+        let state0 = update::State0::new(self.clone(), new_split_outputs, time_lock);
 
         let msg0_self = state0.compose();
         transport.send_message(Message::Update0(msg0_self)).await?;
@@ -167,23 +404,65 @@ impl Channel {
         let msg0_other = map_err(transport.receive_message().await?.into_update0())?;
         let state1 = state0.interpret(msg0_other)?;
 
-        let msg1_self = state1.compose();
-        transport.send_message(Message::Update1(msg1_self)).await?;
+        let updated_channel = match state1 {
+            update::State1Kind::State1(state1) => update!(transport, state1),
+            update::State1Kind::State1PtlcFunder(state1_ptlc_funder) => {
+                let msg_self = state1_ptlc_funder.compose();
+                transport
+                    .send_message(Message::UpdatePtlcFunder(msg_self))
+                    .await?;
 
-        let msg1_other = map_err(transport.receive_message().await?.into_update1())?;
-        let state2 = state1.interpret(msg1_other)?;
+                let msg_other = map_err(
+                    transport
+                        .receive_message()
+                        .await?
+                        .into_update_ptlc_redeemer(),
+                )?;
+                let state1 = state1_ptlc_funder.interpret(msg_other)?;
 
-        let msg2_self = state2.compose();
-        transport.send_message(Message::Update2(msg2_self)).await?;
+                update!(transport, state1)
+            }
+            update::State1Kind::State1PtlcRedeemer(state1_ptlc_redeemer) => {
+                let msg_self = state1_ptlc_redeemer.compose();
+                transport
+                    .send_message(Message::UpdatePtlcRedeemer(msg_self))
+                    .await?;
 
-        let msg2_other = map_err(transport.receive_message().await?.into_update2())?;
-        let state3 = state2.interpret(msg2_other)?;
+                let msg_other =
+                    map_err(transport.receive_message().await?.into_update_ptlc_funder())?;
+                let state1 = state1_ptlc_redeemer.interpret(msg_other)?;
 
-        let msg3_self = state3.compose();
-        transport.send_message(Message::Update3(msg3_self)).await?;
+                update!(transport, state1)
+            }
+        };
 
-        let msg3_other = map_err(transport.receive_message().await?.into_update3())?;
-        let updated_channel = state3.interpret(msg3_other)?;
+        #[macro_export]
+        macro_rules! update {
+            ($transport:expr, $state1:expr) => {{
+                let transport = $transport;
+                let state1 = $state1;
+
+                let msg1_self = state1.compose();
+                transport.send_message(Message::Update1(msg1_self)).await?;
+
+                let msg1_other = map_err(transport.receive_message().await?.into_update1())?;
+                let state2 = state1.interpret(msg1_other)?;
+
+                let msg2_self = state2.compose();
+                transport.send_message(Message::Update2(msg2_self)).await?;
+
+                let msg2_other = map_err(transport.receive_message().await?.into_update2())?;
+                let state3 = state2.interpret(msg2_other)?;
+
+                let msg3_self = state3.compose();
+                transport.send_message(Message::Update3(msg3_self)).await?;
+
+                let msg3_other = map_err(transport.receive_message().await?.into_update3())?;
+                let updated_channel = state3.interpret(msg3_other)?;
+
+                updated_channel
+            }};
+        }
 
         *self = updated_channel;
 
@@ -198,7 +477,7 @@ impl Channel {
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
     /// on the `transport` they provide, allowing the parties to communicate
     /// with each other.
-    pub async fn close<T, W>(&mut self, transport: &mut T, wallet: &W) -> anyhow::Result<()>
+    pub async fn close<T, W>(&self, transport: &mut T, wallet: &W) -> anyhow::Result<()>
     where
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
@@ -218,18 +497,19 @@ impl Channel {
         Ok(())
     }
 
-    pub async fn force_close<W>(&mut self, wallet: &W) -> anyhow::Result<()>
+    pub async fn force_close<W>(&self, wallet: &W) -> anyhow::Result<()>
     where
         W: NewAddress + BroadcastSignedTransaction,
     {
-        let commit_transaction = self
-            .current_state
-            .signed_TX_c(&self.x_self, &self.X_other)?;
+        let current_state = StandardChannelState::from(self.current_state.clone());
+
+        let commit_transaction =
+            current_state.signed_TX_c(&self.TX_f_body, &self.x_self, &self.X_other)?;
         wallet
             .broadcast_signed_transaction(commit_transaction)
             .await?;
 
-        let split_transaction = self.current_state.signed_TX_s.clone();
+        let split_transaction = current_state.signed_TX_s.clone();
         wallet
             .broadcast_signed_transaction(split_transaction.clone().into())
             .await?;
@@ -264,7 +544,8 @@ impl Channel {
     }
 
     pub fn balance(&self) -> Balance {
-        self.current_state.balance
+        let channel_state: &StandardChannelState = self.current_state.as_ref();
+        channel_state.balance
     }
 
     pub fn TX_f_txid(&self) -> Txid {
@@ -276,7 +557,9 @@ impl Channel {
     pub fn latest_revoked_signed_TX_c(&self) -> anyhow::Result<Option<Transaction>> {
         self.revoked_states
             .last()
-            .map(|state| state.signed_TX_c(self.x_self.clone(), self.X_other.clone()))
+            .map(|state| {
+                state.signed_TX_c(&self.TX_f_body, self.x_self.clone(), self.X_other.clone())
+            })
             .transpose()
     }
 
@@ -292,8 +575,9 @@ impl Channel {
         // Re-use timelock, final addresses, balance, ownership keys
         let final_address_self = self.final_address_self;
         let final_address_other = self.final_address_other;
-        let time_lock = self.current_state.time_lock();
-        let balance = self.current_state.balance;
+        let current_state = StandardChannelState::from(self.current_state);
+        let time_lock = current_state.time_lock();
+        let balance = current_state.balance;
         let x_self = self.x_self;
         let X_other = self.X_other;
 
@@ -338,21 +622,48 @@ impl Channel {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Clone, Debug, EnumAsInner)]
+pub(crate) enum ChannelState {
+    Standard(StandardChannelState),
+    WithPtlc {
+        inner: StandardChannelState,
+        ptlc: Ptlc,
+        TX_ptlc_redeem: ptlc::RedeemTransaction,
+        TX_ptlc_refund: ptlc::RefundTransaction,
+        encsig_TX_ptlc_redeem_funder: EncryptedSignature,
+        sig_TX_ptlc_redeem_redeemer: Signature,
+        sig_TX_ptlc_refund_funder: Signature,
+        sig_TX_ptlc_refund_redeemer: Signature,
+    },
+}
+
+impl From<ChannelState> for StandardChannelState {
+    fn from(from: ChannelState) -> Self {
+        match from {
+            ChannelState::Standard(state) | ChannelState::WithPtlc { inner: state, .. } => state,
+        }
+    }
+}
+
+impl AsRef<StandardChannelState> for ChannelState {
+    fn as_ref(&self) -> &StandardChannelState {
+        match self {
+            ChannelState::Standard(state) | ChannelState::WithPtlc { inner: state, .. } => state,
+        }
+    }
+}
+
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
-pub struct ChannelState {
+pub struct StandardChannelState {
     /// Proportion of the coins in the channel that currently belong to either
     /// party. To actually claim these coins one or more transactions will have
     /// to be submitted to the blockchain, so in practice the balance will see a
     /// reduction to pay for transaction fees.
     balance: Balance,
     TX_c: CommitTransaction,
-    /// Encrypted signature sent to the counterparty. If the counterparty
-    /// decrypts it with their own `PublishingSecretKey` and uses it to sign and
-    /// broadcast `TX_c`, we will be able to extract their `PublishingSecretKey`
-    /// by using `recover_decryption_key`. If said `TX_c` was already revoked,
-    /// we can use it with the `RevocationSecretKey` to punish them.
-    encsig_TX_c_self: EncryptedSignature,
     /// Encrypted signature received from the counterparty. It can be decrypted
     /// using our `PublishingSecretkey` and used to sign `TX_c`. Keep in mind,
     /// that publishing a revoked `TX_c` will allow the counterparty to punish
@@ -362,23 +673,25 @@ pub struct ChannelState {
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
-    /// Signed split transaction.
+    /// Signed `SplitTransaction`.
     signed_TX_s: SplitTransaction,
 }
 
-impl ChannelState {
-    pub fn signed_TX_c(
+impl StandardChannelState {
+    fn signed_TX_c(
         &self,
+        TX_f: &FundingTransaction,
         x_self: &OwnershipKeyPair,
         X_other: &OwnershipPublicKey,
     ) -> anyhow::Result<Transaction> {
-        let sig_self = self.TX_c.sign(x_self);
+        let sig_self = self.TX_c.sign_once(x_self);
         let sig_other = decrypt(self.y_self.clone().into(), self.encsig_TX_c_other.clone());
 
-        let signed_TX_c = self
-            .TX_c
-            .clone()
-            .add_signatures((x_self.public(), sig_self), (X_other.clone(), sig_other))?;
+        let signed_TX_c = self.TX_c.clone().add_signatures(
+            TX_f,
+            (x_self.public(), sig_self),
+            (X_other.clone(), sig_other),
+        )?;
 
         Ok(signed_TX_c)
     }
@@ -386,11 +699,15 @@ impl ChannelState {
     pub fn time_lock(&self) -> u32 {
         self.TX_c.time_lock()
     }
+
+    pub fn encsign_TX_c_self(&self, x_self: &OwnershipKeyPair) -> EncryptedSignature {
+        self.TX_c.encsign_once(x_self, self.Y_other.clone())
+    }
 }
 
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
-pub struct RevokedState {
+pub(crate) struct RevokedState {
     channel_state: ChannelState,
     r_other: RevocationSecretKey,
 }
@@ -402,22 +719,11 @@ impl RevokedState {
     /// `RevocationSecretKey`, since this state has already been revoked.
     pub fn signed_TX_c(
         &self,
+        TX_f: &FundingTransaction,
         x_self: keys::OwnershipKeyPair,
         X_other: OwnershipPublicKey,
-    ) -> anyhow::Result<bitcoin::Transaction> {
-        let sig_TX_c_other = signature::decrypt(
-            self.channel_state.y_self.clone().into(),
-            self.channel_state.encsig_TX_c_other.clone(),
-        );
-        let sig_TX_c_self = self.channel_state.TX_c.sign(&x_self);
-
-        let signed_TX_c = self
-            .channel_state
-            .TX_c
-            .clone()
-            .add_signatures((x_self.public(), sig_TX_c_self), (X_other, sig_TX_c_other))?;
-
-        Ok(signed_TX_c)
+    ) -> anyhow::Result<Transaction> {
+        StandardChannelState::from(self.channel_state.clone()).signed_TX_c(TX_f, &x_self, &X_other)
     }
 }
 
@@ -436,6 +742,60 @@ pub struct Balance {
     pub theirs: Amount,
 }
 
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Debug, Clone)]
+pub enum SplitOutput {
+    Ptlc(Ptlc),
+    Balance {
+        #[cfg_attr(
+            feature = "serde",
+            serde(with = "bitcoin::util::amount::serde::as_sat")
+        )]
+        amount: Amount,
+        address: Address,
+    },
+}
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Debug, Clone)]
+pub struct Ptlc {
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
+    amount: Amount,
+    X_funder: OwnershipPublicKey,
+    X_redeemer: OwnershipPublicKey,
+    role: Role,
+    refund_time_lock: u32,
+}
+
+impl Ptlc {
+    pub fn point(&self) -> PtlcPoint {
+        match &self.role {
+            Role::Alice { secret } => secret.point(),
+            Role::Bob { point } => point.clone(),
+        }
+    }
+}
+
+/// Role in an atomic swap.
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum Role {
+    Alice { secret: PtlcSecret },
+    Bob { point: PtlcPoint },
+}
+
+impl SplitOutput {
+    pub fn amount(&self) -> Amount {
+        match self {
+            SplitOutput::Ptlc(Ptlc { amount, .. }) => *amount,
+            SplitOutput::Balance { amount, .. } => *amount,
+        }
+    }
+}
+
 /// All possible messages that can be sent between two parties using this
 /// library.
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
@@ -448,9 +808,12 @@ pub enum Message {
     Create4(create::Message4),
     Create5(create::Message5),
     Update0(update::ShareKeys),
+    UpdatePtlcFunder(update::SignaturesPtlcFunder),
+    UpdatePtlcRedeemer(update::SignaturesPtlcRedeemer),
     Update1(update::ShareSplitSignature),
     Update2(update::ShareCommitEncryptedSignature),
     Update3(update::RevealRevocationSecretKey),
+    Secret(PtlcSecret),
     Close0(close::Message0),
     Recycle0(recycle::Message0),
     Recycle1(recycle::Message1),

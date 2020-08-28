@@ -14,19 +14,21 @@ conquer-once = "0.2"
 ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", branch = "thor", features = ["libsecp_compat"] }
 enum-as-inner = "0.3"
 futures = "0.3"
+genawaiter = { version = "0.99", default-features = false, features = ["futures03"] }
 hex = "0.4"
 miniscript = { version = "1.0.0", features = ["compiler"] }
 rand = "0.7"
 serde = { version = "1", features = ["derive"], optional = true }
 sha2 = "0.9"
 thiserror = "1"
+tokio = { version = "0.2", default-features = false, features = ["time"] }
 
 [dev-dependencies]
 bitcoin-harness = { git = "https://github.com/coblox/bitcoin-harness-rs.git", rev = "a695ddc435f5522d7bc35847caf09df85257cc6b" }
 reqwest = { version = "0.10", default-features = false }
 serde_json = "1"
 testcontainers = "0.9"
-tokio = { version = "0.2", default-features = false, features = ["blocking", "macros", "rt-core", "time"] }
+tokio = { version = "0.2", default-features = false, features = ["blocking", "macros", "rt-core", "time", "rt-threaded"] }
 
 [features]
 default = []
