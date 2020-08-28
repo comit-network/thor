@@ -44,10 +44,8 @@ pub(crate) struct State0 {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    balance: Balance,
-    previous_TX_f_output_descriptor: Descriptor<bitcoin::PublicKey>,
-    TX_f: FundingTransaction,
-    sig_TX_f: Signature,
+    previous_balance: Balance,
+    previous_TX_f: FundingTransaction,
     time_lock: u32,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
@@ -63,39 +61,16 @@ impl State0 {
         x_self: OwnershipKeyPair,
         X_other: OwnershipPublicKey,
     ) -> anyhow::Result<State0> {
-        let previous_funding_txin = previous_TX_f.as_txin();
-        let previous_funding_psbt = PartiallySignedTransaction::from_unsigned_tx(Transaction {
-            version: 2,
-            lock_time: 0,
-            input: vec![previous_funding_txin],
-            output: vec![],
-        })
-        .expect("Only fails if script_sig or witness is empty which is not the case.");
-
-        let balance = Balance {
-            ours: previous_balance.ours - Amount::from_sat(crate::TX_FEE / 2),
-            theirs: previous_balance.theirs - Amount::from_sat(crate::TX_FEE / 2),
-        };
-
-        let TX_f = FundingTransaction::new(vec![previous_funding_psbt], [
-            (x_self.public(), balance.ours),
-            (X_other.clone(), balance.theirs),
-        ])?;
-
-        let sig_TX_f = TX_f.sign_once(x_self.clone(), &previous_TX_f);
-
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
 
         Ok(State0 {
             x_self,
-            TX_f,
             X_other,
             final_address_self,
             final_address_other,
-            balance,
-            previous_TX_f_output_descriptor: previous_TX_f.fund_output_descriptor(),
-            sig_TX_f,
+            previous_balance,
+            previous_TX_f,
             r_self: r,
             y_self: y,
             time_lock,
@@ -116,8 +91,29 @@ impl State0 {
             Y: Y_other,
         }: Message0,
     ) -> anyhow::Result<State1> {
+        let previous_funding_txin = self.previous_TX_f.as_txin();
+        let previous_funding_psbt = PartiallySignedTransaction::from_unsigned_tx(Transaction {
+            version: 2,
+            lock_time: 0,
+            input: vec![previous_funding_txin],
+            output: vec![],
+        })
+        .expect("Only fails if script_sig or witness is empty which is not the case.");
+
+        let balance = Balance {
+            ours: self.previous_balance.ours - Amount::from_sat(crate::TX_FEE / 2),
+            theirs: self.previous_balance.theirs - Amount::from_sat(crate::TX_FEE / 2),
+        };
+
+        let TX_f = FundingTransaction::new(vec![previous_funding_psbt], [
+            (self.x_self.public(), balance.ours),
+            (self.X_other.clone(), balance.theirs),
+        ])?;
+
+        let sig_TX_f = TX_f.sign_once(self.x_self.clone(), &self.previous_TX_f);
+
         let TX_c = CommitTransaction::new(
-            &self.TX_f,
+            &TX_f,
             [
                 (
                     self.x_self.public(),
@@ -131,8 +127,8 @@ impl State0 {
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let TX_s = SplitTransaction::new(&TX_c, [
-            (self.balance.ours, self.final_address_self.clone()),
-            (self.balance.theirs, self.final_address_other.clone()),
+            (balance.ours, self.final_address_self.clone()),
+            (balance.theirs, self.final_address_other.clone()),
         ])?;
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
@@ -141,14 +137,14 @@ impl State0 {
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
-            balance: self.balance,
+            balance,
             r_self: self.r_self,
             R_other,
             y_self: self.y_self,
             Y_other,
-            previous_TX_f_output_descriptor: self.previous_TX_f_output_descriptor,
-            TX_f: self.TX_f,
-            sig_TX_f: self.sig_TX_f,
+            previous_TX_f_output_descriptor: self.previous_TX_f.fund_output_descriptor(),
+            TX_f,
+            sig_TX_f,
             TX_c,
             TX_s,
             encsig_TX_c_self,
