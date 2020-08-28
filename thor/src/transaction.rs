@@ -408,10 +408,13 @@ pub struct SplitTransaction {
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
-#[error("input amount {input} does not cover total transaction output amount {output}")]
+#[error(
+    "input amount {input} does not cover total transaction output amount {output} and fee {fee}"
+)]
 pub struct InsufficientFunds {
     input: Amount,
     output: Amount,
+    fee: Amount,
 }
 
 impl SplitTransaction {
@@ -422,10 +425,14 @@ impl SplitTransaction {
         let total_input = TX_c.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|(amount, _)| amount.as_sat()).sum());
-        if total_input < total_output - TX_c.fee() {
+        let TX_s_fee = Amount::from_sat(TX_FEE);
+
+        // 1.9 > 2.0 - 0.1 - 0.1
+        if total_input <= total_output - TX_c.fee() - TX_s_fee {
             return Err(InsufficientFunds {
                 input: total_input,
-                output: total_output,
+                output: total_output - TX_c.fee(),
+                fee: TX_s_fee,
             });
         }
 
@@ -436,16 +443,19 @@ impl SplitTransaction {
 
         let [(amount_0, address_0), (amount_1, address_1)] = outputs;
 
-        // Distribute transaction fee costs evenly between outputs
-        let half_fee = TX_FEE / 2;
+        // Distribute transaction TX_c fee costs evenly between outputs
+        let half_TX_c_fee = TX_c.fee() / 2;
+
+        // Distribute transaction TX_s fee costs evenly between outputs
+        let half_TX_s_fee = TX_s_fee / 2;
 
         let output_0 = TxOut {
-            value: amount_0.as_sat() - half_fee,
+            value: amount_0.as_sat() - half_TX_c_fee.as_sat() - half_TX_s_fee.as_sat(),
             script_pubkey: address_0.script_pubkey(),
         };
 
         let output_1 = TxOut {
-            value: amount_1.as_sat() - half_fee,
+            value: amount_1.as_sat() - half_TX_c_fee.as_sat() - half_TX_s_fee.as_sat(),
             script_pubkey: address_1.script_pubkey(),
         };
 
@@ -699,10 +709,12 @@ impl CloseTransaction {
         let total_input = TX_f.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|(amount, _)| amount.as_sat()).sum());
-        if total_input < total_output {
+        let close_transaction_fee = Amount::from_sat(TX_FEE);
+        if total_input <= total_output - close_transaction_fee {
             return Err(InsufficientFunds {
                 input: total_input,
                 output: total_output,
+                fee: close_transaction_fee,
             });
         }
 
@@ -714,15 +726,15 @@ impl CloseTransaction {
         let [(amount_0, address_0), (amount_1, address_1)] = outputs;
 
         // Distribute transaction fee costs evenly between outputs
-        let half_fee = TX_FEE / 2;
+        let half_fee = close_transaction_fee / 2;
 
         let output_0 = TxOut {
-            value: amount_0.as_sat() - half_fee,
+            value: amount_0.as_sat() - half_fee.as_sat(),
             script_pubkey: address_0.script_pubkey(),
         };
 
         let output_1 = TxOut {
-            value: amount_1.as_sat() - half_fee,
+            value: amount_1.as_sat() - half_fee.as_sat(),
             script_pubkey: address_1.script_pubkey(),
         };
 

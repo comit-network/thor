@@ -244,17 +244,9 @@ impl State2 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let fee_per_participant = Amount::from_sat(crate::TX_FEE / 2);
-
         let TX_s = SplitTransaction::new(&TX_c, [
-            (
-                self.balance.ours - fee_per_participant,
-                self.final_address_self.clone(),
-            ),
-            (
-                self.balance.theirs - fee_per_participant,
-                self.final_address_other.clone(),
-            ),
+            (self.balance.ours, self.final_address_self.clone()),
+            (self.balance.theirs, self.final_address_other.clone()),
         ])?;
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 

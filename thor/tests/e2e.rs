@@ -256,7 +256,7 @@ async fn e2e_force_close_channel() {
 
 #[tokio::test]
 async fn e2e_force_close_after_updates() {
-    // Arrange
+    // Arrange:
 
     let tc_client = testcontainers::clients::Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
@@ -268,7 +268,9 @@ async fn e2e_force_close_after_updates() {
     let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    // Act: Create a new channel
+    // Act:
+
+    // Create a new channel
 
     let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
@@ -280,35 +282,25 @@ async fn e2e_force_close_after_updates() {
     let after_create_balance_alice = alice_wallet.0.balance().await.unwrap();
     let after_create_balance_bob = bob_wallet.0.balance().await.unwrap();
 
-    // Assert: Channel balances are synced:
-
-    assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
-    assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
-
-    let Balance {
-        ours: actual_alice_balance,
-        theirs: actual_bob_balance,
-    } = alice_channel.balance();
-
-    // Act: Alice pays Bob 0.1 BTC
+    // Alice pays Bob 0.1 BTC
 
     let payment = Amount::from_btc(0.1).unwrap();
-    let expected_alice_balance = actual_alice_balance - payment;
-    let expected_bob_balance = actual_bob_balance + payment;
+    let alice_balance = fund_amount - payment;
+    let bob_balance = fund_amount + payment;
 
     let alice_update = alice_channel.update(
         &mut alice_transport,
         Balance {
-            ours: expected_alice_balance,
-            theirs: expected_bob_balance,
+            ours: alice_balance,
+            theirs: bob_balance,
         },
         time_lock,
     );
     let bob_update = bob_channel.update(
         &mut bob_transport,
         Balance {
-            ours: expected_bob_balance,
-            theirs: expected_alice_balance,
+            ours: bob_balance,
+            theirs: alice_balance,
         },
         time_lock,
     );
@@ -317,62 +309,11 @@ async fn e2e_force_close_after_updates() {
         .await
         .unwrap();
 
-    // Assert: Channel balances are correct
-
-    assert_eq!(expected_alice_balance, alice_channel.balance().ours);
-    assert_eq!(expected_bob_balance, bob_channel.balance().ours);
-
-    assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
-    assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
-
-    let Balance {
-        ours: actual_alice_balance,
-        theirs: actual_bob_balance,
-    } = alice_channel.balance();
-
-    // Act: Bob pays Alice 0.3 BTC
-
-    let payment = Amount::from_btc(0.3).unwrap();
-    let expected_alice_balance = actual_alice_balance + payment;
-    let expected_bob_balance = actual_bob_balance - payment;
-
-    let alice_update = alice_channel.update(
-        &mut alice_transport,
-        Balance {
-            ours: expected_alice_balance,
-            theirs: expected_bob_balance,
-        },
-        time_lock,
-    );
-    let bob_update = bob_channel.update(
-        &mut bob_transport,
-        Balance {
-            ours: expected_bob_balance,
-            theirs: expected_alice_balance,
-        },
-        time_lock,
-    );
-
-    futures::future::try_join(alice_update, bob_update)
-        .await
-        .unwrap();
-
-    // Assert: Channel balances are correct
-
-    assert_eq!(expected_alice_balance, alice_channel.balance().ours);
-    assert_eq!(expected_bob_balance, bob_channel.balance().ours);
-
-    assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
-    assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
-
-    let Balance {
-        ours: actual_alice_balance,
-        theirs: actual_bob_balance,
-    } = alice_channel.balance();
-
-    // Act: Alice force closes the channel
+    // Alice force closes the channel
 
     alice_channel.force_close(&alice_wallet).await.unwrap();
+
+    // Assert:
 
     let after_close_balance_alice = alice_wallet.0.balance().await.unwrap();
     let after_close_balance_bob = bob_wallet.0.balance().await.unwrap();
@@ -386,12 +327,12 @@ async fn e2e_force_close_after_updates() {
 
     assert_eq!(
         after_close_balance_alice,
-        after_create_balance_alice + actual_alice_balance - fee_deduction_per_output,
-        "Balance after closing channel should equal balance after opening minus transaction fees"
+        after_create_balance_alice + fund_amount - payment - fee_deduction_per_output,
+        "Balance after closing channel should equal balance after opening minus payment, minus transaction fees"
     );
     assert_eq!(
         after_close_balance_bob,
-        after_create_balance_bob + actual_bob_balance - fee_deduction_per_output,
-        "Balance after closing channel should equal balance after opening minus transaction fees"
+        after_create_balance_bob + fund_amount + payment - fee_deduction_per_output,
+        "Balance after closing channel should equal balance after opening plus payment, minus transaction fees"
     );
 }
