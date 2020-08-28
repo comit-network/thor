@@ -40,7 +40,7 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
 use futures::{future::Either, pin_mut, Future};
 use genawaiter::sync::Gen;
-use protocols::{close, create, recycle, update};
+use protocols::{close, create, splice, update};
 use signature::decrypt;
 use transaction::ptlc;
 
@@ -563,13 +563,18 @@ impl Channel {
             .transpose()
     }
 
-    /// Recycle a channel.
+    /// Splice a channel.
     ///
     /// Create a new funding transaction using a previous funding transaction as
-    /// input This is useless in this state :]
-    pub async fn recycle<T, W>(self, transport: &mut T, wallet: &W) -> anyhow::Result<Self>
+    /// input. Also inject own funds to channel by passing a splice-in amount.
+    pub async fn splice<T, W>(
+        self,
+        transport: &mut T,
+        wallet: &W,
+        splice_in: Option<Amount>,
+    ) -> anyhow::Result<Self>
     where
-        W: BroadcastSignedTransaction,
+        W: BroadcastSignedTransaction + BuildFundingPSBT + SignFundingPSBT,
         T: SendMessage + ReceiveMessage,
     {
         // Re-use timelock, final addresses, balance, ownership keys
@@ -581,7 +586,7 @@ impl Channel {
         let x_self = self.x_self;
         let X_other = self.X_other;
 
-        let state0 = recycle::State0::new(
+        let state0 = splice::State0::new(
             time_lock,
             final_address_self,
             final_address_other,
@@ -589,32 +594,35 @@ impl Channel {
             self.TX_f_body,
             x_self,
             X_other,
-        )?;
+            splice_in,
+            wallet,
+        )
+        .await?;
 
         let msg0_self = state0.next_message();
-        transport.send_message(Message::Recycle0(msg0_self)).await?;
+        transport.send_message(Message::Splice0(msg0_self)).await?;
 
-        let msg0_other = map_err(transport.receive_message().await?.into_recycle0())?;
+        let msg0_other = map_err(transport.receive_message().await?.into_splice0())?;
         let state1 = state0.receive(msg0_other)?;
 
         let msg1_self = state1.next_message();
-        transport.send_message(Message::Recycle1(msg1_self)).await?;
+        transport.send_message(Message::Splice1(msg1_self)).await?;
 
-        let msg1_other = map_err(transport.receive_message().await?.into_recycle1())?;
+        let msg1_other = map_err(transport.receive_message().await?.into_splice1())?;
         let state2 = state1.receive(msg1_other)?;
 
         let msg2_self = state2.next_message();
-        transport.send_message(Message::Recycle2(msg2_self)).await?;
+        transport.send_message(Message::Splice2(msg2_self)).await?;
 
-        let msg2_other = map_err(transport.receive_message().await?.into_recycle2())?;
-        let state3 = state2.receive(msg2_other)?;
+        let msg2_other = map_err(transport.receive_message().await?.into_splice2())?;
+        let state3 = state2.receive(msg2_other, wallet).await?;
 
         let msg3_self = state3.next_message().await?;
-        transport.send_message(Message::Recycle3(msg3_self)).await?;
+        transport.send_message(Message::Splice3(msg3_self)).await?;
 
-        let msg3_other = map_err(transport.receive_message().await?.into_recycle3())?;
+        let msg3_other = map_err(transport.receive_message().await?.into_splice3())?;
 
-        let (channel, transaction) = state3.receive(msg3_other)?;
+        let (channel, transaction) = state3.receive(msg3_other, wallet).await?;
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
@@ -815,10 +823,10 @@ pub enum Message {
     Update3(update::RevealRevocationSecretKey),
     Secret(PtlcSecret),
     Close0(close::Message0),
-    Recycle0(recycle::Message0),
-    Recycle1(recycle::Message1),
-    Recycle2(recycle::Message2),
-    Recycle3(recycle::Message3),
+    Splice0(splice::Message0),
+    Splice1(splice::Message1),
+    Splice2(splice::Message2),
+    Splice3(splice::Message3),
 }
 
 #[derive(Debug, thiserror::Error)]

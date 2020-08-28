@@ -3,20 +3,27 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, SplitOutput, StandardChannelState,
+    transaction::{
+        CommitTransaction, FundOutput, FundingTransaction, SpliceTransaction, SplitTransaction,
+    },
+    Balance, BuildFundingPSBT, Channel, ChannelState, SignFundingPSBT, SplitOutput,
+    StandardChannelState,
 };
 use anyhow::Context;
-use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
+use bitcoin::{
+    consensus::serialize, util::psbt::PartiallySignedTransaction, Address, Amount, Transaction,
+};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
-
 use miniscript::Descriptor;
+use std::collections::HashMap;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message0 {
     R: RevocationPublicKey,
     Y: PublishingPublicKey,
+    #[cfg_attr(feature = "serde", serde(default))]
+    splice_in: Option<SpliceIn>,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -34,7 +41,13 @@ pub struct Message2 {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message3 {
-    sig_TX_f: Signature,
+    splice_transaction_signature: Signature,
+    #[cfg_attr(feature = "serde", serde(default))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "crate::serde::partially_signed_transaction::option")
+    )]
+    signed_splice_transaction: Option<PartiallySignedTransaction>,
 }
 
 #[derive(Clone, Debug)]
@@ -48,10 +61,36 @@ pub(crate) struct State0 {
     time_lock: u32,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
+    splice_in_self: Option<SpliceIn>,
+}
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug)]
+pub struct SpliceIn {
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "bitcoin::util::amount::serde::as_sat")
+    )]
+    pub amount: Amount,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "crate::serde::partially_signed_transaction")
+    )]
+    pub input_psbt: PartiallySignedTransaction,
+}
+
+#[async_trait::async_trait]
+pub trait BuildSplicePSBT {
+    async fn build_funding_psbt(
+        &self,
+        output_address: Address,
+        output_amount: Amount,
+    ) -> anyhow::Result<PartiallySignedTransaction>;
 }
 
 impl State0 {
-    pub fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new<W>(
         time_lock: u32,
         final_address_self: Address,
         final_address_other: Address,
@@ -59,7 +98,23 @@ impl State0 {
         previous_TX_f: FundingTransaction,
         x_self: OwnershipKeyPair,
         X_other: OwnershipPublicKey,
-    ) -> anyhow::Result<State0> {
+        splice_in: Option<Amount>,
+        wallet: &W,
+    ) -> anyhow::Result<State0>
+    where
+        W: BuildFundingPSBT,
+    {
+        let splice_in_self = match splice_in {
+            Some(amount) => {
+                let fund_output = FundOutput::new([x_self.public(), X_other.clone()]);
+                let input_psbt = wallet
+                    .build_funding_psbt(fund_output.address(), amount)
+                    .await?;
+                Some(SpliceIn { input_psbt, amount })
+            }
+            None => None,
+        };
+
         let r = RevocationKeyPair::new_random();
         let y = PublishingKeyPair::new_random();
 
@@ -72,6 +127,7 @@ impl State0 {
             previous_TX_f,
             r_self: r,
             y_self: y,
+            splice_in_self,
             time_lock,
         })
     }
@@ -80,6 +136,7 @@ impl State0 {
         Message0 {
             R: self.r_self.public(),
             Y: self.y_self.public(),
+            splice_in: self.splice_in_self.clone(),
         }
     }
 
@@ -88,6 +145,7 @@ impl State0 {
         Message0 {
             R: R_other,
             Y: Y_other,
+            splice_in: splice_in_other,
         }: Message0,
     ) -> anyhow::Result<State1> {
         let previous_funding_txin = self.previous_TX_f.as_txin();
@@ -99,20 +157,52 @@ impl State0 {
         })
         .expect("Only fails if script_sig or witness is empty which is not the case.");
 
+        let mut our_balance = self.previous_balance.ours;
+        let mut their_balance = self.previous_balance.theirs;
+
+        let mut splice_in_inputs = vec![];
+
+        if let Some(splice_in) = self.splice_in_self.clone() {
+            splice_in_inputs.push(splice_in.input_psbt);
+            our_balance += splice_in.amount;
+        }
+
+        if let Some(splice_in) = splice_in_other {
+            splice_in_inputs.push(splice_in.input_psbt);
+            their_balance += splice_in.amount;
+        }
+
+        // Sort the PSBT inputs based on the ascending lexicographical order of
+        // bytes of their consensus serialization. Both parties _must_ do this so that
+        // they compute the same splice transaction.
+        splice_in_inputs.sort_by(|a, b| {
+            serialize(a)
+                .partial_cmp(&serialize(b))
+                .expect("comparison is possible")
+        });
+
+        // The previous funding psbt MUST be the first input
+        let mut inputs = vec![previous_funding_psbt];
+
+        inputs.append(&mut splice_in_inputs);
+
         let balance = Balance {
-            ours: self.previous_balance.ours - Amount::from_sat(crate::TX_FEE / 2),
-            theirs: self.previous_balance.theirs - Amount::from_sat(crate::TX_FEE / 2),
+            ours: our_balance,
+            theirs: their_balance,
         };
 
-        let TX_f = FundingTransaction::new(vec![previous_funding_psbt], [
+        let TX_f = SpliceTransaction::new(inputs, [
             (self.x_self.public(), balance.ours),
             (self.X_other.clone(), balance.theirs),
         ])?;
 
+        // TODO: Clean-up the signature/PSBT mix (if possible)
+
+        // Signed to spend TX_f
         let sig_TX_f = TX_f.sign_once(self.x_self.clone(), &self.previous_TX_f);
 
         let TX_c = CommitTransaction::new(
-            &TX_f,
+            &TX_f.clone().into(),
             [
                 (
                     self.x_self.public(),
@@ -148,12 +238,13 @@ impl State0 {
             y_self: self.y_self,
             Y_other,
             previous_TX_f_output_descriptor: self.previous_TX_f.fund_output_descriptor(),
-            TX_f,
-            sig_TX_f,
+            splice_transaction: TX_f,
+            splice_transaction_signature: sig_TX_f,
             TX_c,
             TX_s,
             encsig_TX_c_self,
             sig_TX_s_self,
+            splice_in_self: self.splice_in_self,
         })
     }
 }
@@ -170,12 +261,13 @@ pub(crate) struct State1 {
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
     previous_TX_f_output_descriptor: Descriptor<bitcoin::PublicKey>,
-    TX_f: FundingTransaction,
-    sig_TX_f: Signature,
+    splice_transaction: SpliceTransaction,
+    splice_transaction_signature: Signature,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
     sig_TX_s_self: Signature,
+    splice_in_self: Option<SpliceIn>,
 }
 
 impl State1 {
@@ -211,11 +303,12 @@ impl State1 {
             y_self: self.y_self,
             Y_other: self.Y_other,
             previous_TX_f_output_descriptor: self.previous_TX_f_output_descriptor,
-            TX_f: self.TX_f,
-            sig_TX_f: self.sig_TX_f,
+            splice_transaction: self.splice_transaction,
+            splice_transaction_signature: self.splice_transaction_signature,
             TX_c: self.TX_c,
             signed_TX_s: self.TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
+            splice_in_self: self.splice_in_self,
         })
     }
 }
@@ -232,11 +325,12 @@ pub(crate) struct State2 {
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
     previous_TX_f_output_descriptor: Descriptor<bitcoin::PublicKey>,
-    TX_f: FundingTransaction,
-    sig_TX_f: Signature,
+    splice_transaction: SpliceTransaction,
+    splice_transaction_signature: Signature,
     TX_c: CommitTransaction,
     signed_TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
+    splice_in_self: Option<SpliceIn>,
 }
 
 impl State2 {
@@ -246,11 +340,12 @@ impl State2 {
         }
     }
 
-    pub fn receive(
+    pub async fn receive(
         self,
         Message2 {
             encsig_TX_c: encsig_TX_c_other,
         }: Message2,
+        wallet: &impl SignFundingPSBT,
     ) -> anyhow::Result<State3> {
         self.TX_c
             .verify_encsig(
@@ -259,6 +354,16 @@ impl State2 {
                 &encsig_TX_c_other,
             )
             .context("failed to verify encsig_TX_c sent by counterparty")?;
+
+        // Signed to spend the splice-in input
+        let signed_splice_transaction = match self.splice_in_self {
+            Some(_) => Some(
+                wallet
+                    .sign_funding_psbt(self.splice_transaction.clone().into_psbt()?)
+                    .await?,
+            ),
+            None => None,
+        };
 
         Ok(State3 {
             x_self: self.x_self,
@@ -271,12 +376,13 @@ impl State2 {
             y_self: self.y_self,
             Y_other: self.Y_other,
             previous_TX_f_output_descriptor: self.previous_TX_f_output_descriptor,
-            TX_f: self.TX_f,
-            sig_TX_f: self.sig_TX_f,
+            splice_transaction: self.splice_transaction,
+            splice_transaction_signature: self.splice_transaction_signature,
             TX_c: self.TX_c,
             signed_TX_s: self.signed_TX_s,
             encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other,
+            signed_splice_transaction,
         })
     }
 }
@@ -293,32 +399,53 @@ pub(crate) struct State3 {
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
     previous_TX_f_output_descriptor: Descriptor<bitcoin::PublicKey>,
-    TX_f: FundingTransaction,
-    sig_TX_f: Signature,
+    splice_transaction: SpliceTransaction,
+    splice_transaction_signature: Signature,
     TX_c: CommitTransaction,
     signed_TX_s: SplitTransaction,
     encsig_TX_c_self: EncryptedSignature,
     encsig_TX_c_other: EncryptedSignature,
+    signed_splice_transaction: Option<PartiallySignedTransaction>,
 }
 
 impl State3 {
     pub async fn next_message(&self) -> anyhow::Result<Message3> {
         Ok(Message3 {
-            sig_TX_f: self.sig_TX_f.clone(),
+            splice_transaction_signature: self.splice_transaction_signature.clone(),
+            signed_splice_transaction: self.signed_splice_transaction.clone(),
         })
     }
 
     /// Returns the Channel and the transaction to broadcast.
-    pub fn receive(
+    pub async fn receive(
         self,
         Message3 {
-            sig_TX_f: sig_TX_f_other,
+            splice_transaction_signature: splice_transaction_signature_other,
+            signed_splice_transaction: signed_splice_transaction_other,
         }: Message3,
+        wallet: &impl SignFundingPSBT,
     ) -> anyhow::Result<(Channel, Transaction)> {
-        let signed_TX_f = self.TX_f.clone().add_signatures(
+        // TODO: Check that the received splice transaction is the same than we expect
+        // If the other party sent a splice-in signed TX_f, use it, otherwise, use our
+        // unsigned TX_f
+        let splice_transaction = match signed_splice_transaction_other {
+            Some(signed_splice_transaction_other) => signed_splice_transaction_other,
+            None => self.splice_transaction.clone().into_psbt()?,
+        };
+
+        // If we have a splice-in input, we need to sign it, otherwise, use the previous
+        // TX_f
+        let splice_transaction = match self.signed_splice_transaction {
+            Some(_) => wallet.sign_funding_psbt(splice_transaction).await?,
+            None => splice_transaction,
+        };
+
+        // Add the signatures to spend the previous TX_f
+        let splice_transaction = add_signatures(
+            splice_transaction.extract_tx(),
             self.previous_TX_f_output_descriptor,
-            (self.x_self.public(), self.sig_TX_f),
-            (self.X_other.clone(), sig_TX_f_other),
+            (self.x_self.public(), self.splice_transaction_signature),
+            (self.X_other.clone(), splice_transaction_signature_other),
         )?;
 
         Ok((
@@ -327,7 +454,7 @@ impl State3 {
                 X_other: self.X_other,
                 final_address_self: self.final_address_self,
                 final_address_other: self.final_address_other,
-                TX_f_body: self.TX_f,
+                TX_f_body: self.splice_transaction.into(),
                 current_state: ChannelState::Standard(StandardChannelState {
                     balance: self.balance,
                     TX_c: self.TX_c,
@@ -340,7 +467,37 @@ impl State3 {
                 }),
                 revoked_states: vec![],
             },
-            signed_TX_f,
+            splice_transaction,
         ))
     }
+}
+
+pub fn add_signatures(
+    mut transaction: Transaction,
+    input_descriptor: Descriptor<bitcoin::PublicKey>,
+    (X_0, sig_0): (OwnershipPublicKey, Signature),
+    (X_1, sig_1): (OwnershipPublicKey, Signature),
+) -> anyhow::Result<Transaction> {
+    let satisfier = {
+        let mut satisfier = HashMap::with_capacity(2);
+
+        let X_0 = ::bitcoin::PublicKey {
+            compressed: true,
+            key: X_0.into(),
+        };
+        let X_1 = ::bitcoin::PublicKey {
+            compressed: true,
+            key: X_1.into(),
+        };
+
+        // The order in which these are inserted doesn't matter
+        satisfier.insert(X_0, (sig_0.into(), ::bitcoin::SigHashType::All));
+        satisfier.insert(X_1, (sig_1.into(), ::bitcoin::SigHashType::All));
+
+        satisfier
+    };
+
+    input_descriptor.satisfy(&mut transaction.input[0], satisfier)?;
+
+    Ok(transaction)
 }
