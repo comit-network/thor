@@ -308,8 +308,8 @@ impl State3 {
         let current_state = ChannelState {
             balance: self.updated_balance,
             TX_c: self.TX_c,
-            encsig_TX_c_self: self.encsig_TX_c_other,
-            encsig_TX_c_other: self.encsig_TX_c_self,
+            encsig_TX_c_self: self.encsig_TX_c_self,
+            encsig_TX_c_other: self.encsig_TX_c_other,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
