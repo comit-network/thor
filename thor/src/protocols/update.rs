@@ -4,7 +4,7 @@ use crate::{
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, RevokedState,
+    Channel, ChannelState, RevokedState, SplitOutput,
 };
 use anyhow::Context;
 use bitcoin::Address;
@@ -48,14 +48,14 @@ pub struct State0 {
     TX_f_body: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-    updated_balance: Balance,
+    new_split_outputs: Vec<SplitOutput>,
     time_lock: u32,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
 }
 
 impl State0 {
-    pub fn new(channel: Channel, updated_balance: Balance, time_lock: u32) -> Self {
+    pub fn new(channel: Channel, new_split_outputs: Vec<SplitOutput>, time_lock: u32) -> Self {
         let r_self = RevocationKeyPair::new_random();
         let y_self = PublishingKeyPair::new_random();
 
@@ -67,7 +67,7 @@ impl State0 {
             TX_f_body: channel.TX_f_body,
             current_state: channel.current_state,
             revoked_states: channel.revoked_states,
-            updated_balance,
+            new_split_outputs,
             time_lock,
             r_self,
             y_self,
@@ -102,13 +102,7 @@ impl State0 {
         )?;
         let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, [
-            (self.updated_balance.ours, self.final_address_self.clone()),
-            (
-                self.updated_balance.theirs,
-                self.final_address_other.clone(),
-            ),
-        ])?;
+        let TX_s = SplitTransaction::new(&TX_c, self.new_split_outputs.clone())?;
         let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
 
         Ok(State1 {
@@ -119,7 +113,7 @@ impl State0 {
             TX_f: self.TX_f_body,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
-            updated_balance: self.updated_balance,
+            new_split_outputs: self.new_split_outputs,
             r_self: self.r_self,
             R_other,
             y_self: self.y_self,
@@ -143,7 +137,7 @@ pub struct State1 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-    updated_balance: Balance,
+    new_split_outputs: Vec<SplitOutput>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -184,7 +178,7 @@ impl State1 {
             TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
-            updated_balance: self.updated_balance,
+            new_split_outputs: self.new_split_outputs,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -208,7 +202,7 @@ pub struct State2 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-    updated_balance: Balance,
+    new_split_outputs: Vec<SplitOutput>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -247,7 +241,7 @@ impl State2 {
             TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
-            updated_balance: self.updated_balance,
+            new_split_outputs: self.new_split_outputs,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -272,7 +266,7 @@ pub struct State3 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-    updated_balance: Balance,
+    new_split_outputs: Vec<SplitOutput>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -306,7 +300,7 @@ impl State3 {
         revoked_states.push(revoked_state);
 
         let current_state = ChannelState {
-            balance: self.updated_balance,
+            split_outputs: self.new_split_outputs,
             TX_c: self.TX_c,
             encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other: self.encsig_TX_c_other,

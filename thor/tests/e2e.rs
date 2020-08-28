@@ -7,20 +7,44 @@ use bitcoin_harness::{self, Bitcoind};
 use harness::{make_transports, make_wallets};
 use thor::{Balance, Channel};
 
+fn generate_balances(fund_amount_alice: Amount, fund_amount_bob: Amount) -> (Balance, Balance) {
+    let balance_alice = Balance {
+        ours: fund_amount_alice,
+        theirs: fund_amount_bob,
+    };
+
+    let balance_bob = Balance {
+        ours: fund_amount_bob,
+        theirs: fund_amount_alice,
+    };
+
+    (balance_alice, balance_bob)
+}
+
 #[tokio::test]
 async fn e2e_channel_creation() {
     let tc_client = testcontainers::clients::Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     bitcoind.init(5).await.unwrap();
 
-    let fund_amount = Amount::ONE_BTC;
+    let fund_amount_alice = Amount::ONE_BTC;
+    let fund_amount_bob = Amount::ONE_BTC;
+    let (balance_alice, balance_bob) = generate_balances(fund_amount_alice, fund_amount_bob);
+
     let time_lock = 1;
 
-    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount_alice, fund_amount_bob)
+        .await
+        .unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(
+        &mut alice_transport,
+        &alice_wallet,
+        balance_alice,
+        time_lock,
+    );
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (_alice_channel, _bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -33,14 +57,24 @@ async fn e2e_channel_update() {
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     bitcoind.init(5).await.unwrap();
 
-    let fund_amount = Amount::ONE_BTC;
+    let fund_amount_alice = Amount::ONE_BTC;
+    let fund_amount_bob = Amount::ONE_BTC;
+    let (balance_alice, balance_bob) = generate_balances(fund_amount_alice, fund_amount_bob);
+
     let time_lock = 1;
 
-    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount_alice, fund_amount_bob)
+        .await
+        .unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(
+        &mut alice_transport,
+        &alice_wallet,
+        balance_alice,
+        time_lock,
+    );
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -48,8 +82,8 @@ async fn e2e_channel_update() {
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
     let payment = Amount::from_btc(0.5).unwrap();
-    let alice_balance = fund_amount - payment;
-    let bob_balance = fund_amount + payment;
+    let alice_balance = fund_amount_alice - payment;
+    let bob_balance = fund_amount_bob + payment;
 
     let alice_update = alice_channel.update(
         &mut alice_transport,
@@ -87,14 +121,24 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     bitcoind.init(5).await.unwrap();
 
-    let fund_amount = Amount::ONE_BTC;
+    let fund_amount_alice = Amount::ONE_BTC;
+    let fund_amount_bob = Amount::ONE_BTC;
+    let (balance_alice, balance_bob) = generate_balances(fund_amount_alice, fund_amount_bob);
+
     let time_lock = 1;
 
-    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount_alice, fund_amount_bob)
+        .await
+        .unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(
+        &mut alice_transport,
+        &alice_wallet,
+        balance_alice,
+        time_lock,
+    );
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -105,8 +149,8 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
     let payment = Amount::from_btc(0.5).unwrap();
-    let alice_balance = fund_amount - payment;
-    let bob_balance = fund_amount + payment;
+    let alice_balance = fund_amount_alice - payment;
+    let bob_balance = fund_amount_bob + payment;
 
     let alice_update = alice_channel.update(
         &mut alice_transport,
@@ -154,7 +198,7 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
     );
     assert_eq!(
         after_punish_balance_bob,
-        after_open_balance_bob + fund_amount * 2 - Amount::from_sat(thor::TX_FEE) * 2,
+        after_open_balance_bob + fund_amount_bob * 2 - Amount::from_sat(thor::TX_FEE) * 2,
         "Bob should get all the money back after punishing Alice"
     );
 }
@@ -165,14 +209,24 @@ async fn e2e_channel_collaborative_close() {
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     bitcoind.init(5).await.unwrap();
 
-    let fund_amount = Amount::ONE_BTC;
+    let fund_amount_alice = Amount::ONE_BTC;
+    let fund_amount_bob = Amount::ONE_BTC;
+    let (balance_alice, balance_bob) = generate_balances(fund_amount_alice, fund_amount_bob);
+
     let time_lock = 1;
 
-    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount_alice, fund_amount_bob)
+        .await
+        .unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(
+        &mut alice_transport,
+        &alice_wallet,
+        balance_alice,
+        time_lock,
+    );
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -199,12 +253,12 @@ async fn e2e_channel_collaborative_close() {
 
     assert_eq!(
         after_close_balance_alice,
-        after_open_balance_alice + fund_amount - fee_deduction_per_output,
+        after_open_balance_alice + fund_amount_alice - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus transaction fees"
     );
     assert_eq!(
         after_close_balance_bob,
-        after_open_balance_bob + fund_amount - fee_deduction_per_output,
+        after_open_balance_bob + fund_amount_bob - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus transaction fees"
     );
 }
@@ -215,14 +269,24 @@ async fn e2e_force_close_channel() {
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     bitcoind.init(5).await.unwrap();
 
-    let fund_amount = Amount::ONE_BTC;
+    let fund_amount_alice = Amount::ONE_BTC;
+    let fund_amount_bob = Amount::ONE_BTC;
+    let (balance_alice, balance_bob) = generate_balances(fund_amount_alice, fund_amount_bob);
+
     let time_lock = 1;
 
-    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount_alice, fund_amount_bob)
+        .await
+        .unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
-    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(
+        &mut alice_transport,
+        &alice_wallet,
+        balance_alice,
+        time_lock,
+    );
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, _bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -244,12 +308,12 @@ async fn e2e_force_close_channel() {
 
     assert_eq!(
         after_close_balance_alice,
-        after_open_balance_alice + fund_amount - fee_deduction_per_output,
+        after_open_balance_alice + fund_amount_alice - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus transaction fees"
     );
     assert_eq!(
         after_close_balance_bob,
-        after_open_balance_bob + fund_amount - fee_deduction_per_output,
+        after_open_balance_bob + fund_amount_bob - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus transaction fees"
     );
 }
@@ -262,18 +326,28 @@ async fn e2e_force_close_after_updates() {
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     bitcoind.init(5).await.unwrap();
 
-    let fund_amount = Amount::ONE_BTC;
+    let fund_amount_alice = Amount::ONE_BTC;
+    let fund_amount_bob = Amount::ONE_BTC;
+    let (balance_alice, balance_bob) = generate_balances(fund_amount_alice, fund_amount_bob);
+
     let time_lock = 1;
 
-    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
+    let (alice_wallet, bob_wallet) = make_wallets(&bitcoind, fund_amount_alice, fund_amount_bob)
+        .await
+        .unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
     // Act:
 
     // Create a new channel
 
-    let alice_create = Channel::create(&mut alice_transport, &alice_wallet, fund_amount, time_lock);
-    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, fund_amount, time_lock);
+    let alice_create = Channel::create(
+        &mut alice_transport,
+        &alice_wallet,
+        balance_alice,
+        time_lock,
+    );
+    let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
         .await
@@ -285,8 +359,8 @@ async fn e2e_force_close_after_updates() {
     // Alice pays Bob 0.1 BTC
 
     let payment = Amount::from_btc(0.1).unwrap();
-    let alice_balance = fund_amount - payment;
-    let bob_balance = fund_amount + payment;
+    let alice_balance = fund_amount_alice - payment;
+    let bob_balance = fund_amount_bob + payment;
 
     let alice_update = alice_channel.update(
         &mut alice_transport,
@@ -327,12 +401,12 @@ async fn e2e_force_close_after_updates() {
 
     assert_eq!(
         after_close_balance_alice,
-        after_create_balance_alice + fund_amount - payment - fee_deduction_per_output,
+        after_create_balance_alice + fund_amount_alice - payment - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus payment, minus transaction fees"
     );
     assert_eq!(
         after_close_balance_bob,
-        after_create_balance_bob + fund_amount + payment - fee_deduction_per_output,
+        after_create_balance_bob + fund_amount_bob + payment - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening plus payment, minus transaction fees"
     );
 }

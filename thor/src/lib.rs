@@ -34,7 +34,10 @@ use crate::{
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
 use bitcoin::{Address, Amount, Transaction, Txid};
-use ecdsa_fun::adaptor::EncryptedSignature;
+use ecdsa_fun::{
+    adaptor::EncryptedSignature,
+    fun::{Point, Scalar},
+};
 use enum_as_inner::EnumAsInner;
 use protocols::{close, create, update};
 use signature::decrypt;
@@ -79,17 +82,13 @@ pub trait ReceiveMessage {
 impl Channel {
     /// Create a channel.
     ///
-    /// The `fund_amount` represents how much Bitcoin either party will
-    /// contribute to the channel. This means both parties contribute the same
-    /// amount.
-    ///
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
     /// on the `transport` they provide, allowing the parties to communicate
     /// with each other.
     pub async fn create<T, W>(
         transport: &mut T,
         wallet: &W,
-        fund_amount: Amount,
+        balance: Balance,
         time_lock: u32,
     ) -> anyhow::Result<Self>
     where
@@ -97,7 +96,7 @@ impl Channel {
         T: SendMessage + ReceiveMessage,
     {
         let final_address = wallet.new_address().await?;
-        let state0 = create::State0::new(fund_amount, time_lock, final_address);
+        let state0 = create::State0::new(balance, time_lock, final_address);
 
         let msg0_self = state0.next_message();
         transport.send_message(Message::Create0(msg0_self)).await?;
@@ -144,8 +143,8 @@ impl Channel {
     /// Update the distribution of coins in the channel.
     ///
     /// It assumes that the counterparty has already agreed to update the
-    /// channel with the `new_balance` and the same `timelock` and will call
-    /// the same API (or an equivalent one).
+    /// channel with the same balance and `timelock` and will call the same API
+    /// (or an equivalent one).
     ///
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
     /// on the `transport` they provide, allowing the parties to communicate
@@ -153,13 +152,104 @@ impl Channel {
     pub async fn update<T>(
         &mut self,
         transport: &mut T,
-        new_balance: Balance,
+        Balance { ours, theirs }: Balance,
         time_lock: u32,
     ) -> anyhow::Result<()>
     where
         T: SendMessage + ReceiveMessage,
     {
-        let state0 = update::State0::new(self.clone(), new_balance, time_lock);
+        let split_output_self = SplitOutput::Balance {
+            amount: ours,
+            address: self.final_address_self.clone(),
+        };
+
+        let split_output_other = SplitOutput::Balance {
+            amount: theirs,
+            address: self.final_address_other.clone(),
+        };
+
+        self._update(
+            transport,
+            vec![split_output_self, split_output_other],
+            time_lock,
+        )
+        .await
+    }
+
+    /// Perform an atomic swap with a thor channel as beta ledger in the
+    /// role of Alice.
+    pub async fn add_ptlc_alice<T>(
+        &mut self,
+        _transport: &mut T,
+        _new_split_outputs: Vec<SplitOutput>,
+        _encryption_secret_key: Scalar,
+        _alpha_absolute_expiry: u32,
+        _TX_s_time_lock: u32,
+        _ptlc_redeem_time_lock: u32,
+    ) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+    {
+        // TODO: Think about how to handle the three expiries.
+
+        // 1. Construct and sign ptlc_refund and ptlc_redeem transactions (this requires
+        // building TX_c and TX_s too).
+        // 2. Send signatures to Bob.
+        // 3. Caller must convince Bob that the alpha asset is funded (outside of this
+        // function).
+        // 4. Receive Bob's signature for ptlc_refund and encsignature for ptlc_redeem.
+        // 5. Run channel update protocol to add PTLC output.
+        // 6. Send encryption_secret_key to Bob (who will use it to redeem alpha asset).
+        // 7. Attempt to perform a channel update to add PTLC output to Alice's balance
+        // output. If Bob doesn't respond, force close and publish ptlc_redeem. If he
+        // does respond, carry out the update and feel free to forget the
+        // encryption_secret_key.
+
+        todo!()
+    }
+
+    /// Perform an atomic swap with a thor channel as beta ledger in the
+    /// role of Bob.
+    pub async fn add_ptlc_bob<T>(
+        &mut self,
+        _transport: &mut T,
+        _new_split_outputs: Vec<SplitOutput>,
+        _encryption_public_key: Point,
+        _alpha_absolute_expiry: u32,
+        _TX_s_time_lock: u32,
+        _ptlc_redeem_time_lock: u32,
+    ) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+    {
+        // 1. Construct and sign ptlc_refund and construct and encsign ptlc_redeem
+        // transactions using the encryption_public_key (this requires building TX_c and
+        // TX_s too).
+        // 2. Receive Alice's signatures for ptlc_refund and for ptlc_redeem.
+        // 3. Alice must convince the caller that the alpha asset is funded (outside of
+        // this function).
+        // 4. Send signature and encsignature from step 1 to Alice.
+        // 5. Run channel update protocol to add PTLC output.
+        // 6. Wait for Alice to send over the encryption_secret_key. If she doesn't,
+        // force close and publish ptlc_refund as soon as possible - Alice will have
+        // time to publish ptlc_redeem after we force close, but if she does the caller
+        // will learn the secret and will be able to redeem beta asset. If she does, use
+        // it to redeem beta asset.
+        // 7. Perform a channel update to add PTLC output to Alice's balance output.
+
+        todo!()
+    }
+
+    pub async fn _update<T>(
+        &mut self,
+        transport: &mut T,
+        new_split_outputs: Vec<SplitOutput>,
+        time_lock: u32,
+    ) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+    {
+        let state0 = update::State0::new(self.clone(), new_split_outputs, time_lock);
 
         let msg0_self = state0.compose();
         transport.send_message(Message::Update0(msg0_self)).await?;
@@ -264,7 +354,31 @@ impl Channel {
     }
 
     pub fn balance(&self) -> Balance {
-        self.current_state.balance
+        // We ignore PTLC outputs because it's hard to determine who owns them. Maybe
+        // this method is not that useful.
+        self.current_state.split_outputs.iter().fold(
+            Balance {
+                ours: Amount::ZERO,
+                theirs: Amount::ZERO,
+            },
+            |acc, output| match output {
+                SplitOutput::Balance { amount, address } if address == &self.final_address_self => {
+                    Balance {
+                        ours: acc.ours + *amount,
+                        theirs: acc.theirs,
+                    }
+                }
+                SplitOutput::Balance { amount, address }
+                    if address == &self.final_address_other =>
+                {
+                    Balance {
+                        ours: acc.ours,
+                        theirs: acc.theirs + *amount,
+                    }
+                }
+                _ => acc,
+            },
+        )
     }
 
     pub fn TX_f_txid(&self) -> Txid {
@@ -284,11 +398,12 @@ impl Channel {
 #[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 #[derive(Clone, Debug)]
 pub struct ChannelState {
+    // TODO: Rework this docstring
     /// Proportion of the coins in the channel that currently belong to either
     /// party. To actually claim these coins one or more transactions will have
     /// to be submitted to the blockchain, so in practice the balance will see a
     /// reduction to pay for transaction fees.
-    balance: Balance,
+    split_outputs: Vec<SplitOutput>,
     TX_c: CommitTransaction,
     /// Encrypted signature sent to the counterparty. If the counterparty
     /// decrypts it with their own `PublishingSecretKey` and uses it to sign and
@@ -373,6 +488,37 @@ pub struct Balance {
         serde(with = "bitcoin::util::amount::serde::as_sat")
     )]
     pub theirs: Amount,
+}
+
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[derive(Debug, Clone)]
+pub enum SplitOutput {
+    Ptlc {
+        #[cfg_attr(
+            feature = "serde",
+            serde(with = "bitcoin::util::amount::serde::as_sat")
+        )]
+        amount: Amount,
+        X_funder: OwnershipPublicKey,
+        X_redeemer: OwnershipPublicKey,
+    },
+    Balance {
+        #[cfg_attr(
+            feature = "serde",
+            serde(with = "bitcoin::util::amount::serde::as_sat")
+        )]
+        amount: Amount,
+        address: Address,
+    },
+}
+
+impl SplitOutput {
+    pub fn amount(&self) -> Amount {
+        match self {
+            SplitOutput::Ptlc { amount, .. } => *amount,
+            SplitOutput::Balance { amount, .. } => *amount,
+        }
+    }
 }
 
 /// All possible messages that can be sent between two parties using this
