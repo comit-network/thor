@@ -3,14 +3,12 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    transaction::{CommitTransaction, FundOutput, SplitTransaction},
-    Balance, Channel, ChannelState, SplitOutput,
+    transaction::{balance, CommitTransaction, FundOutput, FundingTransaction, SplitTransaction},
+    Balance, Channel, ChannelState, SplitOutput, StandardChannelState,
 };
 use anyhow::Context;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
-
-pub use crate::transaction::FundingTransaction;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
@@ -59,7 +57,7 @@ pub struct Message5 {
 }
 
 #[derive(Debug)]
-pub struct State0 {
+pub(crate) struct State0 {
     x_self: OwnershipKeyPair,
     final_address_self: Address,
     balance: Balance,
@@ -120,7 +118,7 @@ impl State0 {
 }
 
 #[derive(Debug)]
-pub struct State1 {
+pub(crate) struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -170,7 +168,7 @@ impl State1 {
 }
 
 #[derive(Clone, Debug)]
-pub struct State2 {
+pub(crate) struct State2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -209,7 +207,6 @@ impl State2 {
             ],
             self.time_lock,
         )?;
-        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
         let split_outputs = vec![
             SplitOutput::Balance {
@@ -222,7 +219,7 @@ impl State2 {
             },
         ];
         let TX_s = SplitTransaction::new(&TX_c, split_outputs.clone())?;
-        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
+        let sig_TX_s_self = TX_s.sign_once(&self.x_self);
 
         Ok(Party3 {
             x_self: self.x_self,
@@ -237,14 +234,13 @@ impl State2 {
             TX_f: self.TX_f,
             TX_c,
             TX_s,
-            encsig_TX_c_self,
             sig_TX_s_self,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct Party3 {
+pub(crate) struct Party3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -257,7 +253,6 @@ pub struct Party3 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    encsig_TX_c_self: EncryptedSignature,
     sig_TX_s_self: Signature,
 }
 
@@ -283,6 +278,8 @@ impl Party3 {
             (self.X_other.clone(), sig_TX_s_other),
         )?;
 
+        let encsig_TX_c_self = self.TX_c.encsign_once(&self.x_self, self.Y_other.clone());
+
         Ok(Party4 {
             x_self: self.x_self,
             X_other: self.X_other,
@@ -296,13 +293,13 @@ impl Party3 {
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             signed_TX_s: self.TX_s,
-            encsig_TX_c_self: self.encsig_TX_c_self,
+            encsig_TX_c_self,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct Party4 {
+pub(crate) struct Party4 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -352,14 +349,13 @@ impl Party4 {
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             signed_TX_s: self.signed_TX_s,
-            encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct Party5 {
+pub(crate) struct Party5 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -372,7 +368,6 @@ pub struct Party5 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     signed_TX_s: SplitTransaction,
-    encsig_TX_c_self: EncryptedSignature,
     encsig_TX_c_other: EncryptedSignature,
 }
 
@@ -407,20 +402,23 @@ impl Party5 {
             Channel {
                 x_self: self.x_self,
                 X_other: self.X_other,
-                final_address_self: self.final_address_self,
-                final_address_other: self.final_address_other,
+                final_address_self: self.final_address_self.clone(),
+                final_address_other: self.final_address_other.clone(),
                 TX_f_body: self.TX_f,
-                current_state: ChannelState {
-                    split_outputs: self.split_outputs,
+                current_state: ChannelState::Standard(StandardChannelState {
+                    balance: balance(
+                        self.split_outputs,
+                        &self.final_address_self,
+                        &self.final_address_other,
+                    ),
                     TX_c: self.TX_c,
-                    encsig_TX_c_self: self.encsig_TX_c_self,
                     encsig_TX_c_other: self.encsig_TX_c_other,
                     r_self: self.r_self,
                     R_other: self.R_other,
                     y_self: self.y_self,
                     Y_other: self.Y_other,
                     signed_TX_s: self.signed_TX_s,
-                },
+                }),
                 revoked_states: vec![],
             },
             signed_TX_f,

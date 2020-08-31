@@ -1,7 +1,8 @@
-use crate::keys::{OwnershipPublicKey, PublishingPublicKey, PublishingSecretKey};
+use crate::keys::OwnershipPublicKey;
 use bitcoin::hashes::Hash;
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
+    fun::{Point, Scalar},
     nonce::Deterministic,
     Signature, ECDSA,
 };
@@ -37,7 +38,7 @@ pub struct InvalidEncryptedSignature;
 
 pub fn verify_encsig(
     verification_key: OwnershipPublicKey,
-    encryption_key: PublishingPublicKey,
+    encryption_key: Point,
     transaction_sighash: &SigHash,
     encsig: &EncryptedSignature,
 ) -> Result<(), InvalidEncryptedSignature> {
@@ -45,7 +46,7 @@ pub fn verify_encsig(
 
     if adaptor.verify_encrypted_signature(
         &verification_key.into(),
-        &encryption_key.into(),
+        &encryption_key,
         &transaction_sighash.into_inner(),
         &encsig,
     ) {
@@ -56,8 +57,8 @@ pub fn verify_encsig(
 }
 
 #[allow(dead_code)]
-pub fn decrypt(decryption_key: PublishingSecretKey, encsig: EncryptedSignature) -> Signature {
+pub fn decrypt(decryption_key: Scalar, encsig: EncryptedSignature) -> Signature {
     let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
-    adaptor.decrypt_signature(&decryption_key.into(), encsig)
+    adaptor.decrypt_signature(&decryption_key, encsig)
 }
