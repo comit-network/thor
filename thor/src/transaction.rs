@@ -8,6 +8,7 @@ use crate::{
 use anyhow::bail;
 use arrayvec::ArrayVec;
 use bitcoin::{
+    consensus::encode::serialize,
     hashes::{hash160, Hash},
     secp256k1,
     util::{bip143::SighashComponents, psbt::PartiallySignedTransaction},
@@ -65,39 +66,65 @@ pub struct FundingTransaction {
     amount_1: Amount,
 }
 
+/// Scenario:
+
+/// Redeem + Funding
+/// Ins:
+/// - HTLC 1BTC
+/// - You: 0.5BTC
+/// Outs:
+/// - Onchain me: 1BTC
+/// - Channel (me: 0BTC, you: 0.5BTC)
+
+/// Atomic swaps in channel
+/// Balance: (me: 0.5BTC, you :0BTC)
+
+/// Rebalance
+/// Ins:
+/// - previous_TXf
+/// [- You: 0.75BTC]
+/// Outs:
+/// [- Onchain me: 0.5 BTC]
+/// - Channel: (me: 0BTC, you: 0.75BTC)
 impl FundingTransaction {
     pub fn new(
-        mut args: [(OwnershipPublicKey, PartiallySignedTransaction, Amount); 2],
+        mut inputs: Vec<PartiallySignedTransaction>,
+        channel_balance: [(OwnershipPublicKey, Amount); 2],
     ) -> anyhow::Result<Self> {
-        // Sort the tuples of arguments based on the ascending lexicographical order of
-        // bytes of each ownership public key. Both parties _must_ do this so that they
-        // compute the same funding transaction
-        args.sort_by(|a, b| a.0.partial_cmp(&b.0).expect("comparison is possible"));
+        if inputs.is_empty() {
+            anyhow::bail!("Cannot build a transaction without inputs")
+        }
 
-        let [(X_0, input_psbt_0, amount_0), (X_1, input_psbt_1, amount_1)] = args;
+        // Sort the tuples of arguments based on the ascending lexicographical order of
+        // bytes of each consensus encoded PSBT. Both parties _must_ do this so that
+        // they compute the same funding transaction
+        inputs.sort_by(|a, b| {
+            serialize(a)
+                .partial_cmp(&serialize(b))
+                .expect("comparison is possible")
+        });
+
+        let [(X_0, amount_0), (X_1, amount_1)] = channel_balance;
 
         let fund_output = FundOutput::new([X_0, X_1]);
         let fund_output_descriptor = fund_output.descriptor();
 
         // Extract inputs and change_outputs from each party's input_psbt
-        let [(inputs_0, change_outputs_0), (inputs_1, change_outputs_1)] =
-            vec![input_psbt_0, input_psbt_1]
-                .into_iter()
-                .map(|psbt| {
-                    let Transaction { input, output, .. } = psbt.extract_tx();
+        let (inputs, change_outputs) = inputs
+            .into_iter()
+            .map(|psbt| {
+                let Transaction { input, output, .. } = psbt.extract_tx();
 
-                    let change_outputs = output
-                        .into_iter()
-                        .filter(|output| {
-                            output.script_pubkey != fund_output_descriptor.script_pubkey()
-                        })
-                        .collect();
+                let change_output: Vec<TxOut> = output
+                    .into_iter()
+                    .filter(|output| output.script_pubkey != fund_output_descriptor.script_pubkey())
+                    .collect();
 
-                    (input, change_outputs)
-                })
-                .collect::<ArrayVec<[_; 2]>>()
-                .into_inner()
-                .expect("inner array is full to capacity");
+                (input, change_output)
+            })
+            .fold((vec![], vec![]), |acc, (inputs, outputs)| {
+                (vec![acc.0, inputs].concat(), vec![acc.1, outputs].concat())
+            });
 
         // Build shared fund output based on the amounts and ownership public keys
         // provided by both parties
@@ -110,8 +137,8 @@ impl FundingTransaction {
         let TX_f = Transaction {
             version: 2,
             lock_time: 0,
-            input: vec![inputs_0, inputs_1].concat(),
-            output: vec![vec![fund_output], change_outputs_0, change_outputs_1].concat(),
+            input: inputs,
+            output: vec![vec![fund_output], change_outputs].concat(),
         };
 
         Ok(Self {
@@ -154,6 +181,54 @@ impl FundingTransaction {
 
     pub fn txid(&self) -> Txid {
         self.inner.txid()
+    }
+
+    fn compute_digest(recycle_tx: &Transaction, previous_TX_f: &FundingTransaction) -> SigHash {
+        SighashComponents::new(&recycle_tx).sighash_all(
+            &previous_TX_f.as_txin(),
+            &previous_TX_f.fund_output_descriptor().witness_script(),
+            previous_TX_f.value().as_sat(),
+        )
+    }
+
+    pub fn sign_once(
+        &self,
+        x_self: OwnershipKeyPair,
+        previous_TX_f: &FundingTransaction,
+    ) -> Signature {
+        let digest = Self::compute_digest(&self.inner, previous_TX_f);
+        x_self.sign(digest)
+    }
+
+    pub fn add_signatures(
+        self,
+        input_descriptor: Descriptor<bitcoin::PublicKey>,
+        (X_0, sig_0): (OwnershipPublicKey, Signature),
+        (X_1, sig_1): (OwnershipPublicKey, Signature),
+    ) -> anyhow::Result<Transaction> {
+        let satisfier = {
+            let mut satisfier = HashMap::with_capacity(2);
+
+            let X_0 = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_0.into(),
+            };
+            let X_1 = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_1.into(),
+            };
+
+            // The order in which these are inserted doesn't matter
+            satisfier.insert(X_0, (sig_0.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_1, (sig_1.into(), ::bitcoin::SigHashType::All));
+
+            satisfier
+        };
+
+        let mut transaction = self.inner;
+        input_descriptor.satisfy(&mut transaction.input[0], satisfier)?;
+
+        Ok(transaction)
     }
 
     fn build_output_descriptor(
@@ -320,6 +395,10 @@ impl CommitTransaction {
 
     pub fn txid(&self) -> Txid {
         self.inner.txid()
+    }
+
+    pub fn time_lock(&self) -> u32 {
+        self.time_lock
     }
 
     fn fee(&self) -> Amount {
