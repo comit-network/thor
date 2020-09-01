@@ -73,4 +73,5 @@ jobs:
         run: cargo check --workspace --all-targets --all-features
 
       - name: Cargo test
-        run: cargo test --workspace --all-features
+        # To avoid stack overflows
+        run: RUST_MIN_STACK=10000000 cargo test --workspace --all-features

@@ -3,7 +3,7 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    signature, TX_FEE,
+    signature, Balance, Ptlc, SplitOutput, TX_FEE,
 };
 use anyhow::bail;
 use arrayvec::ArrayVec;
@@ -25,8 +25,10 @@ use sha2::Sha256;
 use signature::{verify_encsig, verify_sig};
 use std::{collections::HashMap, str::FromStr};
 
+pub mod ptlc;
+
 #[derive(Clone, Debug)]
-pub struct FundOutput(miniscript::Descriptor<bitcoin::PublicKey>);
+pub(crate) struct FundOutput(miniscript::Descriptor<bitcoin::PublicKey>);
 
 impl FundOutput {
     pub fn new(mut Xs: [OwnershipPublicKey; 2]) -> Self {
@@ -35,7 +37,7 @@ impl FundOutput {
         Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
         let [X_0, X_1] = Xs;
 
-        let descriptor = FundingTransaction::build_output_descriptor(X_0, X_1);
+        let descriptor = build_shared_output_descriptor(X_0, X_1);
 
         Self(descriptor)
     }
@@ -51,66 +53,42 @@ impl FundOutput {
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, PartialEq, Debug)]
-pub struct FundingTransaction {
+pub(crate) struct FundingTransaction {
     inner: Transaction,
     fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
     #[cfg_attr(
         feature = "serde",
         serde(with = "bitcoin::util::amount::serde::as_sat")
     )]
-    amount_0: Amount,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
-    amount_1: Amount,
+    fund_output_amount: Amount,
 }
 
-/// Scenario:
-
-/// Redeem + Funding
-/// Ins:
-/// - HTLC 1BTC
-/// - You: 0.5BTC
-/// Outs:
-/// - Onchain me: 1BTC
-/// - Channel (me: 0BTC, you: 0.5BTC)
-
-/// Atomic swaps in channel
-/// Balance: (me: 0.5BTC, you :0BTC)
-
-/// Rebalance
-/// Ins:
-/// - previous_TXf
-/// [- You: 0.75BTC]
-/// Outs:
-/// [- Onchain me: 0.5 BTC]
-/// - Channel: (me: 0BTC, you: 0.75BTC)
 impl FundingTransaction {
     pub fn new(
-        mut inputs: Vec<PartiallySignedTransaction>,
+        mut input_psbts: Vec<PartiallySignedTransaction>,
         channel_balance: [(OwnershipPublicKey, Amount); 2],
     ) -> anyhow::Result<Self> {
-        if inputs.is_empty() {
+        if input_psbts.is_empty() {
             anyhow::bail!("Cannot build a transaction without inputs")
         }
 
         // Sort the tuples of arguments based on the ascending lexicographical order of
         // bytes of each consensus encoded PSBT. Both parties _must_ do this so that
         // they compute the same funding transaction
-        inputs.sort_by(|a, b| {
+        input_psbts.sort_by(|a, b| {
             serialize(a)
                 .partial_cmp(&serialize(b))
                 .expect("comparison is possible")
         });
 
         let [(X_0, amount_0), (X_1, amount_1)] = channel_balance;
+        let fund_output_amount = amount_0 + amount_1;
 
         let fund_output = FundOutput::new([X_0, X_1]);
         let fund_output_descriptor = fund_output.descriptor();
 
         // Extract inputs and change_outputs from each party's input_psbt
-        let (inputs, change_outputs) = inputs
+        let (inputs, change_outputs) = input_psbts
             .into_iter()
             .map(|psbt| {
                 let Transaction { input, output, .. } = psbt.extract_tx();
@@ -129,7 +107,7 @@ impl FundingTransaction {
         // Build shared fund output based on the amounts and ownership public keys
         // provided by both parties
         let fund_output = TxOut {
-            value: (amount_0 + amount_1).as_sat(),
+            value: fund_output_amount.as_sat(),
             script_pubkey: fund_output_descriptor.script_pubkey(),
         };
 
@@ -144,8 +122,7 @@ impl FundingTransaction {
         Ok(Self {
             inner: TX_f,
             fund_output_descriptor,
-            amount_0,
-            amount_1,
+            fund_output_amount,
         })
     }
 
@@ -167,7 +144,7 @@ impl FundingTransaction {
     }
 
     pub fn value(&self) -> Amount {
-        self.amount_0 + self.amount_1
+        self.fund_output_amount
     }
 
     pub fn fund_output_descriptor(&self) -> miniscript::Descriptor<bitcoin::PublicKey> {
@@ -230,36 +207,12 @@ impl FundingTransaction {
 
         Ok(transaction)
     }
-
-    fn build_output_descriptor(
-        X_0: OwnershipPublicKey,
-        X_1: OwnershipPublicKey,
-    ) -> miniscript::Descriptor<bitcoin::PublicKey> {
-        // Describes the spending policy of the channel fund transaction TX_f.
-        // For now we use `and(X_0, X_1)` - eventually we might want to replace this
-        // with a threshold signature.
-        const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_0),pk_k(X_1))";
-
-        let X_0 = hex::encode(secp256k1::PublicKey::from(X_0).serialize().to_vec());
-        let X_1 = hex::encode(secp256k1::PublicKey::from(X_1).serialize().to_vec());
-
-        let miniscript = MINISCRIPT_TEMPLATE
-            .replace("X_0", &X_0)
-            .replace("X_1", &X_1);
-
-        let miniscript =
-            miniscript::Miniscript::<bitcoin::PublicKey, Segwitv0>::from_str(&miniscript)
-                .expect("a valid miniscript");
-
-        miniscript::Descriptor::Wsh(miniscript)
-    }
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
-pub struct CommitTransaction {
+pub(crate) struct CommitTransaction {
     inner: Transaction,
-    input_descriptor: Descriptor<bitcoin::PublicKey>,
     output_descriptor: Descriptor<bitcoin::PublicKey>,
     time_lock: u32,
     digest: SigHash,
@@ -292,11 +245,8 @@ impl CommitTransaction {
 
         let digest = Self::compute_digest(&TX_c, TX_f);
 
-        let input_descriptor = TX_f.fund_output_descriptor();
-
         Ok(Self {
             inner: TX_c,
-            input_descriptor,
             output_descriptor,
             time_lock,
             digest,
@@ -306,19 +256,20 @@ impl CommitTransaction {
 
     pub fn encsign_once(
         &self,
-        x_self: OwnershipKeyPair,
+        x_self: &OwnershipKeyPair,
         Y_other: PublishingPublicKey,
     ) -> EncryptedSignature {
-        x_self.encsign(Y_other, self.digest)
+        x_self.encsign(Y_other.into(), self.digest)
     }
 
-    pub fn sign(&self, x_self: &OwnershipKeyPair) -> Signature {
+    pub fn sign_once(&self, x_self: &OwnershipKeyPair) -> Signature {
         x_self.sign(self.digest)
     }
 
     /// Add signatures to CommitTransaction.
     pub fn add_signatures(
         self,
+        TX_f: &FundingTransaction,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
     ) -> anyhow::Result<Transaction> {
@@ -342,7 +293,7 @@ impl CommitTransaction {
         };
 
         let mut TX_c = self.inner;
-        self.input_descriptor
+        TX_f.fund_output_descriptor()
             .satisfy(&mut TX_c.input[0], satisfier)?;
 
         Ok(TX_c)
@@ -388,7 +339,12 @@ impl CommitTransaction {
         encryption_key: PublishingPublicKey,
         encsig: &EncryptedSignature,
     ) -> anyhow::Result<()> {
-        verify_encsig(verification_key, encryption_key, &self.digest, encsig)?;
+        verify_encsig(
+            verification_key,
+            encryption_key.into(),
+            &self.digest,
+            encsig,
+        )?;
 
         Ok(())
     }
@@ -480,7 +436,7 @@ impl CommitTransaction {
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
-pub struct SplitTransaction {
+pub(crate) struct SplitTransaction {
     inner: Transaction,
     input_descriptor: Descriptor<bitcoin::PublicKey>,
     digest: SigHash,
@@ -499,15 +455,13 @@ pub struct InsufficientFunds {
 impl SplitTransaction {
     pub fn new(
         TX_c: &CommitTransaction,
-        mut outputs: [(Amount, Address); 2],
+        outputs: Vec<SplitOutput>,
     ) -> Result<Self, InsufficientFunds> {
         let total_input = TX_c.value();
         let total_output =
-            Amount::from_sat(outputs.iter().map(|(amount, _)| amount.as_sat()).sum());
+            Amount::from_sat(outputs.iter().map(|output| output.amount().as_sat()).sum());
         let TX_s_fee = Amount::from_sat(TX_FEE);
-
-        // 1.9 > 2.0 - 0.1 - 0.1
-        if total_input <= total_output - TX_c.fee() - TX_s_fee {
+        if total_input < total_output - TX_c.fee() - TX_s_fee {
             return Err(InsufficientFunds {
                 input: total_input,
                 output: total_output - TX_c.fee(),
@@ -515,28 +469,56 @@ impl SplitTransaction {
             });
         }
 
-        // Sort the tuples of arguments based on the ascending lexicographical order of
-        // the addresses. Both parties _must_ do this so that they compute the
-        // same split transaction
-        outputs.sort_by(|a, b| a.1.cmp(&b.1));
-
-        let [(amount_0, address_0), (amount_1, address_1)] = outputs;
+        let n_outputs = outputs.len();
 
         // Distribute transaction TX_c fee costs evenly between outputs
-        let half_TX_c_fee = TX_c.fee() / 2;
+        let TX_c_fee_per_output = TX_c.fee() / n_outputs as u64;
 
         // Distribute transaction TX_s fee costs evenly between outputs
-        let half_TX_s_fee = TX_s_fee / 2;
+        let TX_s_fee_per_output = TX_s_fee / n_outputs as u64;
 
-        let output_0 = TxOut {
-            value: amount_0.as_sat() - half_TX_c_fee.as_sat() - half_TX_s_fee.as_sat(),
-            script_pubkey: address_0.script_pubkey(),
-        };
+        let mut outputs = outputs
+            .iter()
+            .map(|output| match output {
+                SplitOutput::Ptlc(Ptlc {
+                    amount,
+                    X_funder,
+                    X_redeemer,
+                    ..
+                }) => {
+                    // Both parties _must_ insert the ownership public keys into the script in
+                    // ascending lexicographical order of bytes
+                    let mut Xs = [X_funder, X_redeemer];
+                    Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
+                    let [X_0, X_1] = Xs;
+                    let descriptor = build_shared_output_descriptor(X_0.clone(), X_1.clone());
 
-        let output_1 = TxOut {
-            value: amount_1.as_sat() - half_TX_c_fee.as_sat() - half_TX_s_fee.as_sat(),
-            script_pubkey: address_1.script_pubkey(),
-        };
+                    TxOut {
+                        value: amount.as_sat(),
+                        script_pubkey: descriptor.script_pubkey(),
+                    }
+                }
+                SplitOutput::Balance { amount, address } => TxOut {
+                    value: amount.as_sat(),
+                    script_pubkey: address.script_pubkey(),
+                },
+            })
+            .map(
+                |TxOut {
+                     value,
+                     script_pubkey,
+                 }| TxOut {
+                    // Distribute transaction fee costs evenly between outputs
+                    value: value - TX_c_fee_per_output.as_sat() - TX_s_fee_per_output.as_sat(),
+                    script_pubkey,
+                },
+            )
+            .collect::<Vec<_>>();
+
+        // Sort outputs based on the ascending lexicographical order of script_pubkey
+        // bytes. Both parties _must_ do this so that they compute the same split
+        // transaction
+        outputs.sort_by(|a, b| a.script_pubkey.cmp(&b.script_pubkey));
 
         let input = TX_c.as_txin_for_TX_s();
 
@@ -546,7 +528,7 @@ impl SplitTransaction {
                 version: 2,
                 lock_time: 0,
                 input: vec![input],
-                output: vec![output_0, output_1],
+                output: outputs,
             }
         };
 
@@ -561,7 +543,7 @@ impl SplitTransaction {
         })
     }
 
-    pub fn sign_once(&self, x_self: OwnershipKeyPair) -> Signature {
+    pub fn sign_once(&self, x_self: &OwnershipKeyPair) -> Signature {
         x_self.sign(self.digest)
     }
 
@@ -624,6 +606,10 @@ impl SplitTransaction {
         Ok(())
     }
 
+    pub fn txid(&self) -> Txid {
+        self.inner.txid()
+    }
+
     fn compute_digest(TX_s: &Transaction, TX_c: &CommitTransaction) -> SigHash {
         SighashComponents::new(&TX_s).sighash_all(
             &TX_c.as_txin_for_TX_s(),
@@ -640,7 +626,7 @@ impl From<SplitTransaction> for Transaction {
 }
 
 #[derive(Clone, Debug)]
-pub struct PunishTransaction(Transaction);
+pub(crate) struct PunishTransaction(Transaction);
 
 #[derive(Debug, thiserror::Error)]
 pub enum PunishError {
@@ -774,7 +760,7 @@ impl From<PunishTransaction> for Transaction {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CloseTransaction {
+pub(crate) struct CloseTransaction {
     inner: Transaction,
     input_descriptor: Descriptor<bitcoin::PublicKey>,
     digest: SigHash,
@@ -885,17 +871,56 @@ impl CloseTransaction {
         Ok(close_transaction)
     }
 
-    pub fn sign_once(&self, x_self: OwnershipKeyPair) -> Signature {
+    pub fn sign_once(&self, x_self: &OwnershipKeyPair) -> Signature {
         x_self.sign(self.digest)
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("Miniscript compiler: ")]
-    MiniscriptCompiler(#[from] miniscript::policy::compiler::CompilerError),
-    #[error("Miniscript: ")]
-    Miniscript(#[from] miniscript::Error),
+fn build_shared_output_descriptor(
+    X_0: OwnershipPublicKey,
+    X_1: OwnershipPublicKey,
+) -> miniscript::Descriptor<bitcoin::PublicKey> {
+    // Describes the spending policy of the channel fund transaction TX_f.
+    // For now we use `and(X_0, X_1)` - eventually we might want to replace this
+    // with a threshold signature.
+    const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_0),pk_k(X_1))";
+
+    let X_0 = hex::encode(secp256k1::PublicKey::from(X_0).serialize().to_vec());
+    let X_1 = hex::encode(secp256k1::PublicKey::from(X_1).serialize().to_vec());
+
+    let miniscript = MINISCRIPT_TEMPLATE
+        .replace("X_0", &X_0)
+        .replace("X_1", &X_1);
+
+    let miniscript = miniscript::Miniscript::<bitcoin::PublicKey, Segwitv0>::from_str(&miniscript)
+        .expect("a valid miniscript");
+
+    miniscript::Descriptor::Wsh(miniscript)
+}
+
+/// Calculate the balance held in the split outputs for the given final address
+pub(crate) fn balance(
+    split_outputs: Vec<SplitOutput>,
+    final_address_self: &Address,
+    final_address_other: &Address,
+) -> Balance {
+    split_outputs.iter().fold(
+        Balance {
+            ours: Amount::ZERO,
+            theirs: Amount::ZERO,
+        },
+        |acc, output| match output {
+            SplitOutput::Balance { amount, address } if address == final_address_self => Balance {
+                ours: acc.ours + *amount,
+                theirs: acc.theirs,
+            },
+            SplitOutput::Balance { amount, address } if address == final_address_other => Balance {
+                ours: acc.ours,
+                theirs: acc.theirs + *amount,
+            },
+            _ => acc,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -927,7 +952,7 @@ mod tests {
             point_from_str("022222222222222222222222222222222222222222222222222222222222222222")
                 .unwrap()
                 .into();
-        let descriptor = FundingTransaction::build_output_descriptor(X_0, X_1);
+        let descriptor = build_shared_output_descriptor(X_0, X_1);
 
         let witness_script = format!("{}", descriptor.witness_script());
         assert_eq!(witness_script, "Script(OP_PUSHBYTES_33 0218845781f631c48f1c9709e23092067d06837f30aa0cd0544ac887fe91ddd166 OP_CHECKSIGVERIFY OP_PUSHBYTES_33 022222222222222222222222222222222222222222222222222222222222222222 OP_CHECKSIG)");

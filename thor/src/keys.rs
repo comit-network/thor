@@ -38,10 +38,10 @@ impl OwnershipKeyPair {
         sign(&self.secret_key, digest)
     }
 
-    pub fn encsign(&self, Y: PublishingPublicKey, digest: SigHash) -> EncryptedSignature {
+    pub fn encsign(&self, Y: Point, digest: SigHash) -> EncryptedSignature {
         let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
-        adaptor.encrypted_sign(&self.secret_key, &Y.0, &digest.into_inner())
+        adaptor.encrypted_sign(&self.secret_key, &Y, &digest.into_inner())
     }
 }
 
@@ -194,6 +194,12 @@ impl From<PublishingKeyPair> for PublishingSecretKey {
     }
 }
 
+impl From<PublishingKeyPair> for Scalar {
+    fn from(from: PublishingKeyPair) -> Self {
+        from.secret_key
+    }
+}
+
 impl From<Scalar> for PublishingKeyPair {
     fn from(secret_key: Scalar) -> Self {
         let public_key = public_key(&secret_key);
@@ -232,6 +238,38 @@ impl fmt::LowerHex for PublishingPublicKey {
 impl fmt::Display for PublishingPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0.to_bytes()))
+    }
+}
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug)]
+pub struct PtlcSecret(Scalar);
+
+impl PtlcSecret {
+    pub fn new_random() -> Self {
+        let secret_key = Scalar::random(&mut rand::thread_rng());
+
+        Self(secret_key)
+    }
+
+    pub fn point(&self) -> PtlcPoint {
+        PtlcPoint(public_key(&self.0))
+    }
+}
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PtlcPoint(Point);
+
+impl From<PtlcPoint> for Point {
+    fn from(from: PtlcPoint) -> Self {
+        from.0
+    }
+}
+
+impl From<PtlcSecret> for Scalar {
+    fn from(from: PtlcSecret) -> Self {
+        from.0
     }
 }
 

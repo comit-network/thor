@@ -3,14 +3,13 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    transaction::{CommitTransaction, SplitTransaction},
-    Balance, Channel, ChannelState,
+    transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
+    Balance, Channel, ChannelState, SplitOutput, StandardChannelState,
 };
 use anyhow::Context;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
-pub use crate::transaction::FundingTransaction;
 use miniscript::Descriptor;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -124,13 +123,19 @@ impl State0 {
             ],
             self.time_lock,
         )?;
-        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
+        let encsig_TX_c_self = TX_c.encsign_once(&self.x_self, Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, [
-            (balance.ours, self.final_address_self.clone()),
-            (balance.theirs, self.final_address_other.clone()),
+        let TX_s = SplitTransaction::new(&TX_c, vec![
+            SplitOutput::Balance {
+                amount: balance.ours,
+                address: self.final_address_self.clone(),
+            },
+            SplitOutput::Balance {
+                amount: balance.theirs,
+                address: self.final_address_other.clone(),
+            },
         ])?;
-        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
+        let sig_TX_s_self = TX_s.sign_once(&self.x_self);
 
         Ok(State1 {
             x_self: self.x_self,
@@ -323,17 +328,16 @@ impl State3 {
                 final_address_self: self.final_address_self,
                 final_address_other: self.final_address_other,
                 TX_f_body: self.TX_f,
-                current_state: ChannelState {
+                current_state: ChannelState::Standard(StandardChannelState {
                     balance: self.balance,
                     TX_c: self.TX_c,
-                    encsig_TX_c_self: self.encsig_TX_c_self,
                     encsig_TX_c_other: self.encsig_TX_c_other,
                     r_self: self.r_self,
                     R_other: self.R_other,
                     y_self: self.y_self,
                     Y_other: self.Y_other,
                     signed_TX_s: self.signed_TX_s,
-                },
+                }),
                 revoked_states: vec![],
             },
             signed_TX_f,

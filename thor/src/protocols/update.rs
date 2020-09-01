@@ -3,8 +3,8 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, RevokedState,
+    transaction::{balance, ptlc, CommitTransaction, FundingTransaction, SplitTransaction},
+    Channel, ChannelState, Ptlc, RevokedState, SplitOutput, StandardChannelState,
 };
 use anyhow::Context;
 use bitcoin::Address;
@@ -18,21 +18,21 @@ pub struct ShareKeys {
     Y: PublishingPublicKey,
 }
 
-/// Third message of the channel update protocol.
+/// Second message of the channel update protocol.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct ShareSplitSignature {
     sig_TX_s: Signature,
 }
 
-/// Fourth message of the channel update protocol.
+/// Third message of the channel update protocol.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct ShareCommitEncryptedSignature {
     encsig_TX_c: EncryptedSignature,
 }
 
-/// Fifth and last message of the channel update protocol.
+/// Fourth and last message of the channel update protocol.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct RevealRevocationSecretKey {
@@ -48,14 +48,14 @@ pub struct State0 {
     TX_f_body: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-    updated_balance: Balance,
+    new_split_outputs: Vec<SplitOutput>,
     time_lock: u32,
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
 }
 
 impl State0 {
-    pub fn new(channel: Channel, updated_balance: Balance, time_lock: u32) -> Self {
+    pub fn new(channel: Channel, new_split_outputs: Vec<SplitOutput>, time_lock: u32) -> Self {
         let r_self = RevocationKeyPair::new_random();
         let y_self = PublishingKeyPair::new_random();
 
@@ -67,7 +67,7 @@ impl State0 {
             TX_f_body: channel.TX_f_body,
             current_state: channel.current_state,
             revoked_states: channel.revoked_states,
-            updated_balance,
+            new_split_outputs,
             time_lock,
             r_self,
             y_self,
@@ -87,7 +87,7 @@ impl State0 {
             R: R_other,
             Y: Y_other,
         }: ShareKeys,
-    ) -> anyhow::Result<State1> {
+    ) -> anyhow::Result<State1Kind> {
         let TX_c = CommitTransaction::new(
             &self.TX_f_body,
             [
@@ -100,26 +100,20 @@ impl State0 {
             ],
             self.time_lock,
         )?;
-        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
+        let encsig_TX_c_self = TX_c.encsign_once(&self.x_self, Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, [
-            (self.updated_balance.ours, self.final_address_self.clone()),
-            (
-                self.updated_balance.theirs,
-                self.final_address_other.clone(),
-            ),
-        ])?;
-        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
+        let TX_s = SplitTransaction::new(&TX_c, self.new_split_outputs.clone())?;
+        let sig_TX_s_self = TX_s.sign_once(&self.x_self);
 
-        Ok(State1 {
-            x_self: self.x_self,
+        let state = State1 {
+            x_self: self.x_self.clone(),
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
             TX_f: self.TX_f_body,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
-            updated_balance: self.updated_balance,
+            new_split_outputs: self.new_split_outputs.clone(),
             r_self: self.r_self,
             R_other,
             y_self: self.y_self,
@@ -128,13 +122,211 @@ impl State0 {
             TX_s,
             encsig_TX_c_self,
             sig_TX_s_self,
+        };
+
+        // NOTE: We assume that there's only one PTLC output
+        match self
+            .new_split_outputs
+            .into_iter()
+            .find_map(|output| match output {
+                SplitOutput::Ptlc(ptlc) => Some(ptlc),
+                SplitOutput::Balance { .. } => None,
+            }) {
+            None => Ok(State1Kind::State1(state)),
+            Some(ptlc) if ptlc.X_funder == self.x_self.public() => Ok(
+                State1Kind::State1PtlcFunder(State1PtlcFunder::new(state, ptlc)?),
+            ),
+            Some(ptlc) if ptlc.X_redeemer == self.x_self.public() => Ok(
+                State1Kind::State1PtlcRedeemer(State1PtlcRedeemer::new(state, ptlc)?),
+            ),
+            _ => anyhow::bail!("ownership of PTLC output is not shared by X_self"),
+        }
+    }
+}
+
+/// The three possible states in which a party can be in after receiving the
+/// first message.
+///
+/// If a `PtlcOutput` is found among the new `SplitOutput`s for the update,
+/// depending on whether the party is identified as the funder or the redeemer
+/// of said output, the party will transition to `State1PtlcFunder` or
+/// `State1PtlcRedeemer` respectively.
+#[allow(clippy::large_enum_variant)]
+pub enum State1Kind {
+    State1(State1),
+    State1PtlcFunder(State1PtlcFunder),
+    State1PtlcRedeemer(State1PtlcRedeemer),
+}
+
+/// Message sent by the PTLC funder in a channel update protocol execution
+/// involving a PTLC output.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug)]
+pub struct SignaturesPtlcFunder {
+    encsig_TX_ptlc_redeem_funder: EncryptedSignature,
+    sig_TX_ptlc_refund_funder: Signature,
+}
+
+/// Message sent by the PTLC redeemer in a channel update protocol execution
+/// involving a PTLC output.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug)]
+pub struct SignaturesPtlcRedeemer {
+    sig_TX_ptlc_redeem_redeemer: Signature,
+    sig_TX_ptlc_refund_redeemer: Signature,
+}
+
+/// A party who has exchanged `RevocationPublicKey`s and `PublishingPublicKey`s
+/// with the counterparty and is ready to start exchanging signatures for the
+/// `ptlc::RedeemTransaction` and `ptlc::RefundTransaction` involving a PTLC
+/// output which they are funding.
+pub struct State1PtlcFunder {
+    inner: State1,
+    ptlc: Ptlc,
+    TX_ptlc_redeem: ptlc::RedeemTransaction,
+    TX_ptlc_refund: ptlc::RefundTransaction,
+    encsig_TX_ptlc_redeem_funder: EncryptedSignature,
+    sig_TX_ptlc_refund_funder: Signature,
+}
+
+impl State1PtlcFunder {
+    pub fn new(state: State1, ptlc: Ptlc) -> anyhow::Result<Self> {
+        let TX_ptlc_redeem = ptlc::RedeemTransaction::new(
+            &state.TX_s,
+            ptlc.clone(),
+            state.final_address_other.clone(),
+        )?;
+        let encsig_TX_ptlc_redeem_funder = TX_ptlc_redeem.encsign_once(&state.x_self, ptlc.point());
+
+        let TX_ptlc_refund = ptlc::RefundTransaction::new(
+            &state.TX_s,
+            ptlc.clone(),
+            state.final_address_self.clone(),
+        )?;
+        let sig_TX_ptlc_refund_funder = TX_ptlc_refund.sign_once(&state.x_self);
+
+        Ok(Self {
+            inner: state,
+            ptlc,
+            TX_ptlc_redeem,
+            TX_ptlc_refund,
+            encsig_TX_ptlc_redeem_funder,
+            sig_TX_ptlc_refund_funder,
+        })
+    }
+
+    pub fn compose(&self) -> SignaturesPtlcFunder {
+        SignaturesPtlcFunder {
+            encsig_TX_ptlc_redeem_funder: self.encsig_TX_ptlc_redeem_funder.clone(),
+            sig_TX_ptlc_refund_funder: self.sig_TX_ptlc_refund_funder.clone(),
+        }
+    }
+
+    pub fn interpret(
+        mut self,
+        message: SignaturesPtlcRedeemer,
+    ) -> anyhow::Result<WithPtlc<State1>> {
+        self.TX_ptlc_refund
+            .verify_sig(
+                self.inner.X_other.clone(),
+                &message.sig_TX_ptlc_refund_redeemer,
+            )
+            .context("failed to verify sig_TX_ptlc_refund sent by PTLC redeemer")?;
+        self.TX_ptlc_refund.add_signatures(
+            (
+                self.inner.x_self.public(),
+                self.sig_TX_ptlc_refund_funder.clone(),
+            ),
+            (
+                self.inner.X_other.clone(),
+                message.sig_TX_ptlc_refund_redeemer.clone(),
+            ),
+        )?;
+
+        Ok(WithPtlc {
+            state: self.inner,
+            ptlc: self.ptlc,
+            TX_ptlc_redeem: self.TX_ptlc_redeem,
+            TX_ptlc_refund: self.TX_ptlc_refund,
+            encsig_TX_ptlc_redeem_funder: self.encsig_TX_ptlc_redeem_funder,
+            sig_TX_ptlc_redeem_redeemer: message.sig_TX_ptlc_redeem_redeemer,
+            sig_TX_ptlc_refund_funder: self.sig_TX_ptlc_refund_funder,
+            sig_TX_ptlc_refund_redeemer: message.sig_TX_ptlc_refund_redeemer,
+        })
+    }
+}
+
+/// A party who has exchanged `RevocationPublicKey`s and `PublishingPublicKey`s
+/// with the counterparty and is ready to start exchanging signatures for the
+/// `ptlc::RedeemTransaction` and `ptlc::RefundTransaction` involving a PTLC
+/// output which they are redeeming.
+pub struct State1PtlcRedeemer {
+    inner: State1,
+    ptlc: Ptlc,
+    TX_ptlc_redeem: ptlc::RedeemTransaction,
+    TX_ptlc_refund: ptlc::RefundTransaction,
+    sig_TX_ptlc_redeem_redeemer: Signature,
+    sig_TX_ptlc_refund_redeemer: Signature,
+}
+
+impl State1PtlcRedeemer {
+    pub fn new(state: State1, ptlc: Ptlc) -> anyhow::Result<Self> {
+        let TX_ptlc_redeem = ptlc::RedeemTransaction::new(
+            &state.TX_s,
+            ptlc.clone(),
+            state.final_address_self.clone(),
+        )?;
+        let sig_TX_ptlc_redeem_redeemer = TX_ptlc_redeem.sign_once(&state.x_self);
+
+        let TX_ptlc_refund = ptlc::RefundTransaction::new(
+            &state.TX_s,
+            ptlc.clone(),
+            state.final_address_other.clone(),
+        )?;
+        let sig_TX_ptlc_refund_redeemer = TX_ptlc_refund.sign_once(&state.x_self);
+
+        Ok(Self {
+            inner: state,
+            ptlc,
+            TX_ptlc_redeem,
+            TX_ptlc_refund,
+            sig_TX_ptlc_redeem_redeemer,
+            sig_TX_ptlc_refund_redeemer,
+        })
+    }
+
+    pub fn compose(&self) -> SignaturesPtlcRedeemer {
+        SignaturesPtlcRedeemer {
+            sig_TX_ptlc_redeem_redeemer: self.sig_TX_ptlc_redeem_redeemer.clone(),
+            sig_TX_ptlc_refund_redeemer: self.sig_TX_ptlc_refund_redeemer.clone(),
+        }
+    }
+
+    pub fn interpret(self, message: SignaturesPtlcFunder) -> anyhow::Result<WithPtlc<State1>> {
+        self.TX_ptlc_redeem
+            .verify_encsig(
+                self.inner.X_other.clone(),
+                self.ptlc.point().into(),
+                &message.encsig_TX_ptlc_redeem_funder,
+            )
+            .context("failed to verify encsig_TX_ptlc_redeem sent by PTLC funder")?;
+
+        Ok(WithPtlc {
+            state: self.inner,
+            ptlc: self.ptlc,
+            TX_ptlc_redeem: self.TX_ptlc_redeem,
+            TX_ptlc_refund: self.TX_ptlc_refund,
+            encsig_TX_ptlc_redeem_funder: message.encsig_TX_ptlc_redeem_funder,
+            sig_TX_ptlc_redeem_redeemer: self.sig_TX_ptlc_redeem_redeemer,
+            sig_TX_ptlc_refund_funder: message.sig_TX_ptlc_refund_funder,
+            sig_TX_ptlc_refund_redeemer: self.sig_TX_ptlc_refund_redeemer,
         })
     }
 }
 
 /// A party who has exchanged `RevocationPublicKey`s and `PublishingPublicKey`s
 /// with the counterparty and is ready to start exchanging signatures.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
@@ -143,7 +335,7 @@ pub struct State1 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-    updated_balance: Balance,
+    new_split_outputs: Vec<SplitOutput>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -184,7 +376,7 @@ impl State1 {
             TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
-            updated_balance: self.updated_balance,
+            new_split_outputs: self.new_split_outputs,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -208,7 +400,7 @@ pub struct State2 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-    updated_balance: Balance,
+    new_split_outputs: Vec<SplitOutput>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -247,7 +439,7 @@ impl State2 {
             TX_f: self.TX_f,
             current_state: self.current_state,
             revoked_states: self.revoked_states,
-            updated_balance: self.updated_balance,
+            new_split_outputs: self.new_split_outputs,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -272,7 +464,7 @@ pub struct State3 {
     TX_f: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
-    updated_balance: Balance,
+    new_split_outputs: Vec<SplitOutput>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -286,7 +478,9 @@ pub struct State3 {
 impl State3 {
     pub fn compose(&self) -> RevealRevocationSecretKey {
         RevealRevocationSecretKey {
-            r: self.current_state.r_self.clone().into(),
+            r: StandardChannelState::from(self.current_state.clone())
+                .r_self
+                .into(),
         }
     }
 
@@ -294,7 +488,7 @@ impl State3 {
         self,
         RevealRevocationSecretKey { r: r_other }: RevealRevocationSecretKey,
     ) -> anyhow::Result<Channel> {
-        self.current_state
+        StandardChannelState::from(self.current_state.clone())
             .R_other
             .verify_revocation_secret_key(&r_other)?;
 
@@ -305,17 +499,20 @@ impl State3 {
         let mut revoked_states = self.revoked_states;
         revoked_states.push(revoked_state);
 
-        let current_state = ChannelState {
-            balance: self.updated_balance,
+        let current_state = ChannelState::Standard(StandardChannelState {
+            balance: balance(
+                self.new_split_outputs,
+                &self.final_address_self,
+                &self.final_address_other,
+            ),
             TX_c: self.TX_c,
-            encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other: self.encsig_TX_c_other,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
             Y_other: self.Y_other,
             signed_TX_s: self.signed_TX_s,
-        };
+        });
 
         Ok(Channel {
             x_self: self.x_self,
@@ -326,5 +523,87 @@ impl State3 {
             current_state,
             revoked_states,
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct WithPtlc<S> {
+    state: S,
+    ptlc: Ptlc,
+    TX_ptlc_redeem: ptlc::RedeemTransaction,
+    TX_ptlc_refund: ptlc::RefundTransaction,
+    encsig_TX_ptlc_redeem_funder: EncryptedSignature,
+    sig_TX_ptlc_redeem_redeemer: Signature,
+    sig_TX_ptlc_refund_funder: Signature,
+    sig_TX_ptlc_refund_redeemer: Signature,
+}
+
+impl WithPtlc<State1> {
+    pub fn compose(&self) -> ShareSplitSignature {
+        self.state.compose()
+    }
+
+    pub fn interpret(self, message: ShareSplitSignature) -> anyhow::Result<WithPtlc<State2>> {
+        let state = self.state.interpret(message)?;
+
+        Ok(WithPtlc {
+            state,
+            ptlc: self.ptlc,
+            TX_ptlc_redeem: self.TX_ptlc_redeem,
+            TX_ptlc_refund: self.TX_ptlc_refund,
+            encsig_TX_ptlc_redeem_funder: self.encsig_TX_ptlc_redeem_funder,
+            sig_TX_ptlc_redeem_redeemer: self.sig_TX_ptlc_redeem_redeemer,
+            sig_TX_ptlc_refund_funder: self.sig_TX_ptlc_refund_funder,
+            sig_TX_ptlc_refund_redeemer: self.sig_TX_ptlc_refund_redeemer,
+        })
+    }
+}
+
+impl WithPtlc<State2> {
+    pub fn compose(&self) -> ShareCommitEncryptedSignature {
+        self.state.compose()
+    }
+
+    pub fn interpret(
+        self,
+        message: ShareCommitEncryptedSignature,
+    ) -> anyhow::Result<WithPtlc<State3>> {
+        let state = self.state.interpret(message)?;
+
+        Ok(WithPtlc {
+            state,
+            ptlc: self.ptlc,
+            TX_ptlc_redeem: self.TX_ptlc_redeem,
+            TX_ptlc_refund: self.TX_ptlc_refund,
+            encsig_TX_ptlc_redeem_funder: self.encsig_TX_ptlc_redeem_funder,
+            sig_TX_ptlc_redeem_redeemer: self.sig_TX_ptlc_redeem_redeemer,
+            sig_TX_ptlc_refund_funder: self.sig_TX_ptlc_refund_funder,
+            sig_TX_ptlc_refund_redeemer: self.sig_TX_ptlc_refund_redeemer,
+        })
+    }
+}
+
+impl WithPtlc<State3> {
+    pub fn compose(&self) -> RevealRevocationSecretKey {
+        self.state.compose()
+    }
+
+    pub fn interpret(self, message: RevealRevocationSecretKey) -> anyhow::Result<Channel> {
+        let mut channel = self.state.interpret(message)?;
+
+        let current_state = ChannelState::WithPtlc {
+            inner: channel.current_state.into(),
+            ptlc: self.ptlc,
+            TX_ptlc_redeem: self.TX_ptlc_redeem,
+            TX_ptlc_refund: self.TX_ptlc_refund,
+            encsig_TX_ptlc_redeem_funder: self.encsig_TX_ptlc_redeem_funder,
+            sig_TX_ptlc_redeem_redeemer: self.sig_TX_ptlc_redeem_redeemer,
+            sig_TX_ptlc_refund_funder: self.sig_TX_ptlc_refund_funder,
+            sig_TX_ptlc_refund_redeemer: self.sig_TX_ptlc_refund_redeemer,
+        };
+
+        channel.current_state = current_state;
+
+        Ok(channel)
     }
 }

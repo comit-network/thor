@@ -3,26 +3,18 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
-    transaction::{CommitTransaction, FundOutput, SplitTransaction},
-    Balance, Channel, ChannelState,
+    transaction::{balance, CommitTransaction, FundOutput, FundingTransaction, SplitTransaction},
+    Balance, Channel, ChannelState, SplitOutput, StandardChannelState,
 };
 use anyhow::Context;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
-
-pub use crate::transaction::FundingTransaction;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug)]
 pub struct Message0 {
     X: OwnershipPublicKey,
     final_address: Address,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
-    fund_amount: Amount,
-    time_lock: u32,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -65,10 +57,10 @@ pub struct Message5 {
 }
 
 #[derive(Debug)]
-pub struct State0 {
+pub(crate) struct State0 {
     x_self: OwnershipKeyPair,
     final_address_self: Address,
-    fund_amount_self: Amount,
+    balance: Balance,
     time_lock: u32,
 }
 
@@ -82,12 +74,12 @@ pub trait BuildFundingPSBT {
 }
 
 impl State0 {
-    pub fn new(fund_amount: Amount, time_lock: u32, final_address: Address) -> Self {
+    pub fn new(balance: Balance, time_lock: u32, final_address: Address) -> Self {
         let x_self = OwnershipKeyPair::new_random();
 
         Self {
             x_self,
-            fund_amount_self: fund_amount,
+            balance,
             final_address_self: final_address,
             time_lock,
         }
@@ -97,8 +89,6 @@ impl State0 {
         Message0 {
             X: self.x_self.public(),
             final_address: self.final_address_self.clone(),
-            fund_amount: self.fund_amount_self,
-            time_lock: self.time_lock,
         }
     }
 
@@ -107,52 +97,28 @@ impl State0 {
         Message0 {
             X: X_other,
             final_address: final_address_other,
-            fund_amount: fund_amount_other,
-            time_lock: time_lock_other,
         }: Message0,
         wallet: &impl BuildFundingPSBT,
     ) -> anyhow::Result<State1> {
-        // NOTE: A real application would also verify that the amount
-        // provided by the other party is satisfactory, together with
-        // the time_lock
-        check_timelocks(self.time_lock, time_lock_other)?;
-
         let fund_output = FundOutput::new([self.x_self.public(), X_other.clone()]);
         let input_psbt_self = wallet
-            .build_funding_psbt(fund_output.address(), self.fund_amount_self)
+            .build_funding_psbt(fund_output.address(), self.balance.ours)
             .await?;
-
-        let balance = Balance {
-            ours: self.fund_amount_self,
-            theirs: fund_amount_other,
-        };
 
         Ok(State1 {
             x_self: self.x_self,
             X_other,
             final_address_self: self.final_address_self,
             final_address_other,
-            balance,
+            balance: self.balance,
             input_psbt_self,
             time_lock: self.time_lock,
         })
     }
 }
 
-#[derive(Clone, Copy, Debug, thiserror::Error)]
-#[error("time_locks are not equal")]
-pub struct IncompatibleTimeLocks;
-
-fn check_timelocks(time_lock_self: u32, time_lock_other: u32) -> Result<(), IncompatibleTimeLocks> {
-    if time_lock_self != time_lock_other {
-        Err(IncompatibleTimeLocks)
-    } else {
-        Ok(())
-    }
-}
-
 #[derive(Debug)]
-pub struct State1 {
+pub(crate) struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -199,7 +165,7 @@ impl State1 {
 }
 
 #[derive(Clone, Debug)]
-pub struct State2 {
+pub(crate) struct State2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -238,20 +204,26 @@ impl State2 {
             ],
             self.time_lock,
         )?;
-        let encsig_TX_c_self = TX_c.encsign_once(self.x_self.clone(), Y_other.clone());
 
-        let TX_s = SplitTransaction::new(&TX_c, [
-            (self.balance.ours, self.final_address_self.clone()),
-            (self.balance.theirs, self.final_address_other.clone()),
-        ])?;
-        let sig_TX_s_self = TX_s.sign_once(self.x_self.clone());
+        let split_outputs = vec![
+            SplitOutput::Balance {
+                amount: self.balance.ours,
+                address: self.final_address_self.clone(),
+            },
+            SplitOutput::Balance {
+                amount: self.balance.theirs,
+                address: self.final_address_other.clone(),
+            },
+        ];
+        let TX_s = SplitTransaction::new(&TX_c, split_outputs.clone())?;
+        let sig_TX_s_self = TX_s.sign_once(&self.x_self);
 
         Ok(Party3 {
             x_self: self.x_self,
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
-            balance: self.balance,
+            split_outputs,
             r_self: self.r_self,
             R_other,
             y_self: self.y_self,
@@ -259,19 +231,18 @@ impl State2 {
             TX_f: self.TX_f,
             TX_c,
             TX_s,
-            encsig_TX_c_self,
             sig_TX_s_self,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct Party3 {
+pub(crate) struct Party3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    balance: Balance,
+    split_outputs: Vec<SplitOutput>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -279,7 +250,6 @@ pub struct Party3 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     TX_s: SplitTransaction,
-    encsig_TX_c_self: EncryptedSignature,
     sig_TX_s_self: Signature,
 }
 
@@ -305,12 +275,14 @@ impl Party3 {
             (self.X_other.clone(), sig_TX_s_other),
         )?;
 
+        let encsig_TX_c_self = self.TX_c.encsign_once(&self.x_self, self.Y_other.clone());
+
         Ok(Party4 {
             x_self: self.x_self,
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
-            balance: self.balance,
+            split_outputs: self.split_outputs,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -318,18 +290,18 @@ impl Party3 {
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             signed_TX_s: self.TX_s,
-            encsig_TX_c_self: self.encsig_TX_c_self,
+            encsig_TX_c_self,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct Party4 {
+pub(crate) struct Party4 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    balance: Balance,
+    split_outputs: Vec<SplitOutput>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -366,7 +338,7 @@ impl Party4 {
             X_other: self.X_other,
             final_address_self: self.final_address_self,
             final_address_other: self.final_address_other,
-            balance: self.balance,
+            split_outputs: self.split_outputs,
             r_self: self.r_self,
             R_other: self.R_other,
             y_self: self.y_self,
@@ -374,19 +346,18 @@ impl Party4 {
             TX_f: self.TX_f,
             TX_c: self.TX_c,
             signed_TX_s: self.signed_TX_s,
-            encsig_TX_c_self: self.encsig_TX_c_self,
             encsig_TX_c_other,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct Party5 {
+pub(crate) struct Party5 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    balance: Balance,
+    split_outputs: Vec<SplitOutput>,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
@@ -394,7 +365,6 @@ pub struct Party5 {
     TX_f: FundingTransaction,
     TX_c: CommitTransaction,
     signed_TX_s: SplitTransaction,
-    encsig_TX_c_self: EncryptedSignature,
     encsig_TX_c_other: EncryptedSignature,
 }
 
@@ -429,20 +399,23 @@ impl Party5 {
             Channel {
                 x_self: self.x_self,
                 X_other: self.X_other,
-                final_address_self: self.final_address_self,
-                final_address_other: self.final_address_other,
+                final_address_self: self.final_address_self.clone(),
+                final_address_other: self.final_address_other.clone(),
                 TX_f_body: self.TX_f,
-                current_state: ChannelState {
-                    balance: self.balance,
+                current_state: ChannelState::Standard(StandardChannelState {
+                    balance: balance(
+                        self.split_outputs,
+                        &self.final_address_self,
+                        &self.final_address_other,
+                    ),
                     TX_c: self.TX_c,
-                    encsig_TX_c_self: self.encsig_TX_c_self,
                     encsig_TX_c_other: self.encsig_TX_c_other,
                     r_self: self.r_self,
                     R_other: self.R_other,
                     y_self: self.y_self,
                     Y_other: self.Y_other,
                     signed_TX_s: self.signed_TX_s,
-                },
+                }),
                 revoked_states: vec![],
             },
             signed_TX_f,
