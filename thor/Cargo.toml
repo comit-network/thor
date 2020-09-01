@@ -24,7 +24,7 @@ thiserror = "1"
 tokio = { version = "0.2", default-features = false, features = ["time"] }
 
 [dev-dependencies]
-bitcoin-harness = { git = "https://github.com/coblox/bitcoin-harness-rs.git", rev = "a695ddc435f5522d7bc35847caf09df85257cc6b" }
+bitcoin-harness = { path = "../../../coblox/bitcoin-harness-rs" }
 proptest = "0.10"
 reqwest = { version = "0.10", default-features = false }
 serde_json = "1"

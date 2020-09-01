@@ -1,7 +1,10 @@
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
-use thor::{BroadcastSignedTransaction, BuildFundingPSBT, NewAddress, SignFundingPSBT};
+use thor::{
+    BroadcastSignedTransaction, BuildFundingPSBT, GetRawTransaction, MedianTime, NewAddress,
+    SignFundingPSBT,
+};
 
 pub struct Wallet(pub bitcoin_harness::Wallet);
 
@@ -91,5 +94,22 @@ impl BroadcastSignedTransaction for Wallet {
 impl NewAddress for Wallet {
     async fn new_address(&self) -> anyhow::Result<Address> {
         self.0.new_address().await.map_err(Into::into)
+    }
+}
+
+#[async_trait::async_trait]
+impl MedianTime for Wallet {
+    async fn median_time(&self) -> anyhow::Result<u32> {
+        self.0.median_time().await.map_err(Into::into)
+    }
+}
+
+#[async_trait::async_trait]
+impl GetRawTransaction for Wallet {
+    async fn get_raw_transaction(
+        &self,
+        txid: bitcoin::Txid,
+    ) -> anyhow::Result<bitcoin::Transaction> {
+        self.0.get_raw_transaction(txid).await.map_err(Into::into)
     }
 }
