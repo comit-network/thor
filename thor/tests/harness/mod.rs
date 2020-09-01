@@ -9,7 +9,7 @@ use futures::{
     SinkExt, StreamExt,
 };
 
-use thor::{Balance, Message, ReceiveMessage, SendMessage};
+use thor::{Balance, MedianTime, Message, ReceiveMessage, SendMessage};
 
 mod wallet;
 
@@ -25,7 +25,6 @@ pub fn generate_balances(fund_amount: Amount) -> (Balance, Balance) {
         ours: fund_amount,
         theirs: fund_amount,
     };
-
     (a_balance, b_balance)
 }
 
@@ -76,4 +75,29 @@ impl ReceiveMessage for Transport {
         let message = serde_json::from_str(&str).context("failed to decode message")?;
         Ok(message)
     }
+}
+
+pub struct SwapExpiries {
+    pub alpha_absolute: u32,
+    pub ptlc_absolute: u32,
+    pub split_transaction_relative: u32,
+}
+
+pub async fn generate_expiries<C>(connector: &C) -> anyhow::Result<SwapExpiries>
+where
+    C: MedianTime,
+{
+    let now = connector.median_time().await?;
+    let twelve_hours = 12 * 60 * 60;
+
+    let ptlc_absolute = now + twelve_hours;
+    let alpha_absolute = ptlc_absolute + twelve_hours;
+
+    let split_transaction_relative = 1;
+
+    Ok(SwapExpiries {
+        alpha_absolute,
+        ptlc_absolute,
+        split_transaction_relative,
+    })
 }

@@ -34,7 +34,7 @@ use crate::{
     protocols::{close, create, punish::punish, splice, update},
     signature::decrypt,
     transaction::{
-        CommitTransaction, FundingTransaction, RedeemTransaction, RefundTransaction,
+        ptlc, CommitTransaction, FundingTransaction, RedeemTransaction, RefundTransaction,
         SplitTransaction,
     },
 };
@@ -44,9 +44,15 @@ use async_trait::async_trait;
 use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
-use futures::{future::Either, pin_mut, Future};
+use futures::{
+    future::{Either, FutureExt},
+    pin_mut, Future,
+};
 use genawaiter::sync::Gen;
-use std::convert::{TryFrom, TryInto};
+use std::{
+    convert::{TryFrom, TryInto},
+    time::Duration,
+};
 
 #[cfg(feature = "serde")]
 use bitcoin::util::amount::serde::as_sat;
@@ -121,6 +127,16 @@ macro_rules! step_wallet {
 
         (transport, res)
     }};
+}
+
+#[async_trait::async_trait]
+pub trait MedianTime {
+    async fn median_time(&self) -> anyhow::Result<u32>;
+}
+
+#[async_trait::async_trait]
+pub trait GetRawTransaction {
+    async fn get_raw_transaction(&self, txid: Txid) -> anyhow::Result<Transaction>;
 }
 
 impl Channel {
@@ -250,9 +266,22 @@ impl Channel {
         )
         .await?;
 
-        transport
-            .send_message(Message::Secret(secret.clone()))
-            .await?;
+        let tx_ptlc_redeem = {
+            let (_, _, tx_ptlc_redeem, _, encsig_funder, sig_redeemer, ..) = self
+                .current_state
+                .clone()
+                .into_with_ptlc()
+                .expect("current state contains PTLC output");
+
+            let sig_funder = signature::decrypt(secret.clone().into(), encsig_funder);
+
+            tx_ptlc_redeem.add_signatures(
+                (self.x_self.public(), sig_redeemer),
+                (self.X_other.clone(), sig_funder),
+            )?
+        };
+
+        transport.send_message(Message::Secret(secret)).await?;
 
         // Attempt to perform a channel update to merge PTLC output into Alice's balance
         // output
@@ -264,7 +293,7 @@ impl Channel {
         let final_update = self.update(transport, vec![out_ours, out_theirs], tx_s_time_lock);
 
         // TODO: Configure timeout based on expiries
-        let timeout = tokio::time::delay_for(std::time::Duration::from_secs(5));
+        let timeout = tokio::time::delay_for(std::time::Duration::from_secs(10));
 
         pin_mut!(final_update);
         pin_mut!(timeout);
@@ -274,22 +303,7 @@ impl Channel {
         match futures::future::select(final_update, timeout).await {
             Either::Left((Ok(_), _)) => (),
             Either::Left((Err(_), _)) | Either::Right(_) => {
-                // TODO: Have we dropped the other future execution if we reach this block?
-                let (_, _, tx_ptlc_redeem, _, encsig_funder, sig_redeemer, ..) = channel
-                    .current_state
-                    .clone()
-                    .into_with_ptlc()
-                    .expect("current state must contain PTLC output");
-
-                let sig_funder = signature::decrypt(secret.into(), encsig_funder);
-
-                let tx_ptlc_redeem = tx_ptlc_redeem.add_signatures(
-                    (channel.x_self.public(), sig_redeemer),
-                    (channel.X_other.clone(), sig_funder),
-                )?;
-
                 channel.force_close(wallet).await?;
-
                 wallet.broadcast_signed_transaction(tx_ptlc_redeem).await?;
             }
         };
@@ -302,10 +316,11 @@ impl Channel {
     ///
     /// Calling this function should only take place once the counterparty has
     /// funded the alpha asset.
-    #[warn(clippy::too_many_arguments)]
-    pub fn swap_beta_ptlc_bob<'a, T>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn swap_beta_ptlc_bob<'a, T, W>(
         &'a mut self,
         transport: &'a mut T,
+        wallet: &'a W,
         ptlc_amount: Amount,
         point: PtlcPoint,
         _alpha_absolute_expiry: u32,
@@ -314,6 +329,7 @@ impl Channel {
     ) -> Gen<PtlcSecret, (), impl Future<Output = Result<()>> + 'a>
     where
         T: SendMessage + ReceiveMessage,
+        W: MedianTime + NewAddress + BroadcastSignedTransaction + GetRawTransaction,
     {
         Gen::new(|co| async move {
             let Balance { ours, theirs } = self.balance();
@@ -348,26 +364,123 @@ impl Channel {
 
             // Wait for Alice to send over the `secret`.
 
-            // TODO: If Alice doesn't reveal the secret and we're approaching
-            // `alpha_absolute_expiry` force close the channel. Now monitor the
-            // Bitcoin blockchain for Alice revealing the `secret` by publishing
-            // `tx_ptlc_redeem`. If she does yield the `secret`. If she doesn't do it before
-            // `ptlc_refund_time_lock`, publish `tx_ptlc_refund`.
-            let secret = map_err(transport.receive_message().await?.into_secret())?;
+            let ptlc_almost_expired = async {
+                // `TX_s_time_lock` is a relative timelock in blocks. To convert it to an
+                // estimated relative timelock in seconds we use 10 minutes as the average
+                // blocktime for Bitcoin.
+                let tx_s_time_lock_in_seconds = tx_s_time_lock * 10 * 60;
+                let ptlc_nearing_expiry_time = ptlc_refund_time_lock - tx_s_time_lock_in_seconds;
 
-            if secret.point() != point {
-                bail!("Alice sent incorrect secret")
+                loop {
+                    let median_time = wallet.median_time().await?;
+
+                    if median_time >= ptlc_nearing_expiry_time {
+                        return Result::<(), anyhow::Error>::Ok(());
+                    }
+
+                    tokio::time::delay_for(Duration::from_secs(1)).await;
+                }
+            };
+
+            // The mutex is only needed because the compiler cannot verify that the mutable
+            // borrow on transport ends if the `ptlc_almost_expired` future is the one that
+            // resolves first in the select
+            let transport = futures::lock::Mutex::new(transport);
+
+            let secret_revealed = async {
+                let mut transport = transport.lock().await;
+                transport.receive_message().await
+            };
+
+            pin_mut!(ptlc_almost_expired);
+            pin_mut!(secret_revealed);
+
+            match futures::future::select(secret_revealed, ptlc_almost_expired).await {
+                Either::Left((Ok(message), _)) => {
+                    // TODO: If the message cannot be converted into a valid secret we should run
+                    // the other branch
+                    let secret = map_err(message.into_secret())?;
+
+                    if secret.point() != point {
+                        bail!("Alice sent incorrect secret")
+                    }
+
+                    co.yield_(secret).await;
+
+                    // Perform a channel update to merge PTLC output into Alice's balance output
+
+                    let balance_output_self = SplitOutput::Balance {
+                        amount: ours,
+                        address: self.final_address_self.clone(),
+                    };
+
+                    let balance_output_other = SplitOutput::Balance {
+                        amount: theirs + ptlc_amount,
+                        address: self.final_address_other.clone(),
+                    };
+
+                    let mut transport = transport.lock().await;
+                    self.update(
+                        *transport,
+                        vec![balance_output_self, balance_output_other],
+                        tx_s_time_lock,
+                    )
+                    .await?;
+                }
+                Either::Left((Err(_), _)) | Either::Right(_) => {
+                    self.force_close(wallet).await?;
+
+                    let (_, _, TX_ptlc_redeem, TX_ptlc_refund, encsig_TX_ptlc_redeem_funder, ..) =
+                        self.current_state
+                            .clone()
+                            .into_with_ptlc()
+                            .expect("current state contains PTLC output");
+
+                    let ptlc_expired = async {
+                        loop {
+                            if wallet.median_time().await? >= ptlc_refund_time_lock {
+                                return Result::<(), anyhow::Error>::Ok(());
+                            }
+
+                            tokio::time::delay_for(Duration::from_secs(1)).await;
+                        }
+                    };
+                    let watch_redeem = async {
+                        loop {
+                            if let Ok(transaction) =
+                                wallet.get_raw_transaction(TX_ptlc_redeem.txid()).await
+                            {
+                                return transaction;
+                            };
+
+                            tokio::time::delay_for(Duration::from_secs(1)).await;
+                        }
+                    };
+
+                    futures::select! {
+                        _ = ptlc_expired.fuse() => {
+                            wallet
+                                .broadcast_signed_transaction(TX_ptlc_refund.into())
+                                .await?;
+                        },
+                        candidate_transaction = watch_redeem.fuse() => {
+                            let sig_TX_ptlc_redeem_funder = ptlc::extract_signature_by_key(
+                                candidate_transaction,
+                                TX_ptlc_redeem,
+                                self.x_self.public(),
+                            )?;
+
+                            let secret = ptlc::recover_secret(
+                                point,
+                                sig_TX_ptlc_redeem_funder,
+                                encsig_TX_ptlc_redeem_funder,
+                            )?;
+
+                            co.yield_(secret).await;
+                        },
+                    };
+                }
             }
-
-            co.yield_(secret).await;
-
-            // Perform a channel update to merge PTLC output into Alice's balance output
-            let out_ours = self.split_balance_output_ours(ours);
-            let out_theirs = self.split_balance_output_theirs(theirs + ptlc_amount);
-
-            self.update(transport, vec![out_ours, out_theirs], tx_s_time_lock)
-                .await?;
-
             Ok(())
         })
     }

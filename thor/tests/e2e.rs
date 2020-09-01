@@ -4,12 +4,15 @@ mod harness;
 
 use thor::{Balance, Channel, PtlcPoint, PtlcSecret, Splice, TX_FEE};
 
+use harness::{
+    generate_balances, generate_expiries, make_transports, make_wallets, Transport, Wallet,
+};
+
 use anyhow::Result;
 use bitcoin::{Amount, TxOut};
 use bitcoin_harness::{self, Bitcoind};
 use futures::future;
 use genawaiter::GeneratorState;
-use harness::{generate_balances, make_transports, make_wallets, Transport, Wallet};
 use spectral::prelude::*;
 use testcontainers::clients::Cli;
 
@@ -453,27 +456,28 @@ async fn e2e_atomic_swap_happy() {
     let point = secret.point();
     let ptlc_amount = Amount::from_btc(0.5).unwrap();
 
-    let (alpha_absolute_expiry, tx_s_time_lock, ptlc_redeem_time_lock) = (1_598_875_222, 1, 1);
+    let expiries = generate_expiries(&a_wallet).await.unwrap();
 
     let swap_beta_ptlc_alice = a_channel.swap_beta_ptlc_alice(
         &mut a_transport,
         &a_wallet,
         ptlc_amount,
         secret,
-        alpha_absolute_expiry,
-        tx_s_time_lock,
-        ptlc_redeem_time_lock,
+        expiries.alpha_absolute,
+        expiries.split_transaction_relative,
+        expiries.ptlc_absolute,
     );
 
     let skip_final_update = false;
     let swap_beta_ptlc_bob_with_final_update = swap_beta_ptlc_bob(
         &mut b_channel,
         &mut b_transport,
+        &b_wallet,
         ptlc_amount,
         point,
-        alpha_absolute_expiry,
-        tx_s_time_lock,
-        ptlc_redeem_time_lock,
+        expiries.alpha_absolute,
+        expiries.split_transaction_relative,
+        expiries.ptlc_absolute,
         skip_final_update,
     );
 
@@ -526,27 +530,28 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
 
     // TODO: produce redeem and refund transactions + fund alpha
 
-    let (alpha_absolute_expiry, tx_s_time_lock, ptlc_redeem_time_lock) = (1_598_875_222, 1, 1);
+    let expiries = generate_expiries(&a_wallet).await.unwrap();
 
     let swap_beta_ptlc_alice = a_channel.swap_beta_ptlc_alice(
         &mut a_transport,
         &a_wallet,
         ptlc_amount,
         secret,
-        alpha_absolute_expiry,
-        tx_s_time_lock,
-        ptlc_redeem_time_lock,
+        expiries.alpha_absolute,
+        expiries.split_transaction_relative,
+        expiries.ptlc_absolute,
     );
 
     let skip_final_update = true;
     let swap_beta_ptlc_bob_without_final_update = swap_beta_ptlc_bob(
         &mut b_channel,
         &mut b_transport,
+        &b_wallet,
         ptlc_amount,
         point,
-        alpha_absolute_expiry,
-        tx_s_time_lock,
-        ptlc_redeem_time_lock,
+        expiries.alpha_absolute,
+        expiries.split_transaction_relative,
+        expiries.ptlc_absolute,
         skip_final_update,
     );
 
@@ -594,7 +599,8 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
 #[allow(clippy::too_many_arguments)]
 async fn swap_beta_ptlc_bob(
     channel: &mut Channel,
-    b_transport: &mut Transport,
+    transport: &mut Transport,
+    wallet: &Wallet,
     ptlc_amount: Amount,
     point: PtlcPoint,
     alpha_absolute_expiry: u32,
@@ -603,7 +609,8 @@ async fn swap_beta_ptlc_bob(
     skip_update: bool,
 ) -> Result<()> {
     let mut swap_beta_ptlc_bob = channel.swap_beta_ptlc_bob(
-        b_transport,
+        transport,
+        wallet,
         ptlc_amount,
         point,
         alpha_absolute_expiry,

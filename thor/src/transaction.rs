@@ -26,7 +26,7 @@ use sha2::Sha256;
 use signature::{verify_encsig, verify_sig};
 use std::{collections::HashMap, str::FromStr};
 
-mod ptlc;
+pub(crate) mod ptlc;
 pub(crate) use ptlc::{RedeemTransaction, RefundTransaction};
 
 #[derive(Clone, Debug)]
