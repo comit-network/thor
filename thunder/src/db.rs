@@ -1,6 +1,7 @@
 use crate::{channel, ChannelId};
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use thor::Channel;
 
 // TODO: Use it
@@ -12,7 +13,7 @@ struct Database {
 // TODO: Use it
 #[allow(dead_code)]
 impl Database {
-    pub fn new(path: &std::path::Path) -> Result<Self> {
+    pub fn new(path: &Path) -> Result<Self> {
         let path = path
             .to_str()
             .ok_or_else(|| anyhow!("The path is not utf-8 valid: {:?}", path))?;
