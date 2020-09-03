@@ -416,7 +416,7 @@ fn e2e_force_close_after_updates() {
 }
 
 #[tokio::test]
-async fn e2e_channel_recycle() {
+async fn e2e_splice_in() {
     // Arrange
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -434,6 +434,9 @@ async fn e2e_channel_recycle() {
         .unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
+    let before_create_balance_alice = alice_wallet.0.balance().await.unwrap();
+    let before_create_balance_bob = bob_wallet.0.balance().await.unwrap();
+
     // Act: Create a new channel
 
     let alice_create = Channel::create(
@@ -448,22 +451,26 @@ async fn e2e_channel_recycle() {
         .await
         .unwrap();
 
-    let after_create_balance_alice = alice_wallet.0.balance().await.unwrap();
-    let after_create_balance_bob = bob_wallet.0.balance().await.unwrap();
-
-    // Assert: Channel balances are synced:
+    // Assert: Channel balances are synced and correct:
 
     assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
     assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
+    assert_eq!(alice_channel.balance().ours, Amount::ONE_BTC);
+    assert_eq!(bob_channel.balance().ours, Amount::ONE_BTC);
 
     let Balance {
         ours: actual_alice_balance,
         theirs: actual_bob_balance,
     } = alice_channel.balance();
 
-    // Act: Alice pays Bob 0.1 BTC
+    let mut bitcoind_fee_alice =
+        before_create_balance_alice - Amount::ONE_BTC - alice_wallet.0.balance().await.unwrap();
+    let mut bitcoind_fee_bob =
+        before_create_balance_bob - Amount::ONE_BTC - bob_wallet.0.balance().await.unwrap();
 
-    let payment = Amount::from_btc(0.1).unwrap();
+    // Act: Alice pays Bob 0.3 BTC
+
+    let payment = Amount::from_btc(0.3).unwrap();
     let expected_alice_balance = actual_alice_balance - payment;
     let expected_bob_balance = actual_bob_balance + payment;
 
@@ -501,24 +508,32 @@ async fn e2e_channel_recycle() {
         theirs: actual_bob_balance,
     } = alice_channel.balance();
 
-    // Act: Recycle the channel
+    // Act: Splice-in the channel:
+    //  Alice adds 0.5 BTC to the channel, increasing her balance to 1.2 BTC.
+    //  Bob adds 0.1 BTC to the channel, increasing his balance to 1.4 BTC
 
-    let alice_recycle = alice_channel.recycle(&mut alice_transport, &alice_wallet);
-    let bob_recycle = bob_channel.recycle(&mut bob_transport, &bob_wallet);
+    let alice_splice_in = Amount::from_btc(0.5).unwrap();
+    let bob_splice_in = Amount::from_btc(0.1).unwrap();
 
-    let (mut alice_channel, mut bob_channel) =
-        futures::future::try_join(alice_recycle, bob_recycle)
-            .await
-            .unwrap();
+    let before_splice_alice_balance = alice_wallet.0.balance().await.unwrap();
+    let before_splice_bob_balance = bob_wallet.0.balance().await.unwrap();
+
+    let alice_splice =
+        alice_channel.splice(&mut alice_transport, &alice_wallet, Some(alice_splice_in));
+    let bob_splice = bob_channel.splice(&mut bob_transport, &bob_wallet, Some(bob_splice_in));
+
+    let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_splice, bob_splice)
+        .await
+        .unwrap();
 
     // Assert: Channel balances are correct
 
     assert_eq!(
-        actual_alice_balance - Amount::from_sat(thor::TX_FEE / 2),
+        actual_alice_balance + alice_splice_in,
         alice_channel.balance().ours
     );
     assert_eq!(
-        actual_bob_balance - Amount::from_sat(thor::TX_FEE / 2),
+        actual_bob_balance + bob_splice_in,
         bob_channel.balance().ours
     );
 
@@ -530,11 +545,17 @@ async fn e2e_channel_recycle() {
         theirs: actual_bob_balance,
     } = alice_channel.balance();
 
-    // Act: Bob pays Alice 0.3 BTC
+    bitcoind_fee_alice +=
+        before_splice_alice_balance - alice_splice_in - alice_wallet.0.balance().await.unwrap();
 
-    let payment = Amount::from_btc(0.3).unwrap();
-    let expected_alice_balance = actual_alice_balance + payment;
-    let expected_bob_balance = actual_bob_balance - payment;
+    bitcoind_fee_bob +=
+        before_splice_bob_balance - bob_splice_in - bob_wallet.0.balance().await.unwrap();
+
+    // Act: Alice pays Bob 1.0 BTC
+
+    let payment = Amount::from_btc(1.0).unwrap();
+    let expected_alice_balance = actual_alice_balance - payment;
+    let expected_bob_balance = actual_bob_balance + payment;
 
     let alice_update = alice_channel.update_balance(
         &mut alice_transport,
@@ -566,9 +587,12 @@ async fn e2e_channel_recycle() {
     assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
 
     let Balance {
-        ours: actual_alice_balance,
-        theirs: actual_bob_balance,
+        ours: actual_channel_balance_alice,
+        theirs: actual_channel_balance_bob,
     } = alice_channel.balance();
+
+    assert_eq!(actual_channel_balance_alice, Amount::from_btc(0.2).unwrap());
+    assert_eq!(actual_channel_balance_bob, Amount::from_btc(2.4).unwrap());
 
     // Act: Collaboratively close the channel
 
@@ -586,23 +610,28 @@ async fn e2e_channel_recycle() {
     // the `FundingTransaction`. Collaboratively closing the channel requires
     // publishing a single `CloseTransaction`, so each party pays
     // one half `thor::TX_FEE`, which is deducted from their output.
-    // Note: The `alice/bob_balance` was set after recycling the channel
     let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE / 2);
 
+    // Alice paid Bob total 1.3 BTC
+    let alice_paid_bob = Amount::from_btc(1.3).unwrap();
+
     assert_eq!(
+        before_create_balance_alice
+            - alice_paid_bob
+            - fee_deduction_per_output
+            - bitcoind_fee_alice,
         after_close_balance_alice,
-        after_create_balance_alice + actual_alice_balance - fee_deduction_per_output,
-        "Balance after closing channel should equal balance after opening minus transaction fees"
+        "Balance after closing channel should match in channel payment minus transaction fees"
     );
     assert_eq!(
+        before_create_balance_bob + alice_paid_bob - fee_deduction_per_output - bitcoind_fee_bob,
         after_close_balance_bob,
-        after_create_balance_bob + actual_bob_balance - fee_deduction_per_output,
-        "Balance after closing channel should equal balance after opening minus transaction fees"
+        "Balance after closing channel should match in channel payment minus transaction fees"
     );
 }
 
 #[tokio::test]
-async fn e2e_channel_recycle_and_force_close() {
+async fn e2e_channel_splice_in_and_force_close() {
     // Arrange
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -620,6 +649,9 @@ async fn e2e_channel_recycle_and_force_close() {
         .unwrap();
     let (mut alice_transport, mut bob_transport) = make_transports();
 
+    let before_create_balance_alice = alice_wallet.0.balance().await.unwrap();
+    let before_create_balance_bob = bob_wallet.0.balance().await.unwrap();
+
     // Act: Create a new channel
 
     let alice_create = Channel::create(
@@ -634,9 +666,6 @@ async fn e2e_channel_recycle_and_force_close() {
         .await
         .unwrap();
 
-    let after_create_balance_alice = alice_wallet.0.balance().await.unwrap();
-    let after_create_balance_bob = bob_wallet.0.balance().await.unwrap();
-
     // Assert: Channel balances are synced:
 
     assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
@@ -647,9 +676,14 @@ async fn e2e_channel_recycle_and_force_close() {
         theirs: actual_bob_balance,
     } = alice_channel.balance();
 
-    // Act: Alice pays Bob 0.1 BTC
+    let mut bitcoind_fee_alice =
+        before_create_balance_alice - Amount::ONE_BTC - alice_wallet.0.balance().await.unwrap();
+    let bitcoind_fee_bob =
+        before_create_balance_bob - Amount::ONE_BTC - bob_wallet.0.balance().await.unwrap();
 
-    let payment = Amount::from_btc(0.1).unwrap();
+    // Act: Alice pays Bob 0.9 BTC
+
+    let payment = Amount::from_btc(0.9).unwrap();
     let expected_alice_balance = actual_alice_balance - payment;
     let expected_bob_balance = actual_bob_balance + payment;
 
@@ -687,26 +721,27 @@ async fn e2e_channel_recycle_and_force_close() {
         theirs: actual_bob_balance,
     } = alice_channel.balance();
 
-    // Act: Recycle the channel
+    // Act: Splice-in the channel, Alice adds 0.5 BTC to the channel
 
-    let alice_recycle = alice_channel.recycle(&mut alice_transport, &alice_wallet);
-    let bob_recycle = bob_channel.recycle(&mut bob_transport, &bob_wallet);
+    let alice_splice_in = Amount::from_btc(0.5).unwrap();
 
-    let (mut alice_channel, mut bob_channel) =
-        futures::future::try_join(alice_recycle, bob_recycle)
-            .await
-            .unwrap();
+    let before_splice_alice_balance = alice_wallet.0.balance().await.unwrap();
+
+    let alice_splice =
+        alice_channel.splice(&mut alice_transport, &alice_wallet, Some(alice_splice_in));
+    let bob_splice = bob_channel.splice(&mut bob_transport, &bob_wallet, None);
+
+    let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_splice, bob_splice)
+        .await
+        .unwrap();
 
     // Assert: Channel balances are correct
 
     assert_eq!(
-        actual_alice_balance - Amount::from_sat(thor::TX_FEE / 2),
+        actual_alice_balance + alice_splice_in,
         alice_channel.balance().ours
     );
-    assert_eq!(
-        actual_bob_balance - Amount::from_sat(thor::TX_FEE / 2),
-        bob_channel.balance().ours
-    );
+    assert_eq!(actual_bob_balance, bob_channel.balance().ours);
 
     assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
     assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
@@ -715,6 +750,9 @@ async fn e2e_channel_recycle_and_force_close() {
         ours: actual_alice_balance,
         theirs: actual_bob_balance,
     } = alice_channel.balance();
+
+    bitcoind_fee_alice +=
+        before_splice_alice_balance - alice_splice_in - alice_wallet.0.balance().await.unwrap();
 
     // Act: Bob pays Alice 0.3 BTC
 
@@ -751,11 +789,6 @@ async fn e2e_channel_recycle_and_force_close() {
     assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
     assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
 
-    let Balance {
-        ours: actual_alice_balance,
-        theirs: actual_bob_balance,
-    } = alice_channel.balance();
-
     // Act: Alice forces close the channel
 
     alice_channel.force_close(&alice_wallet).await.unwrap();
@@ -767,18 +800,24 @@ async fn e2e_channel_recycle_and_force_close() {
     // publishing two transactions: a `CommitTransaction` and a `SplitTransaction`,
     // so each party pays a full `thor::TX_FEE`, which is deducted from their
     // output.
-    // Note: The `actual_{alice,bob}_balance` was set after recycling the channel
     let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE);
 
+    let alice_paid_bob = Amount::from_btc(0.9).unwrap();
+    let bob_paid_alice = Amount::from_btc(0.3).unwrap();
+
     assert_eq!(
+        before_create_balance_alice - alice_paid_bob + bob_paid_alice
+            - fee_deduction_per_output
+            - bitcoind_fee_alice,
         after_close_balance_alice,
-        after_create_balance_alice + actual_alice_balance - fee_deduction_per_output,
-        "Balance after closing channel should equal balance after opening minus transaction fees"
+        "Balance after closing channel should match in channel payment minus transaction fees"
     );
     assert_eq!(
+        before_create_balance_bob - bob_paid_alice + alice_paid_bob
+            - fee_deduction_per_output
+            - bitcoind_fee_bob,
         after_close_balance_bob,
-        after_create_balance_bob + actual_bob_balance - fee_deduction_per_output,
-        "Balance after closing channel should equal balance after opening minus transaction fees"
+        "Balance after closing channel should match in channel payment minus transaction fees"
     );
 }
 
