@@ -41,7 +41,7 @@ use crate::{
 use ::serde::{Deserialize, Serialize};
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
-use bitcoin::{Address, Amount, Transaction, Txid};
+use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
 use futures::{future::Either, pin_mut, Future};
@@ -50,6 +50,7 @@ use std::convert::{TryFrom, TryInto};
 
 // TODO: We should handle fees dynamically
 
+// TODO: Have it as an `Amount` instead
 /// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
 
@@ -537,6 +538,7 @@ impl Channel {
         transport: &mut T,
         wallet: &W,
         splice_in: Option<Amount>,
+        splice_out: Option<TxOut>,
     ) -> Result<Self>
     where
         W: BroadcastSignedTransaction + BuildFundingPsbt + SignFundingPsbt,
@@ -560,6 +562,7 @@ impl Channel {
             x_self,
             X_other,
             splice_in,
+            splice_out,
             wallet,
         )
         .await?;

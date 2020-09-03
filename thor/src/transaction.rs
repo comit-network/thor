@@ -972,6 +972,7 @@ pub(crate) struct SpliceTransaction {
 impl SpliceTransaction {
     pub fn new(
         mut inputs: Vec<PartiallySignedTransaction>,
+        mut splice_outputs: Vec<TxOut>,
         channel_balance: [(OwnershipPublicKey, Amount); 2],
     ) -> Result<Self> {
         if inputs.is_empty() {
@@ -993,7 +994,7 @@ impl SpliceTransaction {
         let fund_output_descriptor = fund_output.descriptor();
 
         // Extract inputs and change_outputs from each party's input_psbt
-        let (inputs, change_outputs) = inputs
+        let (inputs, mut change_outputs) = inputs
             .into_iter()
             .map(|psbt| {
                 let Transaction { input, output, .. } = psbt.extract_tx();
@@ -1016,12 +1017,16 @@ impl SpliceTransaction {
             script_pubkey: fund_output_descriptor.script_pubkey(),
         };
 
+        let mut outputs = vec![fund_output];
+        outputs.append(&mut change_outputs);
+        outputs.append(&mut splice_outputs);
+
         // Both parties _must_ insert inputs and outputs in the order defined above
         let tx_f = Transaction {
             version: 2,
             lock_time: 0,
             input: inputs,
-            output: vec![vec![fund_output], change_outputs].concat(),
+            output: outputs,
         };
 
         Ok(Self {

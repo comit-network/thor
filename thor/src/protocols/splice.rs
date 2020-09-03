@@ -7,12 +7,13 @@ use crate::{
         CommitTransaction, FundOutput, FundingTransaction, SpliceTransaction, SplitTransaction,
     },
     Balance, BuildFundingPsbt, Channel, ChannelState, SignFundingPsbt, SplitOutput,
-    StandardChannelState,
+    StandardChannelState, TX_FEE,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bitcoin::{
     consensus::serialize, util::psbt::PartiallySignedTransaction, Address, Amount, Transaction,
+    TxOut,
 };
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use miniscript::Descriptor;
@@ -26,6 +27,8 @@ pub struct Message0 {
     Y: PublishingPublicKey,
     #[cfg_attr(feature = "serde", serde(default))]
     splice_in: Option<SpliceIn>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    splice_out: Option<TxOut>,
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -64,6 +67,7 @@ pub(crate) struct State0 {
     r_self: RevocationKeyPair,
     y_self: PublishingKeyPair,
     splice_in_self: Option<SpliceIn>,
+    splice_out_self: Option<TxOut>,
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -100,13 +104,21 @@ impl State0 {
         previous_tx_f: FundingTransaction,
         x_self: OwnershipKeyPair,
         X_other: OwnershipPublicKey,
-        splice_in: Option<Amount>,
+        splice_in_self: Option<Amount>,
+        splice_out_self: Option<TxOut>,
         wallet: &W,
     ) -> Result<State0>
     where
         W: BuildFundingPsbt,
     {
-        let splice_in_self = match splice_in {
+        // TODO: Prevent the same party to splice-in and out in the same transaction
+        if let Some(ref tx_out) = splice_out_self {
+            if tx_out.value > previous_balance.ours.as_sat() {
+                anyhow::bail!("Not enough balance to splice out {} sats", tx_out.value)
+            }
+        }
+
+        let splice_in_self = match splice_in_self {
             Some(amount) => {
                 let fund_output = FundOutput::new([x_self.public(), X_other.clone()]);
                 let input_psbt = wallet
@@ -130,6 +142,7 @@ impl State0 {
             r_self: r,
             y_self: y,
             splice_in_self,
+            splice_out_self,
             time_lock,
         })
     }
@@ -139,6 +152,7 @@ impl State0 {
             R: self.r_self.public(),
             Y: self.y_self.public(),
             splice_in: self.splice_in_self.clone(),
+            splice_out: self.splice_out_self.clone(),
         }
     }
 
@@ -148,8 +162,34 @@ impl State0 {
             R: R_other,
             Y: Y_other,
             splice_in: splice_in_other,
+            splice_out: splice_out_other,
         }: Message0,
     ) -> Result<State1> {
+        let mut our_balance = self.previous_balance.ours;
+        let mut their_balance = self.previous_balance.theirs;
+
+        // TODO: Prevent the same party to splice-in and out in the same transaction
+        let mut splice_outputs = vec![];
+        if let Some(tx_out) = splice_out_other {
+            if tx_out.value > self.previous_balance.theirs.as_sat() {
+                anyhow::bail!("Counterpart is splicing out more than they have");
+            } else {
+                // Need to pay the transaction fee, taking it out of the splice out.
+                // TODO: split between splice in and splice out if there is both
+                their_balance -= Amount::from_sat(tx_out.value) + Amount::from_sat(TX_FEE);
+                splice_outputs.push(tx_out);
+            }
+        }
+
+        if let Some(tx_out) = self.splice_out_self {
+            if tx_out.value > self.previous_balance.ours.as_sat() {
+                anyhow::bail!("We are splicing out more than we have");
+            } else {
+                our_balance -= Amount::from_sat(tx_out.value) + Amount::from_sat(TX_FEE);
+                splice_outputs.push(tx_out);
+            }
+        }
+
         let previous_funding_txin = self.previous_tx_f.as_txin();
         let previous_funding_psbt = PartiallySignedTransaction::from_unsigned_tx(Transaction {
             version: 2,
@@ -158,9 +198,6 @@ impl State0 {
             output: vec![],
         })
         .expect("Only fails if script_sig or witness is empty which is not the case.");
-
-        let mut our_balance = self.previous_balance.ours;
-        let mut their_balance = self.previous_balance.theirs;
 
         let mut splice_in_inputs = vec![];
 
@@ -193,7 +230,7 @@ impl State0 {
             theirs: their_balance,
         };
 
-        let tx_f = SpliceTransaction::new(inputs, [
+        let tx_f = SpliceTransaction::new(inputs, splice_outputs, [
             (self.x_self.public(), balance.ours),
             (self.X_other.clone(), balance.theirs),
         ])?;
