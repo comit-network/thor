@@ -452,17 +452,7 @@ async fn e2e_splice_in() {
         .await
         .unwrap();
 
-    // Assert: Channel balances are synced and correct:
-
-    assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
-    assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
-    assert_eq!(alice_channel.balance().ours, Amount::ONE_BTC);
-    assert_eq!(bob_channel.balance().ours, Amount::ONE_BTC);
-
-    let Balance {
-        ours: actual_alice_balance,
-        theirs: actual_bob_balance,
-    } = alice_channel.balance();
+    // Arrange: Save the fees for final asserts
 
     let mut bitcoind_fee_alice =
         before_create_balance_alice - Amount::ONE_BTC - alice_wallet.0.balance().await.unwrap();
@@ -472,6 +462,10 @@ async fn e2e_splice_in() {
     // Act: Alice pays Bob 0.3 BTC
 
     let payment = Amount::from_btc(0.3).unwrap();
+    let Balance {
+        ours: actual_alice_balance,
+        theirs: actual_bob_balance,
+    } = alice_channel.balance();
     let expected_alice_balance = actual_alice_balance - payment;
     let expected_bob_balance = actual_bob_balance + payment;
 
@@ -496,13 +490,7 @@ async fn e2e_splice_in() {
         .await
         .unwrap();
 
-    // Assert: Channel balances are correct
-
-    assert_eq!(expected_alice_balance, alice_channel.balance().ours);
-    assert_eq!(expected_bob_balance, bob_channel.balance().ours);
-
-    assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
-    assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
+    // Arrange: Save channel balances to check after the splice
 
     let Balance {
         ours: actual_alice_balance,
@@ -581,22 +569,6 @@ async fn e2e_splice_in() {
     futures::future::try_join(alice_update, bob_update)
         .await
         .unwrap();
-
-    // Assert: Channel balances are correct
-
-    assert_eq!(expected_alice_balance, alice_channel.balance().ours);
-    assert_eq!(expected_bob_balance, bob_channel.balance().ours);
-
-    assert_eq!(alice_channel.balance().ours, bob_channel.balance().theirs);
-    assert_eq!(alice_channel.balance().theirs, bob_channel.balance().ours);
-
-    let Balance {
-        ours: actual_channel_balance_alice,
-        theirs: actual_channel_balance_bob,
-    } = alice_channel.balance();
-
-    assert_eq!(actual_channel_balance_alice, Amount::from_btc(0.2).unwrap());
-    assert_eq!(actual_channel_balance_bob, Amount::from_btc(2.4).unwrap());
 
     // Act: Collaboratively close the channel
 
