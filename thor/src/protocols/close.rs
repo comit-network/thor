@@ -3,7 +3,7 @@ use crate::{
     transaction::{CloseTransaction, FundingTransaction},
     Balance, Channel,
 };
-use anyhow::Context;
+use anyhow::{Context, Result};
 use bitcoin::{Address, Transaction};
 use ecdsa_fun::Signature;
 
@@ -35,7 +35,7 @@ impl State0 {
         }
     }
 
-    pub(crate) fn compose(&self) -> anyhow::Result<Message0> {
+    pub(crate) fn compose(&self) -> Result<Message0> {
         let close_transaction = CloseTransaction::new(&self.TX_f, [
             (self.balance.ours, self.final_address_self.clone()),
             (self.balance.theirs, self.final_address_other.clone()),
@@ -52,7 +52,7 @@ impl State0 {
         Message0 {
             sig_close_transaction: sig_close_transaction_other,
         }: Message0,
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let close_transaction = CloseTransaction::new(&self.TX_f, [
             (self.balance.ours, self.final_address_self),
             (self.balance.theirs, self.final_address_other),

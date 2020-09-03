@@ -1,6 +1,7 @@
 use crate::{
     keys::OwnershipKeyPair, transaction::PunishTransaction, RevokedState, StandardChannelState,
 };
+use anyhow::Result;
 use bitcoin::{Address, Transaction};
 
 #[derive(Copy, Clone, Debug, thiserror::Error)]
@@ -12,7 +13,7 @@ pub(crate) fn punish(
     revoked_states: &[RevokedState],
     final_address: Address,
     old_commit_transaction: Transaction,
-) -> anyhow::Result<PunishTransaction> {
+) -> Result<PunishTransaction> {
     let (channel_state, r_other) = revoked_states
         .iter()
         .map(|state| {

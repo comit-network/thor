@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{Context, Result};
 use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
@@ -34,7 +34,7 @@ pub fn make_transports() -> (Transport, Transport) {
 
 #[async_trait::async_trait]
 impl SendMessage for Transport {
-    async fn send_message(&mut self, message: Message) -> anyhow::Result<()> {
+    async fn send_message(&mut self, message: Message) -> Result<()> {
         let str = serde_json::to_string(&message).context("failed to encode message")?;
         self.sender
             .send(str)
@@ -45,7 +45,7 @@ impl SendMessage for Transport {
 
 #[async_trait::async_trait]
 impl ReceiveMessage for Transport {
-    async fn receive_message(&mut self) -> anyhow::Result<Message> {
+    async fn receive_message(&mut self) -> Result<Message> {
         let str = self
             .receiver
             .next()

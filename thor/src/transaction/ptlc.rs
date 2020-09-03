@@ -5,6 +5,7 @@ use crate::{
     Ptlc, PtlcPoint, TX_FEE,
 };
 
+use anyhow::Result;
 use bitcoin::{
     util::bip143::SighashComponents, Address, OutPoint, Script, SigHash, Transaction, TxIn, TxOut,
 };
@@ -22,11 +23,7 @@ pub(crate) struct RedeemTransaction {
 }
 
 impl RedeemTransaction {
-    pub fn new(
-        TX_s: &SplitTransaction,
-        ptlc: Ptlc,
-        redeem_address: Address,
-    ) -> anyhow::Result<Self> {
+    pub fn new(TX_s: &SplitTransaction, ptlc: Ptlc, redeem_address: Address) -> Result<Self> {
         let (transaction, digest, input_descriptor) =
             spend_transaction(TX_s, ptlc, redeem_address, 0xFFFF_FFFF)?;
 
@@ -49,7 +46,7 @@ impl RedeemTransaction {
         &self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -82,7 +79,7 @@ impl RedeemTransaction {
         verification_key: OwnershipPublicKey,
         encryption_key: Point,
         encsig: &EncryptedSignature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_encsig(verification_key, encryption_key, &self.digest, encsig)?;
 
         Ok(())
@@ -98,11 +95,7 @@ pub(crate) struct RefundTransaction {
 }
 
 impl RefundTransaction {
-    pub fn new(
-        TX_s: &SplitTransaction,
-        ptlc: Ptlc,
-        refund_address: Address,
-    ) -> anyhow::Result<Self> {
+    pub fn new(TX_s: &SplitTransaction, ptlc: Ptlc, refund_address: Address) -> Result<Self> {
         let (transaction, digest, input_descriptor) =
             spend_transaction(TX_s, ptlc.clone(), refund_address, ptlc.refund_time_lock)?;
 
@@ -121,7 +114,7 @@ impl RefundTransaction {
         &self,
         verification_key: OwnershipPublicKey,
         signature: &Signature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_sig(verification_key, &self.digest, signature)?;
 
         Ok(())
@@ -131,7 +124,7 @@ impl RefundTransaction {
         &mut self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -165,7 +158,7 @@ pub(crate) fn spend_transaction(
     ptlc: Ptlc,
     refund_address: Address,
     input_sequence: u32,
-) -> anyhow::Result<(Transaction, SigHash, Descriptor<bitcoin::PublicKey>)> {
+) -> Result<(Transaction, SigHash, Descriptor<bitcoin::PublicKey>)> {
     let mut Xs = [ptlc.X_funder, ptlc.X_redeemer];
     Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
     let [X_0, X_1] = Xs;

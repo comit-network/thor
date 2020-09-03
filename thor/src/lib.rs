@@ -34,7 +34,7 @@ use crate::{
     protocols::punish::punish,
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
-use anyhow::bail;
+use anyhow::{bail, Result};
 use bitcoin::{Address, Amount, Transaction, Txid};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
@@ -63,22 +63,22 @@ pub struct Channel {
 
 #[async_trait::async_trait]
 pub trait NewAddress {
-    async fn new_address(&self) -> anyhow::Result<Address>;
+    async fn new_address(&self) -> Result<Address>;
 }
 
 #[async_trait::async_trait]
 pub trait BroadcastSignedTransaction {
-    async fn broadcast_signed_transaction(&self, transaction: Transaction) -> anyhow::Result<()>;
+    async fn broadcast_signed_transaction(&self, transaction: Transaction) -> Result<()>;
 }
 
 #[async_trait::async_trait]
 pub trait SendMessage {
-    async fn send_message(&mut self, message: Message) -> anyhow::Result<()>;
+    async fn send_message(&mut self, message: Message) -> Result<()>;
 }
 
 #[async_trait::async_trait]
 pub trait ReceiveMessage {
-    async fn receive_message(&mut self) -> anyhow::Result<Message>;
+    async fn receive_message(&mut self) -> Result<Message>;
 }
 
 impl Channel {
@@ -92,7 +92,7 @@ impl Channel {
         wallet: &W,
         balance: Balance,
         time_lock: u32,
-    ) -> anyhow::Result<Self>
+    ) -> Result<Self>
     where
         T: SendMessage + ReceiveMessage,
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
@@ -156,7 +156,7 @@ impl Channel {
         transport: &mut T,
         Balance { ours, theirs }: Balance,
         time_lock: u32,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
     {
@@ -190,7 +190,7 @@ impl Channel {
         _alpha_absolute_expiry: u32,
         TX_s_time_lock: u32,
         ptlc_refund_time_lock: u32,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
@@ -307,7 +307,7 @@ impl Channel {
         _alpha_absolute_expiry: u32,
         TX_s_time_lock: u32,
         ptlc_refund_time_lock: u32,
-    ) -> Gen<PtlcSecret, (), impl Future<Output = anyhow::Result<()>> + 'a>
+    ) -> Gen<PtlcSecret, (), impl Future<Output = Result<()>> + 'a>
     where
         T: SendMessage + ReceiveMessage,
     {
@@ -392,7 +392,7 @@ impl Channel {
         transport: &mut T,
         new_split_outputs: Vec<SplitOutput>,
         time_lock: u32,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
     {
@@ -477,7 +477,7 @@ impl Channel {
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
     /// on the `transport` they provide, allowing the parties to communicate
     /// with each other.
-    pub async fn close<T, W>(&self, transport: &mut T, wallet: &W) -> anyhow::Result<()>
+    pub async fn close<T, W>(&self, transport: &mut T, wallet: &W) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
@@ -497,7 +497,7 @@ impl Channel {
         Ok(())
     }
 
-    pub async fn force_close<W>(&self, wallet: &W) -> anyhow::Result<()>
+    pub async fn force_close<W>(&self, wallet: &W) -> Result<()>
     where
         W: NewAddress + BroadcastSignedTransaction,
     {
@@ -521,11 +521,7 @@ impl Channel {
     ///
     /// This effectively closes the channel, as all of the channel's funds go to
     /// our final address.
-    pub async fn punish<W>(
-        &self,
-        wallet: &W,
-        old_commit_transaction: Transaction,
-    ) -> anyhow::Result<()>
+    pub async fn punish<W>(&self, wallet: &W, old_commit_transaction: Transaction) -> Result<()>
     where
         W: BroadcastSignedTransaction,
     {
@@ -554,7 +550,7 @@ impl Channel {
 
     /// Retrieve the signed `CommitTransaction` of the state that was revoked
     /// during the last channel update.
-    pub fn latest_revoked_signed_TX_c(&self) -> anyhow::Result<Option<Transaction>> {
+    pub fn latest_revoked_signed_TX_c(&self) -> Result<Option<Transaction>> {
         self.revoked_states
             .last()
             .map(|state| {
@@ -572,7 +568,7 @@ impl Channel {
         transport: &mut T,
         wallet: &W,
         splice_in: Option<Amount>,
-    ) -> anyhow::Result<Self>
+    ) -> Result<Self>
     where
         W: BroadcastSignedTransaction + BuildFundingPSBT + SignFundingPSBT,
         T: SendMessage + ReceiveMessage,
@@ -691,7 +687,7 @@ impl StandardChannelState {
         TX_f: &FundingTransaction,
         x_self: &OwnershipKeyPair,
         X_other: &OwnershipPublicKey,
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let sig_self = self.TX_c.sign_once(x_self);
         let sig_other = decrypt(self.y_self.clone().into(), self.encsig_TX_c_other.clone());
 
@@ -730,7 +726,7 @@ impl RevokedState {
         TX_f: &FundingTransaction,
         x_self: keys::OwnershipKeyPair,
         X_other: OwnershipPublicKey,
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         StandardChannelState::from(self.channel_state.clone()).signed_TX_c(TX_f, &x_self, &X_other)
     }
 }

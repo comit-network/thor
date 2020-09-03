@@ -2,6 +2,7 @@
 
 mod harness;
 
+use anyhow::Result;
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
 use genawaiter::GeneratorState;
@@ -1033,7 +1034,7 @@ async fn swap_beta_ptlc_bob(
     TX_s_time_lock: u32,
     ptlc_redeem_time_lock: u32,
     skip_update: bool,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     let mut swap_beta_ptlc_bob = channel.swap_beta_ptlc_bob(
         bob_transport,
         ptlc_amount,

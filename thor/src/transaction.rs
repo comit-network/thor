@@ -5,7 +5,7 @@ use crate::{
     },
     signature, Balance, Ptlc, SplitOutput, TX_FEE,
 };
-use anyhow::bail;
+use anyhow::{bail, Result};
 use arrayvec::ArrayVec;
 use bitcoin::{
     consensus::encode::serialize,
@@ -67,7 +67,7 @@ impl FundingTransaction {
     pub fn new(
         mut input_psbts: Vec<PartiallySignedTransaction>,
         channel_balance: [(OwnershipPublicKey, Amount); 2],
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         if input_psbts.is_empty() {
             anyhow::bail!("Cannot build a transaction without inputs")
         }
@@ -151,7 +151,7 @@ impl FundingTransaction {
         self.fund_output_descriptor.clone()
     }
 
-    pub fn into_psbt(self) -> anyhow::Result<PartiallySignedTransaction> {
+    pub fn into_psbt(self) -> Result<PartiallySignedTransaction> {
         PartiallySignedTransaction::from_unsigned_tx(self.inner)
             .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
     }
@@ -180,7 +180,7 @@ impl CommitTransaction {
         TX_f: &FundingTransaction,
         keys: [(OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey); 2],
         time_lock: u32,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let output_descriptor = Self::build_descriptor(keys, time_lock)?;
 
         let input = TX_f.as_txin();
@@ -224,7 +224,7 @@ impl CommitTransaction {
         TX_f: &FundingTransaction,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -290,7 +290,7 @@ impl CommitTransaction {
         verification_key: OwnershipPublicKey,
         encryption_key: PublishingPublicKey,
         encsig: &EncryptedSignature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_encsig(
             verification_key,
             encryption_key.into(),
@@ -325,7 +325,7 @@ impl CommitTransaction {
     fn build_descriptor(
         mut keys: [(OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey); 2],
         time_lock: u32,
-    ) -> anyhow::Result<Descriptor<bitcoin::PublicKey>> {
+    ) -> Result<Descriptor<bitcoin::PublicKey>> {
         // Sort the tuples of arguments based on the ascending lexicographical order of
         // bytes of each ownership public key. Both parties _must_ do this so that they
         // build the same commit transaction descriptor
@@ -578,7 +578,7 @@ impl SplitTransaction {
         &self,
         verification_key: OwnershipPublicKey,
         signature: &Signature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_sig(verification_key, &self.digest, signature)?;
 
         Ok(())
@@ -589,7 +589,7 @@ impl SplitTransaction {
         &mut self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         struct Satisfier {
             a: (bitcoin::PublicKey, bitcoin::secp256k1::Signature),
             b: (bitcoin::PublicKey, bitcoin::secp256k1::Signature),
@@ -672,7 +672,7 @@ impl PunishTransaction {
         r_other: &RevocationKeyPair,
         Y_other: PublishingPublicKey,
         revoked_TX_c_candidate: Transaction,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
         // CommitTransaction's only have one input
@@ -861,7 +861,7 @@ impl CloseTransaction {
         &self,
         verification_key: OwnershipPublicKey,
         signature: &Signature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_sig(verification_key, &self.digest, signature)?;
 
         Ok(())
@@ -871,7 +871,7 @@ impl CloseTransaction {
         self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -971,7 +971,7 @@ impl SpliceTransaction {
     pub fn new(
         mut inputs: Vec<PartiallySignedTransaction>,
         channel_balance: [(OwnershipPublicKey, Amount); 2],
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         if inputs.is_empty() {
             anyhow::bail!("Cannot build a transaction without inputs")
         }
@@ -1030,7 +1030,7 @@ impl SpliceTransaction {
         })
     }
 
-    pub fn into_psbt(self) -> anyhow::Result<PartiallySignedTransaction> {
+    pub fn into_psbt(self) -> Result<PartiallySignedTransaction> {
         PartiallySignedTransaction::from_unsigned_tx(self.inner)
             .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
     }

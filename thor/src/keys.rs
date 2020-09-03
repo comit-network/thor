@@ -1,4 +1,4 @@
-use anyhow::bail;
+use anyhow::{bail, Result};
 use bitcoin::{hashes::Hash, SigHash};
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
@@ -113,10 +113,7 @@ impl RevocationKeyPair {
 pub struct WrongRevocationSecretKey;
 
 impl RevocationPublicKey {
-    pub fn verify_revocation_secret_key(
-        &self,
-        secret_key: &RevocationSecretKey,
-    ) -> anyhow::Result<()> {
+    pub fn verify_revocation_secret_key(&self, secret_key: &RevocationSecretKey) -> Result<()> {
         if self.0 != public_key(&secret_key.0) {
             bail!(WrongRevocationSecretKey)
         }
@@ -311,7 +308,7 @@ fn sign(secret_key: &Scalar, digest: SigHash) -> Signature {
 }
 
 #[cfg(test)]
-pub fn point_from_str(from: &str) -> anyhow::Result<Point> {
+pub fn point_from_str(from: &str) -> Result<Point> {
     let point = hex::decode(from)?;
 
     let mut bytes = [0u8; 33];

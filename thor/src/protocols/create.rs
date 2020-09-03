@@ -6,7 +6,7 @@ use crate::{
     transaction::{balance, CommitTransaction, FundOutput, FundingTransaction, SplitTransaction},
     Balance, Channel, ChannelState, SplitOutput, StandardChannelState,
 };
-use anyhow::Context;
+use anyhow::{Context, Result};
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
@@ -70,7 +70,7 @@ pub trait BuildFundingPSBT {
         &self,
         output_address: Address,
         output_amount: Amount,
-    ) -> anyhow::Result<PartiallySignedTransaction>;
+    ) -> Result<PartiallySignedTransaction>;
 }
 
 impl State0 {
@@ -99,7 +99,7 @@ impl State0 {
             final_address: final_address_other,
         }: Message0,
         wallet: &impl BuildFundingPSBT,
-    ) -> anyhow::Result<State1> {
+    ) -> Result<State1> {
         let fund_output = FundOutput::new([self.x_self.public(), X_other.clone()]);
         let input_psbt_self = wallet
             .build_funding_psbt(fund_output.address(), self.balance.ours)
@@ -140,7 +140,7 @@ impl State1 {
         Message1 {
             input_psbt: input_pstb_other,
         }: Message1,
-    ) -> anyhow::Result<State2> {
+    ) -> Result<State2> {
         let TX_f = FundingTransaction::new(vec![self.input_psbt_self.clone(), input_pstb_other], [
             (self.x_self.public(), self.balance.ours),
             (self.X_other.clone(), self.balance.theirs),
@@ -191,7 +191,7 @@ impl State2 {
             R: R_other,
             Y: Y_other,
         }: Message2,
-    ) -> anyhow::Result<Party3> {
+    ) -> Result<Party3> {
         let TX_c = CommitTransaction::new(
             &self.TX_f,
             [
@@ -265,7 +265,7 @@ impl Party3 {
         Message3 {
             sig_TX_s: sig_TX_s_other,
         }: Message3,
-    ) -> anyhow::Result<Party4> {
+    ) -> Result<Party4> {
         self.TX_s
             .verify_sig(self.X_other.clone(), &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
@@ -324,7 +324,7 @@ impl Party4 {
         Message4 {
             encsig_TX_c: encsig_TX_c_other,
         }: Message4,
-    ) -> anyhow::Result<Party5> {
+    ) -> Result<Party5> {
         self.TX_c
             .verify_encsig(
                 self.X_other.clone(),
@@ -374,11 +374,11 @@ pub trait SignFundingPSBT {
     async fn sign_funding_psbt(
         &self,
         psbt: PartiallySignedTransaction,
-    ) -> anyhow::Result<PartiallySignedTransaction>;
+    ) -> Result<PartiallySignedTransaction>;
 }
 
 impl Party5 {
-    pub async fn next_message(&self, wallet: &impl SignFundingPSBT) -> anyhow::Result<Message5> {
+    pub async fn next_message(&self, wallet: &impl SignFundingPSBT) -> Result<Message5> {
         let TX_f_signed_once = wallet
             .sign_funding_psbt(self.TX_f.clone().into_psbt()?)
             .await?;
@@ -391,7 +391,7 @@ impl Party5 {
         self,
         Message5 { TX_f_signed_once }: Message5,
         wallet: &impl SignFundingPSBT,
-    ) -> anyhow::Result<(Channel, Transaction)> {
+    ) -> Result<(Channel, Transaction)> {
         let signed_TX_f = wallet.sign_funding_psbt(TX_f_signed_once).await?;
         let signed_TX_f = signed_TX_f.extract_tx();
 

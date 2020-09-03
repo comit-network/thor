@@ -6,7 +6,7 @@ use crate::{
     transaction::{balance, ptlc, CommitTransaction, FundingTransaction, SplitTransaction},
     Channel, ChannelState, Ptlc, RevokedState, SplitOutput, StandardChannelState,
 };
-use anyhow::Context;
+use anyhow::{Context, Result};
 use bitcoin::Address;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
@@ -87,7 +87,7 @@ impl State0 {
             R: R_other,
             Y: Y_other,
         }: ShareKeys,
-    ) -> anyhow::Result<State1Kind> {
+    ) -> Result<State1Kind> {
         let TX_c = CommitTransaction::new(
             &self.TX_f_body,
             [
@@ -190,7 +190,7 @@ pub struct State1PtlcFunder {
 }
 
 impl State1PtlcFunder {
-    pub fn new(state: State1, ptlc: Ptlc) -> anyhow::Result<Self> {
+    pub fn new(state: State1, ptlc: Ptlc) -> Result<Self> {
         let TX_ptlc_redeem = ptlc::RedeemTransaction::new(
             &state.TX_s,
             ptlc.clone(),
@@ -222,10 +222,7 @@ impl State1PtlcFunder {
         }
     }
 
-    pub fn interpret(
-        mut self,
-        message: SignaturesPtlcRedeemer,
-    ) -> anyhow::Result<WithPtlc<State1>> {
+    pub fn interpret(mut self, message: SignaturesPtlcRedeemer) -> Result<WithPtlc<State1>> {
         self.TX_ptlc_refund
             .verify_sig(
                 self.inner.X_other.clone(),
@@ -270,7 +267,7 @@ pub struct State1PtlcRedeemer {
 }
 
 impl State1PtlcRedeemer {
-    pub fn new(state: State1, ptlc: Ptlc) -> anyhow::Result<Self> {
+    pub fn new(state: State1, ptlc: Ptlc) -> Result<Self> {
         let TX_ptlc_redeem = ptlc::RedeemTransaction::new(
             &state.TX_s,
             ptlc.clone(),
@@ -302,7 +299,7 @@ impl State1PtlcRedeemer {
         }
     }
 
-    pub fn interpret(self, message: SignaturesPtlcFunder) -> anyhow::Result<WithPtlc<State1>> {
+    pub fn interpret(self, message: SignaturesPtlcFunder) -> Result<WithPtlc<State1>> {
         self.TX_ptlc_redeem
             .verify_encsig(
                 self.inner.X_other.clone(),
@@ -358,7 +355,7 @@ impl State1 {
         ShareSplitSignature {
             sig_TX_s: sig_TX_s_other,
         }: ShareSplitSignature,
-    ) -> anyhow::Result<State2> {
+    ) -> Result<State2> {
         self.TX_s
             .verify_sig(self.X_other.clone(), &sig_TX_s_other)
             .context("failed to verify sig_TX_s sent by counterparty")?;
@@ -422,7 +419,7 @@ impl State2 {
         ShareCommitEncryptedSignature {
             encsig_TX_c: encsig_TX_c_other,
         }: ShareCommitEncryptedSignature,
-    ) -> anyhow::Result<State3> {
+    ) -> Result<State3> {
         self.TX_c
             .verify_encsig(
                 self.X_other.clone(),
@@ -487,7 +484,7 @@ impl State3 {
     pub fn interpret(
         self,
         RevealRevocationSecretKey { r: r_other }: RevealRevocationSecretKey,
-    ) -> anyhow::Result<Channel> {
+    ) -> Result<Channel> {
         StandardChannelState::from(self.current_state.clone())
             .R_other
             .verify_revocation_secret_key(&r_other)?;
@@ -543,7 +540,7 @@ impl WithPtlc<State1> {
         self.state.compose()
     }
 
-    pub fn interpret(self, message: ShareSplitSignature) -> anyhow::Result<WithPtlc<State2>> {
+    pub fn interpret(self, message: ShareSplitSignature) -> Result<WithPtlc<State2>> {
         let state = self.state.interpret(message)?;
 
         Ok(WithPtlc {
@@ -564,10 +561,7 @@ impl WithPtlc<State2> {
         self.state.compose()
     }
 
-    pub fn interpret(
-        self,
-        message: ShareCommitEncryptedSignature,
-    ) -> anyhow::Result<WithPtlc<State3>> {
+    pub fn interpret(self, message: ShareCommitEncryptedSignature) -> Result<WithPtlc<State3>> {
         let state = self.state.interpret(message)?;
 
         Ok(WithPtlc {
@@ -588,7 +582,7 @@ impl WithPtlc<State3> {
         self.state.compose()
     }
 
-    pub fn interpret(self, message: RevealRevocationSecretKey) -> anyhow::Result<Channel> {
+    pub fn interpret(self, message: RevealRevocationSecretKey) -> Result<Channel> {
         let mut channel = self.state.interpret(message)?;
 
         let current_state = ChannelState::WithPtlc {
