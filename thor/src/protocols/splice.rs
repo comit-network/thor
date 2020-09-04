@@ -16,9 +16,10 @@ use bitcoin::{
 };
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use miniscript::Descriptor;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct Message0 {
     R: RevocationPublicKey,
@@ -27,19 +28,19 @@ pub struct Message0 {
     splice_in: Option<SpliceIn>,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct Message1 {
     sig_TX_s: Signature,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct Message2 {
     encsig_TX_c: EncryptedSignature,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct Message3 {
     splice_transaction_signature: Signature,
@@ -65,7 +66,7 @@ pub(crate) struct State0 {
     splice_in_self: Option<SpliceIn>,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct SpliceIn {
     #[cfg_attr(

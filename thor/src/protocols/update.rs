@@ -9,9 +9,10 @@ use crate::{
 use anyhow::{bail, Context, Result};
 use bitcoin::Address;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
+use serde::{Deserialize, Serialize};
 
 /// First message of the channel update protocol.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct ShareKeys {
     R: RevocationPublicKey,
@@ -19,21 +20,21 @@ pub struct ShareKeys {
 }
 
 /// Second message of the channel update protocol.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct ShareSplitSignature {
     sig_TX_s: Signature,
 }
 
 /// Third message of the channel update protocol.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct ShareCommitEncryptedSignature {
     encsig_TX_c: EncryptedSignature,
 }
 
 /// Fourth and last message of the channel update protocol.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct RevealRevocationSecretKey {
     r: RevocationSecretKey,
@@ -160,7 +161,7 @@ pub enum State1Kind {
 
 /// Message sent by the PTLC funder in a channel update protocol execution
 /// involving a PTLC output.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct SignaturesPtlcFunder {
     encsig_TX_ptlc_redeem_funder: EncryptedSignature,
@@ -169,7 +170,7 @@ pub struct SignaturesPtlcFunder {
 
 /// Message sent by the PTLC redeemer in a channel update protocol execution
 /// involving a PTLC output.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct SignaturesPtlcRedeemer {
     sig_TX_ptlc_redeem_redeemer: Signature,

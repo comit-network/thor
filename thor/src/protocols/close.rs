@@ -6,6 +6,7 @@ use crate::{
 use anyhow::{Context, Result};
 use bitcoin::{Address, Transaction};
 use ecdsa_fun::Signature;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub(crate) struct State0 {
@@ -17,7 +18,7 @@ pub(crate) struct State0 {
     balance: Balance,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct Message0 {
     sig_close_transaction: Signature,

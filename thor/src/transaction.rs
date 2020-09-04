@@ -21,6 +21,7 @@ use ecdsa_fun::{
     Signature,
 };
 use miniscript::{self, Descriptor, Segwitv0};
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use signature::{verify_encsig, verify_sig};
 use std::{collections::HashMap, str::FromStr};
@@ -51,7 +52,7 @@ impl FundOutput {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct FundingTransaction {
     inner: Transaction,
@@ -161,7 +162,7 @@ impl FundingTransaction {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CommitTransaction {
     inner: Transaction,
@@ -387,7 +388,7 @@ impl CommitTransaction {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SplitTransaction {
     inner: Transaction,
@@ -950,7 +951,7 @@ pub(crate) fn balance(
     )
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct SpliceTransaction {
     inner: Transaction,

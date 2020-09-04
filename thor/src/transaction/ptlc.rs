@@ -11,10 +11,11 @@ use bitcoin::{
 };
 use ecdsa_fun::{self, adaptor::EncryptedSignature, fun::Point, Signature};
 use miniscript::Descriptor;
+use serde::{Deserialize, Serialize};
 use signature::{verify_encsig, verify_sig};
 use std::collections::HashMap;
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub(crate) struct RedeemTransaction {
     inner: Transaction,
@@ -86,7 +87,7 @@ impl RedeemTransaction {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub(crate) struct RefundTransaction {
     inner: Transaction,

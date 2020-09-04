@@ -34,6 +34,7 @@ use crate::{
     protocols::punish::punish,
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
+use ::serde::{Deserialize, Serialize};
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use bitcoin::{Address, Amount, Transaction, Txid};
@@ -50,7 +51,7 @@ use transaction::ptlc;
 /// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct Channel {
     x_self: OwnershipKeyPair,
@@ -628,7 +629,7 @@ impl Channel {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, EnumAsInner)]
 pub(crate) enum ChannelState {
     Standard(StandardChannelState),
@@ -660,7 +661,7 @@ impl AsRef<StandardChannelState> for ChannelState {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct StandardChannelState {
     /// Proportion of the coins in the channel that currently belong to either
@@ -710,7 +711,7 @@ impl StandardChannelState {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub(crate) struct RevokedState {
     channel_state: ChannelState,
@@ -732,7 +733,7 @@ impl RevokedState {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Balance {
     #[cfg_attr(
@@ -747,7 +748,7 @@ pub struct Balance {
     pub theirs: Amount,
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub enum SplitOutput {
     Ptlc(Ptlc),
@@ -761,7 +762,7 @@ pub enum SplitOutput {
     },
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub struct Ptlc {
     #[cfg_attr(
@@ -785,7 +786,7 @@ impl Ptlc {
 }
 
 /// Role in an atomic swap.
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, EnumAsInner)]
 pub enum Role {
     Alice { secret: PtlcSecret },
@@ -803,7 +804,7 @@ impl SplitOutput {
 
 /// All possible messages that can be sent between two parties using this
 /// library.
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, EnumAsInner)]
 pub enum Message {
     Create0(create::Message0),

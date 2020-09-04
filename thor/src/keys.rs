@@ -1,3 +1,4 @@
+use ::serde::{Deserialize, Serialize};
 #[cfg(test)]
 use anyhow::anyhow;
 use anyhow::{bail, Result};
@@ -11,14 +12,14 @@ use ecdsa_fun::{
 use sha2::Sha256;
 use std::fmt;
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct OwnershipKeyPair {
     secret_key: Scalar,
     public_key: Point,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct OwnershipPublicKey(Point);
 
@@ -76,18 +77,18 @@ impl From<Scalar> for OwnershipKeyPair {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevocationKeyPair {
     secret_key: Scalar,
     public_key: Point,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevocationSecretKey(Scalar);
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevocationPublicKey(Point);
 
@@ -154,7 +155,7 @@ impl From<RevocationSecretKey> for RevocationKeyPair {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct PublishingKeyPair {
     secret_key: Scalar,
@@ -164,7 +165,7 @@ pub struct PublishingKeyPair {
 #[derive(Clone, Debug)]
 pub struct PublishingSecretKey(Scalar);
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct PublishingPublicKey(Point);
 
@@ -240,7 +241,7 @@ impl fmt::Display for PublishingPublicKey {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct PtlcSecret(Scalar);
 
@@ -256,7 +257,7 @@ impl PtlcSecret {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PtlcPoint(Point);
 
