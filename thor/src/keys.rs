@@ -1,3 +1,5 @@
+#[cfg(test)]
+use anyhow::anyhow;
 use anyhow::{bail, Result};
 use bitcoin::{hashes::Hash, SigHash};
 use ecdsa_fun::{
@@ -314,8 +316,7 @@ pub fn point_from_str(from: &str) -> Result<Point> {
     let mut bytes = [0u8; 33];
     bytes.copy_from_slice(point.as_slice());
 
-    let point =
-        Point::from_bytes(bytes).ok_or_else(|| anyhow::anyhow!("string slice is not a Point"))?;
+    let point = Point::from_bytes(bytes).ok_or_else(|| anyhow!("string slice is not a Point"))?;
 
     Ok(point)
 }

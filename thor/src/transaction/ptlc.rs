@@ -5,7 +5,7 @@ use crate::{
     Ptlc, PtlcPoint, TX_FEE,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use bitcoin::{
     util::bip143::SighashComponents, Address, OutPoint, Script, SigHash, Transaction, TxIn, TxOut,
 };
@@ -169,7 +169,7 @@ pub(crate) fn spend_transaction(
         .output
         .iter()
         .position(|output| output.script_pubkey == ptlc_output_descriptor.script_pubkey())
-        .ok_or_else(|| anyhow::anyhow!("TX_s does not contain PTLC output"))?;
+        .ok_or_else(|| anyhow!("TX_s does not contain PTLC output"))?;
 
     #[allow(clippy::cast_possible_truncation)]
     let input = TxIn {

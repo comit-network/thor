@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
@@ -39,7 +39,7 @@ impl SendMessage for Transport {
         self.sender
             .send(str)
             .await
-            .map_err(|_| anyhow::anyhow!("failed to send message"))
+            .map_err(|_| anyhow!("failed to send message"))
     }
 }
 
@@ -50,7 +50,7 @@ impl ReceiveMessage for Transport {
             .receiver
             .next()
             .await
-            .ok_or_else(|| anyhow::anyhow!("failed to receive message"))?;
+            .ok_or_else(|| anyhow!("failed to receive message"))?;
         let message = serde_json::from_str(&str).context("failed to decode message")?;
         Ok(message)
     }

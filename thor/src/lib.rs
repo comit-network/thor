@@ -34,7 +34,7 @@ use crate::{
     protocols::punish::punish,
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use bitcoin::{Address, Amount, Transaction, Txid};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
@@ -201,7 +201,7 @@ impl Channel {
         let Balance { ours, theirs } = self.balance();
 
         let theirs = theirs.checked_sub(ptlc_amount).ok_or_else(|| {
-            anyhow::anyhow!(
+            anyhow!(
                 "Bob's {} balance cannot cover PTLC output amount: {}",
                 theirs,
                 ptlc_amount
@@ -315,7 +315,7 @@ impl Channel {
             let Balance { ours, theirs } = self.balance();
 
             let ours = ours.checked_sub(ptlc_amount).ok_or_else(|| {
-                anyhow::anyhow!(
+                anyhow!(
                     "Bob's {} balance cannot cover PTLC output amount: {}",
                     ours,
                     ptlc_amount

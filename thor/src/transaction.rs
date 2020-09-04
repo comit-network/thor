@@ -5,7 +5,7 @@ use crate::{
     },
     signature, Balance, Ptlc, SplitOutput, TX_FEE,
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use arrayvec::ArrayVec;
 use bitcoin::{
     consensus::encode::serialize,
@@ -69,7 +69,7 @@ impl FundingTransaction {
         channel_balance: [(OwnershipPublicKey, Amount); 2],
     ) -> Result<Self> {
         if input_psbts.is_empty() {
-            anyhow::bail!("Cannot build a transaction without inputs")
+            bail!("Cannot build a transaction without inputs")
         }
 
         // Sort the tuples of arguments based on the ascending lexicographical order of
@@ -153,7 +153,7 @@ impl FundingTransaction {
 
     pub fn into_psbt(self) -> Result<PartiallySignedTransaction> {
         PartiallySignedTransaction::from_unsigned_tx(self.inner)
-            .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
+            .map_err(|_| anyhow!("could not convert to psbt"))
     }
 
     pub fn txid(&self) -> Txid {
@@ -973,7 +973,7 @@ impl SpliceTransaction {
         channel_balance: [(OwnershipPublicKey, Amount); 2],
     ) -> Result<Self> {
         if inputs.is_empty() {
-            anyhow::bail!("Cannot build a transaction without inputs")
+            bail!("Cannot build a transaction without inputs")
         }
 
         // Sort the tuples of arguments based on the ascending lexicographical order of
@@ -1032,7 +1032,7 @@ impl SpliceTransaction {
 
     pub fn into_psbt(self) -> Result<PartiallySignedTransaction> {
         PartiallySignedTransaction::from_unsigned_tx(self.inner)
-            .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
+            .map_err(|_| anyhow!("could not convert to psbt"))
     }
 
     fn compute_digest(&self, previous_TX_f: &FundingTransaction) -> SigHash {

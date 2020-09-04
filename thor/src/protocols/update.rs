@@ -6,7 +6,7 @@ use crate::{
     transaction::{balance, ptlc, CommitTransaction, FundingTransaction, SplitTransaction},
     Channel, ChannelState, Ptlc, RevokedState, SplitOutput, StandardChannelState,
 };
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use bitcoin::Address;
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
@@ -139,7 +139,7 @@ impl State0 {
             Some(ptlc) if ptlc.X_redeemer == self.x_self.public() => Ok(
                 State1Kind::State1PtlcRedeemer(State1PtlcRedeemer::new(state, ptlc)?),
             ),
-            _ => anyhow::bail!("ownership of PTLC output is not shared by X_self"),
+            _ => bail!("ownership of PTLC output is not shared by X_self"),
         }
     }
 }
