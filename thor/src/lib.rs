@@ -35,6 +35,7 @@ use crate::{
     transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
 };
 use anyhow::{anyhow, bail, Result};
+use async_trait::async_trait;
 use bitcoin::{Address, Amount, Transaction, Txid};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
@@ -61,22 +62,22 @@ pub struct Channel {
     revoked_states: Vec<RevokedState>,
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait NewAddress {
     async fn new_address(&self) -> Result<Address>;
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait BroadcastSignedTransaction {
     async fn broadcast_signed_transaction(&self, transaction: Transaction) -> Result<()>;
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait SendMessage {
     async fn send_message(&mut self, message: Message) -> Result<()>;
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait ReceiveMessage {
     async fn receive_message(&mut self) -> Result<Message>;
 }

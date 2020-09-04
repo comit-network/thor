@@ -7,6 +7,7 @@ use crate::{
     Balance, Channel, ChannelState, SplitOutput, StandardChannelState,
 };
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 
@@ -64,7 +65,7 @@ pub(crate) struct State0 {
     time_lock: u32,
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait BuildFundingPSBT {
     async fn build_funding_psbt(
         &self,
@@ -369,7 +370,7 @@ pub(crate) struct Party5 {
 }
 
 /// Sign one of the inputs of the `FundingTransaction`.
-#[async_trait::async_trait]
+#[async_trait]
 pub trait SignFundingPSBT {
     async fn sign_funding_psbt(
         &self,

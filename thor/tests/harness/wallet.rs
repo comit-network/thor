@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
@@ -35,7 +36,7 @@ pub async fn make_wallets(
     Ok((alice, bob))
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl BuildFundingPSBT for Wallet {
     async fn build_funding_psbt(
         &self,
@@ -51,7 +52,7 @@ impl BuildFundingPSBT for Wallet {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl SignFundingPSBT for Wallet {
     async fn sign_funding_psbt(
         &self,
@@ -70,7 +71,7 @@ impl SignFundingPSBT for Wallet {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl BroadcastSignedTransaction for Wallet {
     async fn broadcast_signed_transaction(&self, transaction: bitcoin::Transaction) -> Result<()> {
         let _txid = self.0.send_raw_transaction(transaction).await?;
@@ -85,7 +86,7 @@ impl BroadcastSignedTransaction for Wallet {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl NewAddress for Wallet {
     async fn new_address(&self) -> Result<Address> {
         self.0.new_address().await.map_err(Into::into)

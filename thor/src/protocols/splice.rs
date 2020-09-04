@@ -10,6 +10,7 @@ use crate::{
     StandardChannelState,
 };
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use bitcoin::{
     consensus::serialize, util::psbt::PartiallySignedTransaction, Address, Amount, Transaction,
 };
@@ -79,7 +80,7 @@ pub struct SpliceIn {
     pub input_psbt: PartiallySignedTransaction,
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait BuildSplicePSBT {
     async fn build_funding_psbt(
         &self,
