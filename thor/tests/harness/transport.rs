@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use futures::{
-    channel::mpsc::{Receiver, Sender},
+    channel::mpsc::{self, Receiver, Sender},
     SinkExt, StreamExt,
 };
 use thor::{Message, ReceiveMessage, SendMessage};
@@ -17,8 +17,8 @@ pub struct Transport {
 /// parties, allowing them to send and receive `thor::Message`s to and from each
 /// other.
 pub fn make_transports() -> (Transport, Transport) {
-    let (alice_sender, bob_receiver) = futures::channel::mpsc::channel(5);
-    let (bob_sender, alice_receiver) = futures::channel::mpsc::channel(5);
+    let (alice_sender, bob_receiver) = mpsc::channel(5);
+    let (bob_sender, alice_receiver) = mpsc::channel(5);
 
     let alice_transport = Transport {
         sender: alice_sender,
