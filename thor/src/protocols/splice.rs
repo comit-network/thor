@@ -168,18 +168,8 @@ impl State0 {
         let mut our_balance = self.previous_balance.ours;
         let mut their_balance = self.previous_balance.theirs;
 
-        // TODO: Prevent the same party to splice-in and out in the same transaction
         let mut splice_outputs = vec![];
-        if let Some(tx_out) = splice_out_other {
-            if tx_out.value > self.previous_balance.theirs.as_sat() {
-                anyhow::bail!("Counterpart is splicing out more than they have");
-            } else {
-                // Need to pay the transaction fee, taking it out of the splice out.
-                // TODO: split between splice in and splice out if there is both
-                their_balance -= Amount::from_sat(tx_out.value) + Amount::from_sat(TX_FEE);
-                splice_outputs.push(tx_out);
-            }
-        }
+        let mut splice_in_inputs = vec![];
 
         if let Some(tx_out) = self.splice_out_self {
             if tx_out.value > self.previous_balance.ours.as_sat() {
@@ -190,20 +180,20 @@ impl State0 {
             }
         }
 
-        let previous_funding_txin = self.previous_tx_f.as_txin();
-        let previous_funding_psbt = PartiallySignedTransaction::from_unsigned_tx(Transaction {
-            version: 2,
-            lock_time: 0,
-            input: vec![previous_funding_txin],
-            output: vec![],
-        })
-        .expect("Only fails if script_sig or witness is empty which is not the case.");
-
-        let mut splice_in_inputs = vec![];
-
         if let Some(splice_in) = self.splice_in_self.clone() {
             splice_in_inputs.push(splice_in.input_psbt);
             our_balance += splice_in.amount;
+        }
+
+        if let Some(tx_out) = splice_out_other {
+            if tx_out.value > self.previous_balance.theirs.as_sat() {
+                anyhow::bail!("Counterpart is splicing out more than they have");
+            } else {
+                // Need to pay the transaction fee, taking it out of the splice out.
+                // TODO: split between splice in and splice out if there is both
+                their_balance -= Amount::from_sat(tx_out.value) + Amount::from_sat(TX_FEE);
+                splice_outputs.push(tx_out);
+            }
         }
 
         if let Some(splice_in) = splice_in_other {
@@ -220,6 +210,15 @@ impl State0 {
                 .expect("comparison is possible")
         });
 
+        let previous_funding_txin = self.previous_tx_f.as_txin();
+        let previous_funding_psbt = PartiallySignedTransaction::from_unsigned_tx(Transaction {
+            version: 2,
+            lock_time: 0,
+            input: vec![previous_funding_txin],
+            output: vec![],
+        })
+        .expect("Only fails if script_sig or witness is empty which is not the case.");
+
         // The previous funding psbt MUST be the first input
         let mut inputs = vec![previous_funding_psbt];
 
@@ -234,8 +233,6 @@ impl State0 {
             (self.x_self.public(), balance.ours),
             (self.X_other.clone(), balance.theirs),
         ])?;
-
-        // TODO: Clean-up the signature/Psbt mix (if possible)
 
         // Signed to spend tx_f
         let sig_tx_f = tx_f.sign_once(self.x_self.clone(), &self.previous_tx_f);
