@@ -10,7 +10,6 @@ use crate::{
     StandardChannelState, TX_FEE,
 };
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use bitcoin::{
     consensus::serialize, util::psbt::PartiallySignedTransaction, Address, Amount, Transaction,
     TxOut,
@@ -90,15 +89,6 @@ impl Default for Splice {
     fn default() -> Self {
         Splice::None
     }
-}
-
-#[async_trait]
-pub trait BuildSplicePsbt {
-    async fn build_funding_psbt(
-        &self,
-        output_address: Address,
-        output_amount: Amount,
-    ) -> Result<PartiallySignedTransaction>;
 }
 
 impl State0 {
@@ -515,7 +505,7 @@ impl State3 {
     }
 }
 
-pub fn add_signatures(
+fn add_signatures(
     mut transaction: Transaction,
     input_descriptor: Descriptor<bitcoin::PublicKey>,
     (X_0, sig_0): (OwnershipPublicKey, Signature),
