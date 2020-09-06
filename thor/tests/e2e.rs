@@ -7,7 +7,7 @@ use bitcoin::{Amount, TxOut};
 use bitcoin_harness::{self, Bitcoind};
 use genawaiter::GeneratorState;
 use harness::{build_runtime, generate_balances, make_transports, make_wallets, Transport};
-use thor::{Balance, Channel, PtlcPoint, PtlcSecret};
+use thor::{Balance, Channel, PtlcPoint, PtlcSecret, Splice};
 
 #[test]
 fn e2e_channel_creation() {
@@ -522,10 +522,9 @@ async fn e2e_splice_in() {
     let alice_splice = alice_channel.splice(
         &mut alice_transport,
         &alice_wallet,
-        Some(alice_splice_in),
-        None,
+        Splice::In(alice_splice_in),
     );
-    let bob_splice = bob_channel.splice(&mut bob_transport, &bob_wallet, Some(bob_splice_in), None);
+    let bob_splice = bob_channel.splice(&mut bob_transport, &bob_wallet, Splice::In(bob_splice_in));
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_splice, bob_splice)
         .await
@@ -729,16 +728,15 @@ async fn e2e_splice_out() {
     //  Bob withdraws 1.2BTC, decreasing his channel balance to 0.1 BTC
     let bob_splice_address = bob_wallet.0.new_address().await.unwrap();
     let bob_splice_out_amount = Amount::from_btc(1.2).unwrap();
-    let bob_splice_out = TxOut {
+    let bob_splice = Splice::Out(TxOut {
         script_pubkey: bob_splice_address.script_pubkey(),
         value: bob_splice_out_amount.as_sat(),
-    };
+    });
 
     let before_splice_bob_balance = bob_wallet.0.balance().await.unwrap();
 
-    let alice_splice = alice_channel.splice(&mut alice_transport, &alice_wallet, None, None);
-    let bob_splice =
-        bob_channel.splice(&mut bob_transport, &bob_wallet, None, Some(bob_splice_out));
+    let alice_splice = alice_channel.splice(&mut alice_transport, &alice_wallet, Splice::None);
+    let bob_splice = bob_channel.splice(&mut bob_transport, &bob_wallet, bob_splice);
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_splice, bob_splice)
         .await
@@ -950,10 +948,9 @@ async fn e2e_channel_splice_in_and_force_close() {
     let alice_splice = alice_channel.splice(
         &mut alice_transport,
         &alice_wallet,
-        Some(alice_splice_in),
-        None,
+        Splice::In(alice_splice_in),
     );
-    let bob_splice = bob_channel.splice(&mut bob_transport, &bob_wallet, None, None);
+    let bob_splice = bob_channel.splice(&mut bob_transport, &bob_wallet, Splice::None);
 
     let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_splice, bob_splice)
         .await

@@ -533,13 +533,7 @@ impl Channel {
     ///
     /// Create a new funding transaction using a previous funding transaction as
     /// input. Also inject own funds to channel by passing a splice-in amount.
-    pub async fn splice<T, W>(
-        self,
-        transport: &mut T,
-        wallet: &W,
-        splice_in: Option<Amount>,
-        splice_out: Option<TxOut>,
-    ) -> Result<Self>
+    pub async fn splice<T, W>(self, transport: &mut T, wallet: &W, splice: Splice) -> Result<Self>
     where
         W: BroadcastSignedTransaction + BuildFundingPsbt + SignFundingPsbt,
         T: SendMessage + ReceiveMessage,
@@ -561,8 +555,7 @@ impl Channel {
             self.tx_f_body,
             x_self,
             X_other,
-            splice_in,
-            splice_out,
+            splice,
             wallet,
         )
         .await?;
@@ -589,6 +582,14 @@ impl Channel {
 
         Ok(channel)
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum Splice {
+    /// Useful if the other party wants to splice in or out
+    None,
+    In(Amount),
+    Out(TxOut),
 }
 
 #[allow(clippy::large_enum_variant)]
