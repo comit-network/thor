@@ -675,7 +675,7 @@ pub struct StandardChannelState {
     balance: Balance,
     TX_c: CommitTransaction,
     /// Encrypted signature received from the counterparty. It can be decrypted
-    /// using our `PublishingSecretkey` and used to sign `TX_c`. Keep in mind,
+    /// using our `PublishingSecretKey` and used to sign `TX_c`. Keep in mind,
     /// that publishing a revoked `TX_c` will allow the counterparty to punish
     /// us.
     encsig_TX_c_other: EncryptedSignature,
@@ -725,7 +725,7 @@ pub(crate) struct RevokedState {
 impl RevokedState {
     /// Add signatures to the `CommitTransaction`. Publishing the resulting
     /// transaction is punishable by the counterparty, as they can recover the
-    /// `PublishingSecretkey` from it and they already know the
+    /// `PublishingSecretKey` from it and they already know the
     /// `RevocationSecretKey`, since this state has already been revoked.
     pub fn signed_TX_c(
         &self,
