@@ -398,7 +398,7 @@ pub(crate) struct SplitTransaction {
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
-pub enum Error {
+pub(crate) enum Error {
     #[error(
     "input amount {input} does not cover total transaction output amount {output} and fee {fee}"
     )]
@@ -654,7 +654,7 @@ impl From<SplitTransaction> for Transaction {
 pub(crate) struct PunishTransaction(Transaction);
 
 #[derive(Debug, thiserror::Error)]
-pub enum PunishError {
+pub(crate) enum PunishError {
     #[error("no signatures found in witness stack")]
     NoSignatures,
     #[error("could not recover PublishingSecretKey from signatures in transaction")]
