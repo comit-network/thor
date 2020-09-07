@@ -17,7 +17,6 @@ use bitcoin::{
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use miniscript::Descriptor;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
@@ -473,7 +472,7 @@ impl State3 {
         };
 
         // Add the signatures to spend the previous tx_f
-        let splice_transaction = add_signatures(
+        let splice_transaction = SpliceTransaction::add_signatures(
             splice_transaction.extract_tx(),
             self.previous_tx_f_output_descriptor,
             (self.x_self.public(), self.splice_transaction_signature),
@@ -502,34 +501,4 @@ impl State3 {
             splice_transaction,
         ))
     }
-}
-
-fn add_signatures(
-    mut transaction: Transaction,
-    input_descriptor: Descriptor<bitcoin::PublicKey>,
-    (X_0, sig_0): (OwnershipPublicKey, Signature),
-    (X_1, sig_1): (OwnershipPublicKey, Signature),
-) -> Result<Transaction> {
-    let satisfier = {
-        let mut satisfier = HashMap::with_capacity(2);
-
-        let X_0 = ::bitcoin::PublicKey {
-            compressed: true,
-            key: X_0.into(),
-        };
-        let X_1 = ::bitcoin::PublicKey {
-            compressed: true,
-            key: X_1.into(),
-        };
-
-        // The order in which these are inserted doesn't matter
-        satisfier.insert(X_0, (sig_0.into(), ::bitcoin::SigHashType::All));
-        satisfier.insert(X_1, (sig_1.into(), ::bitcoin::SigHashType::All));
-
-        satisfier
-    };
-
-    input_descriptor.satisfy(&mut transaction.input[0], satisfier)?;
-
-    Ok(transaction)
 }

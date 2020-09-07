@@ -1058,6 +1058,36 @@ impl SpliceTransaction {
         let digest = self.compute_digest(previous_tx_f);
         x_self.sign(digest)
     }
+
+    pub fn add_signatures(
+        mut transaction: Transaction,
+        input_descriptor: Descriptor<bitcoin::PublicKey>,
+        (X_0, sig_0): (OwnershipPublicKey, Signature),
+        (X_1, sig_1): (OwnershipPublicKey, Signature),
+    ) -> anyhow::Result<Transaction> {
+        let satisfier = {
+            let mut satisfier = HashMap::with_capacity(2);
+
+            let X_0 = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_0.into(),
+            };
+            let X_1 = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_1.into(),
+            };
+
+            // The order in which these are inserted doesn't matter
+            satisfier.insert(X_0, (sig_0.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_1, (sig_1.into(), ::bitcoin::SigHashType::All));
+
+            satisfier
+        };
+
+        input_descriptor.satisfy(&mut transaction.input[0], satisfier)?;
+
+        Ok(transaction)
+    }
 }
 
 impl From<SpliceTransaction> for FundingTransaction {
