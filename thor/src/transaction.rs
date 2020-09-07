@@ -86,8 +86,7 @@ impl FundingTransaction {
         let [(X_0, amount_0), (X_1, amount_1)] = channel_balance;
         let fund_output_amount = amount_0 + amount_1;
 
-        let fund_output = FundOutput::new([X_0, X_1]);
-        let fund_output_descriptor = fund_output.descriptor();
+        let fund_output_descriptor = FundOutput::new([X_0, X_1]).descriptor();
 
         // Extract inputs and change_outputs from each party's input_psbt
         let (inputs, change_outputs) = input_psbts
