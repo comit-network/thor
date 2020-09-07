@@ -7,13 +7,14 @@ use bitcoin::{Amount, TxOut};
 use bitcoin_harness::{self, Bitcoind};
 use genawaiter::GeneratorState;
 use harness::{build_runtime, generate_balances, make_transports, make_wallets, Transport};
+use testcontainers::clients::Cli;
 use thor::{Balance, Channel, PtlcPoint, PtlcSecret, Splice};
 
 #[test]
 fn e2e_channel_creation() {
     let mut runtime = build_runtime();
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     runtime.block_on(bitcoind.init(5)).unwrap();
 
@@ -45,7 +46,7 @@ fn e2e_channel_creation() {
 fn e2e_channel_update() {
     let mut runtime = build_runtime();
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     runtime.block_on(bitcoind.init(5)).unwrap();
 
@@ -111,7 +112,7 @@ fn e2e_channel_update() {
 fn e2e_punish_publication_of_revoked_commit_transaction() {
     let mut runtime = build_runtime();
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     runtime.block_on(bitcoind.init(5)).unwrap();
 
@@ -202,7 +203,7 @@ fn e2e_punish_publication_of_revoked_commit_transaction() {
 fn e2e_channel_collaborative_close() {
     let mut runtime = build_runtime();
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     runtime.block_on(bitcoind.init(5)).unwrap();
 
@@ -264,7 +265,7 @@ fn e2e_channel_collaborative_close() {
 fn e2e_force_close_channel() {
     let mut runtime = build_runtime();
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     runtime.block_on(bitcoind.init(5)).unwrap();
 
@@ -325,7 +326,7 @@ fn e2e_force_close_after_updates() {
 
     // Arrange:
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     runtime.block_on(bitcoind.init(5)).unwrap();
 
@@ -420,7 +421,7 @@ fn e2e_force_close_after_updates() {
 async fn e2e_splice_in() {
     // Arrange
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     bitcoind.init(5).await.unwrap();
 
@@ -824,7 +825,7 @@ async fn e2e_splice_out() {
 async fn e2e_channel_splice_in_and_force_close() {
     // Arrange
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     bitcoind.init(5).await.unwrap();
 
@@ -1020,7 +1021,7 @@ async fn e2e_channel_splice_in_and_force_close() {
 fn e2e_atomic_swap_happy() {
     let mut runtime = build_runtime();
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     runtime.block_on(bitcoind.init(5)).unwrap();
 
@@ -1115,7 +1116,7 @@ fn e2e_atomic_swap_happy() {
 fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
     let mut runtime = build_runtime();
 
-    let tc_client = testcontainers::clients::Cli::default();
+    let tc_client = Cli::default();
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     runtime.block_on(bitcoind.init(5)).unwrap();
 
