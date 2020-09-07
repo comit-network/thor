@@ -31,7 +31,8 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    protocols::punish::punish,
+    protocols::{close, create, punish::punish, splice, update},
+    signature::decrypt,
     transaction::{
         CommitTransaction, FundingTransaction, RedeemTransaction, RefundTransaction,
         SplitTransaction,
@@ -45,8 +46,6 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
 use futures::{future::Either, pin_mut, Future};
 use genawaiter::sync::Gen;
-use protocols::{close, create, splice, update};
-use signature::decrypt;
 
 // TODO: We should handle fees dynamically
 
