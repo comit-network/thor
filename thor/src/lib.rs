@@ -500,6 +500,7 @@ impl Channel {
         Ok(())
     }
 
+    /// Close the channel non-collaboratively.
     pub async fn force_close<W>(&self, wallet: &W) -> Result<()>
     where
         W: NewAddress + BroadcastSignedTransaction,
