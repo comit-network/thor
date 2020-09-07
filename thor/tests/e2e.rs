@@ -5,6 +5,7 @@ mod harness;
 use anyhow::Result;
 use bitcoin::{Amount, TxOut};
 use bitcoin_harness::{self, Bitcoind};
+use futures::future;
 use genawaiter::GeneratorState;
 use harness::{build_runtime, generate_balances, make_transports, make_wallets, Transport};
 use testcontainers::clients::Cli;
@@ -38,7 +39,7 @@ fn e2e_channel_creation() {
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (_alice_channel, _bob_channel) = runtime
-        .block_on(futures::future::try_join(alice_create, bob_create))
+        .block_on(future::try_join(alice_create, bob_create))
         .unwrap();
 }
 
@@ -70,7 +71,7 @@ fn e2e_channel_update() {
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, mut bob_channel) = runtime
-        .block_on(futures::future::try_join(alice_create, bob_create))
+        .block_on(future::try_join(alice_create, bob_create))
         .unwrap();
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
@@ -96,7 +97,7 @@ fn e2e_channel_update() {
     );
 
     runtime
-        .block_on(futures::future::try_join(alice_update, bob_update))
+        .block_on(future::try_join(alice_update, bob_update))
         .unwrap();
 
     // Assert expected balance changes
@@ -136,7 +137,7 @@ fn e2e_punish_publication_of_revoked_commit_transaction() {
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, mut bob_channel) = runtime
-        .block_on(futures::future::try_join(alice_create, bob_create))
+        .block_on(future::try_join(alice_create, bob_create))
         .unwrap();
 
     let after_open_balance_alice = runtime.block_on(alice_wallet.0.balance()).unwrap();
@@ -165,7 +166,7 @@ fn e2e_punish_publication_of_revoked_commit_transaction() {
     );
 
     runtime
-        .block_on(futures::future::try_join(alice_update, bob_update))
+        .block_on(future::try_join(alice_update, bob_update))
         .unwrap();
 
     // Alice attempts to cheat by publishing a revoked commit transaction
@@ -227,7 +228,7 @@ fn e2e_channel_collaborative_close() {
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (alice_channel, bob_channel) = runtime
-        .block_on(futures::future::try_join(alice_create, bob_create))
+        .block_on(future::try_join(alice_create, bob_create))
         .unwrap();
 
     let after_open_balance_alice = runtime.block_on(alice_wallet.0.balance()).unwrap();
@@ -237,7 +238,7 @@ fn e2e_channel_collaborative_close() {
     let bob_close = bob_channel.close(&mut bob_transport, &bob_wallet);
 
     runtime
-        .block_on(futures::future::try_join(alice_close, bob_close))
+        .block_on(future::try_join(alice_close, bob_close))
         .unwrap();
 
     let after_close_balance_alice = runtime.block_on(alice_wallet.0.balance()).unwrap();
@@ -289,7 +290,7 @@ fn e2e_force_close_channel() {
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (alice_channel, _bob_channel) = runtime
-        .block_on(futures::future::try_join(alice_create, bob_create))
+        .block_on(future::try_join(alice_create, bob_create))
         .unwrap();
 
     let after_open_balance_alice = runtime.block_on(alice_wallet.0.balance()).unwrap();
@@ -354,7 +355,7 @@ fn e2e_force_close_after_updates() {
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, mut bob_channel) = runtime
-        .block_on(futures::future::try_join(alice_create, bob_create))
+        .block_on(future::try_join(alice_create, bob_create))
         .unwrap();
 
     let after_create_balance_alice = runtime.block_on(alice_wallet.0.balance()).unwrap();
@@ -384,7 +385,7 @@ fn e2e_force_close_after_updates() {
     );
 
     runtime
-        .block_on(futures::future::try_join(alice_update, bob_update))
+        .block_on(future::try_join(alice_update, bob_update))
         .unwrap();
 
     // Alice force closes the channel
@@ -449,9 +450,8 @@ async fn e2e_splice_in() {
     );
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
-    let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
-        .await
-        .unwrap();
+    let (mut alice_channel, mut bob_channel) =
+        future::try_join(alice_create, bob_create).await.unwrap();
 
     // Arrange: Save the fees for final asserts
 
@@ -487,9 +487,7 @@ async fn e2e_splice_in() {
         time_lock,
     );
 
-    futures::future::try_join(alice_update, bob_update)
-        .await
-        .unwrap();
+    future::try_join(alice_update, bob_update).await.unwrap();
 
     // Arrange: Save channel balances to check after the splice
 
@@ -515,9 +513,8 @@ async fn e2e_splice_in() {
     );
     let bob_splice = bob_channel.splice(&mut bob_transport, &bob_wallet, Splice::In(bob_splice_in));
 
-    let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_splice, bob_splice)
-        .await
-        .unwrap();
+    let (mut alice_channel, mut bob_channel) =
+        future::try_join(alice_splice, bob_splice).await.unwrap();
 
     // Assert: Channel balances are correct
 
@@ -567,9 +564,7 @@ async fn e2e_splice_in() {
         time_lock,
     );
 
-    futures::future::try_join(alice_update, bob_update)
-        .await
-        .unwrap();
+    future::try_join(alice_update, bob_update).await.unwrap();
 
     // Act: Collaboratively close the channel
 
@@ -787,9 +782,7 @@ async fn e2e_splice_out() {
     let alice_close = alice_channel.close(&mut alice_transport, &alice_wallet);
     let bob_close = bob_channel.close(&mut bob_transport, &bob_wallet);
 
-    futures::future::try_join(alice_close, bob_close)
-        .await
-        .unwrap();
+    future::try_join(alice_close, bob_close).await.unwrap();
 
     let after_close_balance_alice = alice_wallet.0.balance().await.unwrap();
     let after_close_balance_bob = bob_wallet.0.balance().await.unwrap();
@@ -853,9 +846,8 @@ async fn e2e_channel_splice_in_and_force_close() {
     );
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
-    let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_create, bob_create)
-        .await
-        .unwrap();
+    let (mut alice_channel, mut bob_channel) =
+        future::try_join(alice_create, bob_create).await.unwrap();
 
     // Assert: Channel balances are synced:
 
@@ -895,9 +887,7 @@ async fn e2e_channel_splice_in_and_force_close() {
         time_lock,
     );
 
-    futures::future::try_join(alice_update, bob_update)
-        .await
-        .unwrap();
+    future::try_join(alice_update, bob_update).await.unwrap();
 
     // Assert: Channel balances are correct
 
@@ -925,9 +915,8 @@ async fn e2e_channel_splice_in_and_force_close() {
     );
     let bob_splice = bob_channel.splice(&mut bob_transport, &bob_wallet, Splice::None);
 
-    let (mut alice_channel, mut bob_channel) = futures::future::try_join(alice_splice, bob_splice)
-        .await
-        .unwrap();
+    let (mut alice_channel, mut bob_channel) =
+        future::try_join(alice_splice, bob_splice).await.unwrap();
 
     // Assert: Channel balances are correct
 
@@ -971,9 +960,7 @@ async fn e2e_channel_splice_in_and_force_close() {
         time_lock,
     );
 
-    futures::future::try_join(alice_update, bob_update)
-        .await
-        .unwrap();
+    future::try_join(alice_update, bob_update).await.unwrap();
 
     // Assert: Channel balances are correct
 
@@ -1045,7 +1032,7 @@ fn e2e_atomic_swap_happy() {
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, mut bob_channel) = runtime
-        .block_on(futures::future::try_join(alice_create, bob_create))
+        .block_on(future::try_join(alice_create, bob_create))
         .unwrap();
 
     let after_open_balance_alice = runtime.block_on(alice_wallet.0.balance()).unwrap();
@@ -1080,7 +1067,7 @@ fn e2e_atomic_swap_happy() {
     );
 
     runtime
-        .block_on(futures::future::try_join(
+        .block_on(future::try_join(
             swap_beta_ptlc_alice,
             swap_beta_ptlc_bob_with_final_update,
         ))
@@ -1140,7 +1127,7 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
     let bob_create = Channel::create(&mut bob_transport, &bob_wallet, balance_bob, time_lock);
 
     let (mut alice_channel, mut bob_channel) = runtime
-        .block_on(futures::future::try_join(alice_create, bob_create))
+        .block_on(future::try_join(alice_create, bob_create))
         .unwrap();
 
     let after_open_balance_alice = runtime.block_on(alice_wallet.0.balance()).unwrap();
@@ -1177,7 +1164,7 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
     );
 
     runtime
-        .block_on(futures::future::try_join(
+        .block_on(future::try_join(
             swap_beta_ptlc_alice,
             swap_beta_ptlc_bob_without_final_update,
         ))
