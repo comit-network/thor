@@ -30,7 +30,7 @@ mod ptlc;
 pub(crate) use ptlc::{RedeemTransaction, RefundTransaction};
 
 #[derive(Clone, Debug)]
-pub(crate) struct FundOutput(miniscript::Descriptor<bitcoin::PublicKey>);
+pub(crate) struct FundOutput(Descriptor<bitcoin::PublicKey>);
 
 impl FundOutput {
     pub fn new(mut Xs: [OwnershipPublicKey; 2]) -> Self {
@@ -44,7 +44,7 @@ impl FundOutput {
         Self(descriptor)
     }
 
-    fn descriptor(&self) -> miniscript::Descriptor<bitcoin::PublicKey> {
+    fn descriptor(&self) -> Descriptor<bitcoin::PublicKey> {
         self.0.clone()
     }
 
@@ -57,7 +57,7 @@ impl FundOutput {
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct FundingTransaction {
     inner: Transaction,
-    fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+    fund_output_descriptor: Descriptor<bitcoin::PublicKey>,
     #[cfg_attr(
         feature = "serde",
         serde(with = "bitcoin::util::amount::serde::as_sat")
@@ -149,7 +149,7 @@ impl FundingTransaction {
         self.fund_output_amount
     }
 
-    pub fn fund_output_descriptor(&self) -> miniscript::Descriptor<bitcoin::PublicKey> {
+    pub fn fund_output_descriptor(&self) -> Descriptor<bitcoin::PublicKey> {
         self.fund_output_descriptor.clone()
     }
 
@@ -908,7 +908,7 @@ impl CloseTransaction {
 fn build_shared_output_descriptor(
     X_0: OwnershipPublicKey,
     X_1: OwnershipPublicKey,
-) -> miniscript::Descriptor<bitcoin::PublicKey> {
+) -> Descriptor<bitcoin::PublicKey> {
     // Describes the spending policy of the channel fund transaction TX_f.
     // For now we use `and(X_0, X_1)` - eventually we might want to replace this
     // with a threshold signature.
@@ -924,7 +924,7 @@ fn build_shared_output_descriptor(
     let miniscript = miniscript::Miniscript::<bitcoin::PublicKey, Segwitv0>::from_str(&miniscript)
         .expect("a valid miniscript");
 
-    miniscript::Descriptor::Wsh(miniscript)
+    Descriptor::Wsh(miniscript)
 }
 
 /// Calculate the balance held in the split outputs for the given final address
@@ -956,7 +956,7 @@ pub(crate) fn balance(
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct SpliceTransaction {
     inner: Transaction,
-    fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+    fund_output_descriptor: Descriptor<bitcoin::PublicKey>,
     #[cfg_attr(
         feature = "serde",
         serde(with = "bitcoin::util::amount::serde::as_sat")
