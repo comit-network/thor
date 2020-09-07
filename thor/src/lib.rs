@@ -726,7 +726,7 @@ impl RevokedState {
     pub fn signed_TX_c(
         &self,
         TX_f: &FundingTransaction,
-        x_self: keys::OwnershipKeyPair,
+        x_self: OwnershipKeyPair,
         X_other: OwnershipPublicKey,
     ) -> Result<Transaction> {
         StandardChannelState::from(self.channel_state.clone()).signed_TX_c(TX_f, &x_self, &X_other)
