@@ -107,7 +107,6 @@ impl State0 {
     where
         W: BuildFundingPsbt,
     {
-        // TODO: Prevent the same party to splice-in and out in the same transaction
         let splice_self = match splice_self {
             crate::Splice::Out(tx_out) => {
                 if tx_out.value > previous_balance.ours.as_sat() {
