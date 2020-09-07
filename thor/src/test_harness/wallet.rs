@@ -1,12 +1,12 @@
+use crate::{
+    BroadcastSignedTransaction, BuildFundingPsbt, GetRawTransaction, MedianTime, NewAddress,
+    SignFundingPsbt,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use bitcoin::{consensus, util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
-use thor::{
-    BroadcastSignedTransaction, BuildFundingPsbt, GetRawTransaction, MedianTime, NewAddress,
-    SignFundingPsbt,
-};
 
 pub struct Wallet(pub bitcoin_harness::Wallet);
 

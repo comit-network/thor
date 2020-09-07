@@ -1,128 +1,23 @@
 #![allow(non_snake_case)]
 
-mod harness;
-
-use thor::{Balance, Channel, PtlcPoint, PtlcSecret, Splice, TX_FEE};
-
-use harness::{
-    generate_balances, generate_expiries, make_transports, make_wallets, Transport, Wallet,
+use crate::{
+    test_harness::{
+        assert_channel_balances, create_channels, generate_expiries, init_bitcoind, init_cli,
+        update_balances, Transport, Wallet, FUND,
+    },
+    Channel, PtlcPoint, PtlcSecret, Splice, TX_FEE,
 };
 
 use anyhow::Result;
 use bitcoin::{Amount, TxOut};
-use bitcoin_harness::{self, Bitcoind};
 use futures::future;
 use genawaiter::GeneratorState;
 use spectral::prelude::*;
-use testcontainers::clients::Cli;
 
 // NOTE: For some reason running these tests overflows the stack. In order to
 // mitigate this run them with:
 //
 //     RUST_MIN_STACK=10000000 cargo test
-
-// Alice and Bob both fund the channel with this much.
-const FUND: Amount = Amount::ONE_BTC;
-
-async fn create_channels(
-    bitcoind: &Bitcoind<'_>,
-) -> (
-    Channel,
-    Channel,
-    Transport,
-    Transport,
-    Wallet,
-    Wallet,
-    u32,
-    Amount,
-) {
-    let (mut a_transport, mut b_transport) = make_transports();
-    let (a_balance, b_balance) = generate_balances(FUND);
-    let (a_wallet, b_wallet) = make_wallets(bitcoind, FUND)
-        .await
-        .expect("failed to make wallets");
-    let time_lock = 1;
-
-    let initial_balance = a_wallet.balance().await.unwrap();
-
-    let a_create = Channel::create(&mut a_transport, &a_wallet, a_balance, time_lock);
-    let b_create = Channel::create(&mut b_transport, &b_wallet, b_balance, time_lock);
-
-    let (a_channel, b_channel) = future::try_join(a_create, b_create)
-        .await
-        .expect("failed to create channels");
-
-    assert_channel_balances(&a_channel, &b_channel, FUND, FUND);
-
-    let final_balance = a_wallet.balance().await.unwrap();
-    let tx_fee = initial_balance - final_balance - FUND;
-
-    (
-        a_channel,
-        b_channel,
-        a_transport,
-        b_transport,
-        a_wallet,
-        b_wallet,
-        time_lock,
-        tx_fee,
-    )
-}
-
-fn assert_channel_balances(
-    a_channel: &Channel,
-    b_channel: &Channel,
-    a_balance: Amount,
-    b_balance: Amount,
-) {
-    assert_that!(a_channel.balance().ours).is_equal_to(a_balance);
-    assert_that!(a_channel.balance().theirs).is_equal_to(b_balance);
-
-    assert_that!(b_channel.balance().ours).is_equal_to(b_balance);
-    assert_that!(b_channel.balance().theirs).is_equal_to(a_balance);
-}
-
-fn init_cli() -> Cli {
-    Cli::default()
-}
-
-async fn init_bitcoind(tc_client: &Cli) -> Bitcoind<'_> {
-    let bitcoind = Bitcoind::new(tc_client, "0.19.1").expect("failed to create bitcoind");
-    let _ = bitcoind.init(5).await;
-
-    bitcoind
-}
-
-async fn update_balances(
-    a_channel: &mut Channel,
-    b_channel: &mut Channel,
-    a_transport: &mut Transport,
-    b_transport: &mut Transport,
-    a_balance: Amount,
-    b_balance: Amount,
-    time_lock: u32,
-) {
-    let a_update = a_channel.update_balance(
-        a_transport,
-        Balance {
-            ours: a_balance,
-            theirs: b_balance,
-        },
-        time_lock,
-    );
-    let b_update = b_channel.update_balance(
-        b_transport,
-        Balance {
-            ours: b_balance,
-            theirs: a_balance,
-        },
-        time_lock,
-    );
-
-    future::try_join(a_update, b_update)
-        .await
-        .expect("update failed");
-}
 
 #[tokio::test]
 async fn e2e_channel_update() {
@@ -458,6 +353,7 @@ async fn e2e_atomic_swap_happy() {
 
     let expiries = generate_expiries(&a_wallet).await.unwrap();
 
+    let hold_secret = false;
     let swap_beta_ptlc_alice = a_channel.swap_beta_ptlc_alice(
         &mut a_transport,
         &a_wallet,
@@ -466,6 +362,7 @@ async fn e2e_atomic_swap_happy() {
         expiries.alpha_absolute,
         expiries.split_transaction_relative,
         expiries.ptlc_absolute,
+        hold_secret,
     );
 
     let skip_final_update = false;
@@ -532,6 +429,7 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
 
     let expiries = generate_expiries(&a_wallet).await.unwrap();
 
+    let hold_secret = false;
     let swap_beta_ptlc_alice = a_channel.swap_beta_ptlc_alice(
         &mut a_transport,
         &a_wallet,
@@ -540,6 +438,7 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         expiries.alpha_absolute,
         expiries.split_transaction_relative,
         expiries.ptlc_absolute,
+        hold_secret,
     );
 
     let skip_final_update = true;
