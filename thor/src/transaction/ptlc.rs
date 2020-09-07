@@ -80,7 +80,6 @@ impl RedeemTransaction {
         };
 
         let mut transaction = self.inner.clone();
-
         self.input_descriptor
             .satisfy(&mut transaction.input[0], satisfier)?;
 
@@ -165,10 +164,8 @@ impl RefundTransaction {
             satisfier
         };
 
-        let mut transaction = self.inner.clone();
-
         self.input_descriptor
-            .satisfy(&mut transaction.input[0], satisfier)?;
+            .satisfy(&mut self.inner.input[0], satisfier)?;
 
         Ok(())
     }
@@ -178,7 +175,7 @@ pub(crate) fn spend_transaction(
     TX_s: &SplitTransaction,
     ptlc: Ptlc,
     refund_address: Address,
-    input_sequence: u32,
+    lock_time: u32,
 ) -> anyhow::Result<(Transaction, SigHash, Descriptor<bitcoin::PublicKey>)> {
     let mut Xs = [ptlc.X_funder, ptlc.X_redeemer];
     Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
@@ -196,7 +193,7 @@ pub(crate) fn spend_transaction(
     let input = TxIn {
         previous_output: OutPoint::new(TX_s.txid(), vout as u32),
         script_sig: Script::new(),
-        sequence: input_sequence,
+        sequence: 0xFFFF_FFFF,
         witness: Vec::new(),
     };
 
@@ -208,7 +205,7 @@ pub(crate) fn spend_transaction(
 
     let transaction = Transaction {
         version: 2,
-        lock_time: 0,
+        lock_time,
         input: vec![input.clone()],
         output: vec![output],
     };

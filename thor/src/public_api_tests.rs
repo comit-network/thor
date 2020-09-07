@@ -1,18 +1,15 @@
-#![allow(non_snake_case)]
-
-mod harness;
-
+use crate::{
+    test_harness::{
+        build_runtime, generate_balances, generate_expiries, make_transports, make_wallets,
+        swap_beta_ptlc_bob,
+    },
+    Balance, Channel, PtlcSecret,
+};
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
-use genawaiter::GeneratorState;
-use harness::{
-    build_runtime, generate_balances, generate_expiries, make_transports, make_wallets, Transport,
-    Wallet,
-};
-use thor::{Balance, Channel, PtlcPoint, PtlcSecret};
 
 #[test]
-fn e2e_channel_creation() {
+fn channel_creation() {
     let mut runtime = build_runtime();
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -44,7 +41,7 @@ fn e2e_channel_creation() {
 }
 
 #[test]
-fn e2e_channel_update() {
+fn channel_update() {
     let mut runtime = build_runtime();
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -110,7 +107,7 @@ fn e2e_channel_update() {
 }
 
 #[test]
-fn e2e_punish_publication_of_revoked_commit_transaction() {
+fn punish_publication_of_revoked_commit_transaction() {
     let mut runtime = build_runtime();
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -195,13 +192,13 @@ fn e2e_punish_publication_of_revoked_commit_transaction() {
     );
     assert_eq!(
         after_punish_balance_bob,
-        after_open_balance_bob + fund_amount_bob * 2 - Amount::from_sat(thor::TX_FEE) * 2,
+        after_open_balance_bob + fund_amount_bob * 2 - Amount::from_sat(crate::TX_FEE) * 2,
         "Bob should get all the money back after punishing Alice"
     );
 }
 
 #[test]
-fn e2e_channel_collaborative_close() {
+fn channel_collaborative_close() {
     let mut runtime = build_runtime();
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -248,7 +245,7 @@ fn e2e_channel_collaborative_close() {
     // the `FundingTransaction`. Collaboratively closing the channel requires
     // publishing a single `CloseTransaction`, so each party pays
     // one half `thor::TX_FEE`, which is deducted from their output.
-    let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE) / 2;
+    let fee_deduction_per_output = Amount::from_sat(crate::TX_FEE) / 2;
 
     assert_eq!(
         after_close_balance_alice,
@@ -263,7 +260,7 @@ fn e2e_channel_collaborative_close() {
 }
 
 #[test]
-fn e2e_force_close_channel() {
+fn force_close_channel() {
     let mut runtime = build_runtime();
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -307,7 +304,7 @@ fn e2e_force_close_channel() {
     // the `FundingTransaction`. Force closing the channel requires publishing
     // both the `CommitTransaction` and the `SplitTransaction`, so each party pays
     // one `thor::TX_FEE`, which is deducted from their output.
-    let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE);
+    let fee_deduction_per_output = Amount::from_sat(crate::TX_FEE);
 
     assert_eq!(
         after_close_balance_alice,
@@ -322,7 +319,7 @@ fn e2e_force_close_channel() {
 }
 
 #[test]
-fn e2e_force_close_after_updates() {
+fn force_close_after_updates() {
     let mut runtime = build_runtime();
 
     // Arrange:
@@ -404,7 +401,7 @@ fn e2e_force_close_after_updates() {
     // publishing two transactions: a `CommitTransaction` and a `SplitTransaction`,
     // so each party pays a full `thor::TX_FEE`, which is deducted from their
     // output.
-    let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE);
+    let fee_deduction_per_output = Amount::from_sat(crate::TX_FEE);
 
     assert_eq!(
         after_close_balance_alice,
@@ -419,7 +416,7 @@ fn e2e_force_close_after_updates() {
 }
 
 #[tokio::test]
-async fn e2e_splice_in() {
+async fn splice_in() {
     // Arrange
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -613,7 +610,7 @@ async fn e2e_splice_in() {
     // the `FundingTransaction`. Collaboratively closing the channel requires
     // publishing a single `CloseTransaction`, so each party pays
     // one half `thor::TX_FEE`, which is deducted from their output.
-    let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE / 2);
+    let fee_deduction_per_output = Amount::from_sat(crate::TX_FEE / 2);
 
     // Alice paid Bob total 1.3 BTC
     let alice_paid_bob = Amount::from_btc(1.3).unwrap();
@@ -634,7 +631,7 @@ async fn e2e_splice_in() {
 }
 
 #[tokio::test]
-async fn e2e_channel_splice_in_and_force_close() {
+async fn channel_splice_in_and_force_close() {
     // Arrange
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -803,7 +800,7 @@ async fn e2e_channel_splice_in_and_force_close() {
     // publishing two transactions: a `CommitTransaction` and a `SplitTransaction`,
     // so each party pays a full `thor::TX_FEE`, which is deducted from their
     // output.
-    let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE);
+    let fee_deduction_per_output = Amount::from_sat(crate::TX_FEE);
 
     let alice_paid_bob = Amount::from_btc(0.9).unwrap();
     let bob_paid_alice = Amount::from_btc(0.3).unwrap();
@@ -827,7 +824,7 @@ async fn e2e_channel_splice_in_and_force_close() {
 // TODO: Fund alpha ledger (Bitcoin on-chain) and use the secret to redeem it as
 // Bob
 #[test]
-fn e2e_atomic_swap_happy() {
+fn atomic_swap_happy() {
     let mut runtime = build_runtime();
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -866,6 +863,7 @@ fn e2e_atomic_swap_happy() {
 
     let expiries = runtime.block_on(generate_expiries(&alice_wallet)).unwrap();
 
+    let hold_secret = false;
     let swap_beta_ptlc_alice = alice_channel.swap_beta_ptlc_alice(
         &mut alice_transport,
         &alice_wallet,
@@ -874,6 +872,7 @@ fn e2e_atomic_swap_happy() {
         expiries.alpha_absolute,
         expiries.split_transaction_relative,
         expiries.ptlc_absolute,
+        hold_secret,
     );
 
     let skip_final_update = false;
@@ -908,7 +907,7 @@ fn e2e_atomic_swap_happy() {
     // publishing two transactions: a `CommitTransaction` and a `SplitTransaction`,
     // so each party pays a full `thor::TX_FEE`, which is deducted from their
     // output.
-    let fee_deduction_per_output = Amount::from_sat(thor::TX_FEE);
+    let fee_deduction_per_output = Amount::from_sat(crate::TX_FEE);
 
     assert_eq!(
         after_close_balance_alice,
@@ -923,7 +922,7 @@ fn e2e_atomic_swap_happy() {
 }
 
 #[test]
-fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
+fn atomic_swap_unresponsive_bob_after_secret_reveal() {
     let mut runtime = build_runtime();
 
     let tc_client = testcontainers::clients::Cli::default();
@@ -964,6 +963,7 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
 
     let expiries = runtime.block_on(generate_expiries(&alice_wallet)).unwrap();
 
+    let hold_secret = false;
     let swap_beta_ptlc_alice = alice_channel.swap_beta_ptlc_alice(
         &mut alice_transport,
         &alice_wallet,
@@ -972,6 +972,7 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         expiries.alpha_absolute,
         expiries.split_transaction_relative,
         expiries.ptlc_absolute,
+        hold_secret,
     );
 
     let skip_final_update = true;
@@ -1003,7 +1004,7 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
 
     // The fees are distributed evenly between the outputs.
     let fee_deduction_per_split_output =
-        Amount::from_sat(thor::TX_FEE + thor::TX_FEE) / n_outputs_split_transaction;
+        Amount::from_sat(crate::TX_FEE + crate::TX_FEE) / n_outputs_split_transaction;
 
     // Alice will claim her balance output and a PTLC output
     let split_transaction_fee_alice = fee_deduction_per_split_output * 2;
@@ -1013,7 +1014,7 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
 
     // Additionally, Alice pays an extra `thor::TX_FEE` to be able to redeem the
     // PTLC output.
-    let fee_deduction_for_ptlc_redeem = Amount::from_sat(thor::TX_FEE);
+    let fee_deduction_for_ptlc_redeem = Amount::from_sat(crate::TX_FEE);
 
     assert_eq!(
         after_close_balance_alice,
@@ -1026,47 +1027,4 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         after_open_balance_bob + fund_amount_bob - ptlc_amount - split_transaction_fee_bob,
         "Balance after closing channel should equal balance after opening minus PTLC amount, minus transaction fees"
     );
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn swap_beta_ptlc_bob(
-    channel: &mut Channel,
-    transport: &mut Transport,
-    wallet: &Wallet,
-    ptlc_amount: Amount,
-    point: PtlcPoint,
-    alpha_absolute_expiry: u32,
-    TX_s_time_lock: u32,
-    ptlc_redeem_time_lock: u32,
-    skip_update: bool,
-) -> anyhow::Result<()> {
-    let mut swap_beta_ptlc_bob = channel.swap_beta_ptlc_bob(
-        transport,
-        wallet,
-        ptlc_amount,
-        point,
-        alpha_absolute_expiry,
-        TX_s_time_lock,
-        ptlc_redeem_time_lock,
-    );
-
-    match swap_beta_ptlc_bob.async_resume().await {
-        GeneratorState::Yielded(_secret) => {
-            // TODO: Redeem alpha asset
-
-            if skip_update {
-                return Ok(());
-            }
-
-            match swap_beta_ptlc_bob.async_resume().await {
-                GeneratorState::Complete(Ok(())) => (),
-                GeneratorState::Complete(Err(e)) => panic!("{}", e),
-                GeneratorState::Yielded(_) => panic!("unexpected yield"),
-            }
-        }
-        GeneratorState::Complete(Err(e)) => panic!("{}", e),
-        GeneratorState::Complete(Ok(())) => panic!("did not yield secret"),
-    }
-
-    Ok(())
 }

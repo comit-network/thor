@@ -222,17 +222,16 @@ impl State1PtlcFunder {
         }
     }
 
-    pub fn interpret(
-        mut self,
-        message: SignaturesPtlcRedeemer,
-    ) -> anyhow::Result<WithPtlc<State1>> {
+    pub fn interpret(self, message: SignaturesPtlcRedeemer) -> anyhow::Result<WithPtlc<State1>> {
         self.TX_ptlc_refund
             .verify_sig(
                 self.inner.X_other.clone(),
                 &message.sig_TX_ptlc_refund_redeemer,
             )
             .context("failed to verify sig_TX_ptlc_refund sent by PTLC redeemer")?;
-        self.TX_ptlc_refund.add_signatures(
+
+        let mut TX_ptlc_refund = self.TX_ptlc_refund;
+        TX_ptlc_refund.add_signatures(
             (
                 self.inner.x_self.public(),
                 self.sig_TX_ptlc_refund_funder.clone(),
@@ -247,7 +246,7 @@ impl State1PtlcFunder {
             state: self.inner,
             ptlc: self.ptlc,
             TX_ptlc_redeem: self.TX_ptlc_redeem,
-            TX_ptlc_refund: self.TX_ptlc_refund,
+            TX_ptlc_refund,
             encsig_TX_ptlc_redeem_funder: self.encsig_TX_ptlc_redeem_funder,
             sig_TX_ptlc_redeem_redeemer: message.sig_TX_ptlc_redeem_redeemer,
             sig_TX_ptlc_refund_funder: self.sig_TX_ptlc_refund_funder,

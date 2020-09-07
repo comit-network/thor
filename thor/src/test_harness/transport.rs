@@ -1,9 +1,9 @@
+use crate::{Message, ReceiveMessage, SendMessage};
 use anyhow::Context;
 use futures::{
     channel::mpsc::{Receiver, Sender},
     SinkExt, StreamExt,
 };
-use thor::{Message, ReceiveMessage, SendMessage};
 
 pub struct Transport {
     // While it would be more efficient to use `Message` this allows us to test the `use-serde`

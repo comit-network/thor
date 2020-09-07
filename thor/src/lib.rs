@@ -22,6 +22,13 @@ mod protocols;
 mod signature;
 mod transaction;
 
+#[cfg(test)]
+mod edge_case_tests;
+#[cfg(test)]
+mod public_api_tests;
+#[cfg(test)]
+mod test_harness;
+
 pub use ::bitcoin;
 pub use keys::{PtlcPoint, PtlcSecret};
 pub use protocols::create::{BuildFundingPSBT, SignFundingPSBT};
@@ -204,14 +211,12 @@ impl Channel {
         _alpha_absolute_expiry: u32,
         TX_s_time_lock: u32,
         ptlc_refund_time_lock: u32,
+        #[cfg(test)] hold_secret: bool,
     ) -> anyhow::Result<()>
     where
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
     {
-        // TODO: Think about how to handle the three expiries. See
-        // https://github.com/comit-network/thor/pull/47#discussion_r480822913.
-
         let Balance { ours, theirs } = self.balance();
 
         let theirs = theirs.checked_sub(ptlc_amount).ok_or_else(|| {
@@ -263,6 +268,15 @@ impl Channel {
                 (self.X_other.clone(), sig_funder),
             )?
         };
+
+        #[cfg(not(test))]
+        let hold_secret = false;
+        #[cfg(test)]
+        let hold_secret = hold_secret;
+
+        if cfg!(test) && hold_secret {
+            return Ok(());
+        }
 
         transport.send_message(Message::Secret(secret)).await?;
 
@@ -483,6 +497,7 @@ impl Channel {
                     };
                 }
             }
+
             Ok(())
         })
     }
