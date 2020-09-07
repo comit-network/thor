@@ -543,6 +543,7 @@ impl Channel {
         Ok(())
     }
 
+    /// Get the current channel balance.
     pub fn balance(&self) -> Balance {
         let channel_state: &StandardChannelState = self.current_state.as_ref();
         channel_state.balance
