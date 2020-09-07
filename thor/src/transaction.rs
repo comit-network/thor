@@ -398,8 +398,7 @@ pub(crate) struct SplitTransaction {
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
-
-pub enum FeeError {
+pub enum Error {
     #[error(
     "input amount {input} does not cover total transaction output amount {output} and fee {fee}"
     )]
@@ -425,16 +424,13 @@ pub enum FeeError {
 }
 
 impl SplitTransaction {
-    pub(crate) fn new(
-        tx_c: &CommitTransaction,
-        outputs: Vec<SplitOutput>,
-    ) -> Result<Self, FeeError> {
+    pub(crate) fn new(tx_c: &CommitTransaction, outputs: Vec<SplitOutput>) -> Result<Self, Error> {
         let total_input = tx_c.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|output| output.amount().as_sat()).sum());
         let tx_s_fee = Amount::from_sat(TX_FEE);
         if total_input < total_output - tx_c.fee() - tx_s_fee {
-            return Err(FeeError::InsufficientFunds {
+            return Err(Error::InsufficientFunds {
                 input: total_input,
                 output: total_output - tx_c.fee(),
                 fee: tx_s_fee,
@@ -524,19 +520,19 @@ impl SplitTransaction {
         tx_c_fee: Amount,
         amount_0: Amount,
         amount_1: Amount,
-    ) -> Result<(Amount, Amount), FeeError> {
+    ) -> Result<(Amount, Amount), Error> {
         let total_output = amount_0 + amount_1;
         let tx_s_fee = Amount::from_sat(TX_FEE);
 
         if total_output != tx_c_value {
-            return Err(FeeError::OutputMismatch {
+            return Err(Error::OutputMismatch {
                 tx_c_value,
                 total_output,
             });
         }
 
         if total_output < tx_c_fee + tx_s_fee {
-            return Err(FeeError::DustOutput {
+            return Err(Error::DustOutput {
                 total_output,
                 tx_c_fee,
                 tx_s_fee,
@@ -544,7 +540,7 @@ impl SplitTransaction {
         }
 
         if tx_c_value <= total_output - tx_c_fee - tx_s_fee {
-            return Err(FeeError::InsufficientFunds {
+            return Err(Error::InsufficientFunds {
                 input: tx_c_value,
                 output: total_output - tx_c_fee,
                 fee: tx_s_fee,
@@ -799,13 +795,13 @@ impl CloseTransaction {
     pub(crate) fn new(
         tx_f: &FundingTransaction,
         mut outputs: [(Amount, Address); 2],
-    ) -> Result<Self, FeeError> {
+    ) -> Result<Self, Error> {
         let total_input = tx_f.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|(amount, _)| amount.as_sat()).sum());
         let close_transaction_fee = Amount::from_sat(TX_FEE);
         if total_input <= total_output - close_transaction_fee {
-            return Err(FeeError::InsufficientFunds {
+            return Err(Error::InsufficientFunds {
                 input: total_input,
                 output: total_output,
                 fee: close_transaction_fee,
@@ -1098,14 +1094,6 @@ impl From<SpliceTransaction> for FundingTransaction {
             fund_output_amount: splice_tx.amount_0 + splice_tx.amount_1,
         }
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("Miniscript compiler: ")]
-    MiniscriptCompiler(#[from] miniscript::policy::compiler::CompilerError),
-    #[error("Miniscript: ")]
-    Miniscript(#[from] miniscript::Error),
 }
 
 #[cfg(test)]
