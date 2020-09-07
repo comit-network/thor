@@ -32,7 +32,10 @@ use crate::{
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
     protocols::punish::punish,
-    transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
+    transaction::{
+        CommitTransaction, FundingTransaction, RedeemTransaction, RefundTransaction,
+        SplitTransaction,
+    },
 };
 use ::serde::{Deserialize, Serialize};
 use anyhow::{anyhow, bail, Result};
@@ -44,7 +47,6 @@ use futures::{future::Either, pin_mut, Future};
 use genawaiter::sync::Gen;
 use protocols::{close, create, splice, update};
 use signature::decrypt;
-use transaction::ptlc;
 
 // TODO: We should handle fees dynamically
 
@@ -636,8 +638,8 @@ pub(crate) enum ChannelState {
     WithPtlc {
         inner: StandardChannelState,
         ptlc: Ptlc,
-        TX_ptlc_redeem: ptlc::RedeemTransaction,
-        TX_ptlc_refund: ptlc::RefundTransaction,
+        TX_ptlc_redeem: RedeemTransaction,
+        TX_ptlc_refund: RefundTransaction,
         encsig_TX_ptlc_redeem_funder: EncryptedSignature,
         sig_TX_ptlc_redeem_redeemer: Signature,
         sig_TX_ptlc_refund_funder: Signature,

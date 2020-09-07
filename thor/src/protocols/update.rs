@@ -3,7 +3,10 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    transaction::{balance, ptlc, CommitTransaction, FundingTransaction, SplitTransaction},
+    transaction::{
+        balance, CommitTransaction, FundingTransaction, RedeemTransaction, RefundTransaction,
+        SplitTransaction,
+    },
     Channel, ChannelState, Ptlc, RevokedState, SplitOutput, StandardChannelState,
 };
 use anyhow::{bail, Context, Result};
@@ -179,31 +182,25 @@ pub struct SignaturesPtlcRedeemer {
 
 /// A party who has exchanged `RevocationPublicKey`s and `PublishingPublicKey`s
 /// with the counterparty and is ready to start exchanging signatures for the
-/// `ptlc::RedeemTransaction` and `ptlc::RefundTransaction` involving a PTLC
+/// `RedeemTransaction` and `RefundTransaction` involving a PTLC
 /// output which they are funding.
 pub struct State1PtlcFunder {
     inner: State1,
     ptlc: Ptlc,
-    TX_ptlc_redeem: ptlc::RedeemTransaction,
-    TX_ptlc_refund: ptlc::RefundTransaction,
+    TX_ptlc_redeem: RedeemTransaction,
+    TX_ptlc_refund: RefundTransaction,
     encsig_TX_ptlc_redeem_funder: EncryptedSignature,
     sig_TX_ptlc_refund_funder: Signature,
 }
 
 impl State1PtlcFunder {
     pub fn new(state: State1, ptlc: Ptlc) -> Result<Self> {
-        let TX_ptlc_redeem = ptlc::RedeemTransaction::new(
-            &state.TX_s,
-            ptlc.clone(),
-            state.final_address_other.clone(),
-        )?;
+        let TX_ptlc_redeem =
+            RedeemTransaction::new(&state.TX_s, ptlc.clone(), state.final_address_other.clone())?;
         let encsig_TX_ptlc_redeem_funder = TX_ptlc_redeem.encsign_once(&state.x_self, ptlc.point());
 
-        let TX_ptlc_refund = ptlc::RefundTransaction::new(
-            &state.TX_s,
-            ptlc.clone(),
-            state.final_address_self.clone(),
-        )?;
+        let TX_ptlc_refund =
+            RefundTransaction::new(&state.TX_s, ptlc.clone(), state.final_address_self.clone())?;
         let sig_TX_ptlc_refund_funder = TX_ptlc_refund.sign_once(&state.x_self);
 
         Ok(Self {
@@ -256,31 +253,25 @@ impl State1PtlcFunder {
 
 /// A party who has exchanged `RevocationPublicKey`s and `PublishingPublicKey`s
 /// with the counterparty and is ready to start exchanging signatures for the
-/// `ptlc::RedeemTransaction` and `ptlc::RefundTransaction` involving a PTLC
+/// `RedeemTransaction` and `RefundTransaction` involving a PTLC
 /// output which they are redeeming.
 pub struct State1PtlcRedeemer {
     inner: State1,
     ptlc: Ptlc,
-    TX_ptlc_redeem: ptlc::RedeemTransaction,
-    TX_ptlc_refund: ptlc::RefundTransaction,
+    TX_ptlc_redeem: RedeemTransaction,
+    TX_ptlc_refund: RefundTransaction,
     sig_TX_ptlc_redeem_redeemer: Signature,
     sig_TX_ptlc_refund_redeemer: Signature,
 }
 
 impl State1PtlcRedeemer {
     pub fn new(state: State1, ptlc: Ptlc) -> Result<Self> {
-        let TX_ptlc_redeem = ptlc::RedeemTransaction::new(
-            &state.TX_s,
-            ptlc.clone(),
-            state.final_address_self.clone(),
-        )?;
+        let TX_ptlc_redeem =
+            RedeemTransaction::new(&state.TX_s, ptlc.clone(), state.final_address_self.clone())?;
         let sig_TX_ptlc_redeem_redeemer = TX_ptlc_redeem.sign_once(&state.x_self);
 
-        let TX_ptlc_refund = ptlc::RefundTransaction::new(
-            &state.TX_s,
-            ptlc.clone(),
-            state.final_address_other.clone(),
-        )?;
+        let TX_ptlc_refund =
+            RefundTransaction::new(&state.TX_s, ptlc.clone(), state.final_address_other.clone())?;
         let sig_TX_ptlc_refund_redeemer = TX_ptlc_refund.sign_once(&state.x_self);
 
         Ok(Self {
@@ -528,8 +519,8 @@ impl State3 {
 pub struct WithPtlc<S> {
     state: S,
     ptlc: Ptlc,
-    TX_ptlc_redeem: ptlc::RedeemTransaction,
-    TX_ptlc_refund: ptlc::RefundTransaction,
+    TX_ptlc_redeem: RedeemTransaction,
+    TX_ptlc_refund: RefundTransaction,
     encsig_TX_ptlc_redeem_funder: EncryptedSignature,
     sig_TX_ptlc_redeem_redeemer: Signature,
     sig_TX_ptlc_refund_funder: Signature,

@@ -26,7 +26,8 @@ use sha2::Sha256;
 use signature::{verify_encsig, verify_sig};
 use std::{collections::HashMap, str::FromStr};
 
-pub mod ptlc;
+mod ptlc;
+pub(crate) use ptlc::{RedeemTransaction, RefundTransaction};
 
 #[derive(Clone, Debug)]
 pub(crate) struct FundOutput(miniscript::Descriptor<bitcoin::PublicKey>);
