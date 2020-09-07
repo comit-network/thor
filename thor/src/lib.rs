@@ -549,6 +549,7 @@ impl Channel {
         channel_state.balance
     }
 
+    /// Get the transaction id of the initial fund transaction.
     pub fn TX_f_txid(&self) -> Txid {
         self.TX_f_body.txid()
     }
