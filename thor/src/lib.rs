@@ -389,69 +389,49 @@ impl Channel {
     where
         T: SendMessage + ReceiveMessage,
     {
-        let state0 = update::State0::new(self.clone(), new_split_outputs, time_lock);
+        use update::*;
 
-        let msg0_self = state0.compose();
-        transport.send_message(Message::Update0(msg0_self)).await?;
+        let state = State0::new(self.clone(), new_split_outputs, time_lock);
 
-        let msg0_other = map_err(transport.receive_message().await?.into_update0())?;
-        let state1 = state0.interpret(msg0_other)?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let updated_channel = match state1 {
-            update::State1Kind::State1(state1) => update!(transport, state1),
-            update::State1Kind::State1PtlcFunder(state1_ptlc_funder) => {
-                let msg_self = state1_ptlc_funder.compose();
-                transport
-                    .send_message(Message::UpdatePtlcFunder(msg_self))
-                    .await?;
+        let updated_channel = match state {
+            State1Kind::State1(state) => update!(transport, state),
+            State1Kind::State1PtlcFunder(state) => {
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let state = state.interpret(response)?;
 
-                let msg_other = map_err(
-                    transport
-                        .receive_message()
-                        .await?
-                        .into_update_ptlc_redeemer(),
-                )?;
-                let state1 = state1_ptlc_funder.interpret(msg_other)?;
-
-                update!(transport, state1)
+                update!(transport, state)
             }
-            update::State1Kind::State1PtlcRedeemer(state1_ptlc_redeemer) => {
-                let msg_self = state1_ptlc_redeemer.compose();
-                transport
-                    .send_message(Message::UpdatePtlcRedeemer(msg_self))
-                    .await?;
+            State1Kind::State1PtlcRedeemer(state) => {
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let state = state.interpret(response)?;
 
-                let msg_other =
-                    map_err(transport.receive_message().await?.into_update_ptlc_funder())?;
-                let state1 = state1_ptlc_redeemer.interpret(msg_other)?;
-
-                update!(transport, state1)
+                update!(transport, state)
             }
         };
 
         #[macro_export]
         macro_rules! update {
-            ($transport:expr, $state1:expr) => {{
+            ($transport:expr, $state:expr) => {{
                 let transport = $transport;
-                let state1 = $state1;
+                let state = $state;
 
-                let msg1_self = state1.compose();
-                transport.send_message(Message::Update1(msg1_self)).await?;
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let state = state.interpret(response)?;
 
-                let msg1_other = map_err(transport.receive_message().await?.into_update1())?;
-                let state2 = state1.interpret(msg1_other)?;
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let state = state.interpret(response)?;
 
-                let msg2_self = state2.compose();
-                transport.send_message(Message::Update2(msg2_self)).await?;
-
-                let msg2_other = map_err(transport.receive_message().await?.into_update2())?;
-                let state3 = state2.interpret(msg2_other)?;
-
-                let msg3_self = state3.compose();
-                transport.send_message(Message::Update3(msg3_self)).await?;
-
-                let msg3_other = map_err(transport.receive_message().await?.into_update3())?;
-                let updated_channel = state3.interpret(msg3_other)?;
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let updated_channel = state.interpret(response)?;
 
                 updated_channel
             }};
@@ -957,6 +937,126 @@ impl TryFrom<Message> for create::Message5 {
             Message::Create5(m) => Ok(m),
             _ => Err(UnexpectedMessage {
                 expected_type: "Create5".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::ShareKeys> for Message {
+    fn from(m: update::ShareKeys) -> Self {
+        Message::Update0(m)
+    }
+}
+
+impl TryFrom<Message> for update::ShareKeys {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Update0(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Update0".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::SignaturesPtlcFunder> for Message {
+    fn from(m: update::SignaturesPtlcFunder) -> Self {
+        Message::UpdatePtlcFunder(m)
+    }
+}
+
+impl TryFrom<Message> for update::SignaturesPtlcFunder {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::UpdatePtlcFunder(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "UpdatePtlcFunder".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::SignaturesPtlcRedeemer> for Message {
+    fn from(m: update::SignaturesPtlcRedeemer) -> Self {
+        Message::UpdatePtlcRedeemer(m)
+    }
+}
+
+impl TryFrom<Message> for update::SignaturesPtlcRedeemer {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::UpdatePtlcRedeemer(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "UpdatePtlcRedeemer".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::ShareSplitSignature> for Message {
+    fn from(m: update::ShareSplitSignature) -> Self {
+        Message::Update1(m)
+    }
+}
+
+impl TryFrom<Message> for update::ShareSplitSignature {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Update1(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Update1".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::ShareCommitEncryptedSignature> for Message {
+    fn from(m: update::ShareCommitEncryptedSignature) -> Self {
+        Message::Update2(m)
+    }
+}
+
+impl TryFrom<Message> for update::ShareCommitEncryptedSignature {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Update2(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Update2".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::RevealRevocationSecretKey> for Message {
+    fn from(m: update::RevealRevocationSecretKey) -> Self {
+        Message::Update3(m)
+    }
+}
+
+impl TryFrom<Message> for update::RevealRevocationSecretKey {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Update3(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Update3".to_string(),
                 received: m,
             }),
         }
