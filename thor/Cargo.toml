@@ -9,14 +9,14 @@ anyhow = "1"
 arrayvec = "0.5"
 async-trait = "0.1"
 base64 = "0.12"
-bitcoin = { version = "0.23.0", features = ["rand"] }
+bitcoin = { version = "0.23", features = ["rand"] }
 conquer-once = "0.2"
 ecdsa_fun = { git = "https://github.com/LLFourn/secp256kfun", branch = "thor", features = ["libsecp_compat"] }
 enum-as-inner = "0.3"
 futures = "0.3"
 genawaiter = { version = "0.99", default-features = false, features = ["futures03"] }
 hex = "0.4"
-miniscript = { version = "1.0.0", features = ["compiler"] }
+miniscript = { version = "1.0", features = ["compiler"] }
 rand = "0.7"
 serde = { version = "1", features = ["derive"], optional = true }
 sha2 = "0.9"
