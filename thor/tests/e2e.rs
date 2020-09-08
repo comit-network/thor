@@ -7,94 +7,98 @@ use bitcoin::{Amount, TxOut};
 use bitcoin_harness::{self, Bitcoind};
 use futures::future;
 use genawaiter::GeneratorState;
-use harness::{build_runtime, generate_balances, make_transports, make_wallets, Transport};
+use harness::{build_runtime, generate_balances, make_transports, make_wallets, Transport, Wallet};
 use testcontainers::clients::Cli;
 use thor::{Balance, Channel, PtlcPoint, PtlcSecret, Splice};
 
-#[test]
-fn e2e_channel_creation() {
-    let mut runtime = build_runtime();
-
+async fn create_channels() -> (
+    Amount,
+    Channel,
+    Channel,
+    Transport,
+    Transport,
+    Wallet,
+    Wallet,
+    u32,
+) {
     let tc_client = Cli::default();
-    let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
-    runtime.block_on(bitcoind.init(5)).unwrap();
+    let bitcoind = Bitcoind::new(&tc_client, "0.19.1").expect("failed to create bitcoind");
+    let _ = bitcoind.init(5).await;
 
     let fund_amount = Amount::ONE_BTC;
-    let (a_balance, b_balance) = generate_balances(fund_amount);
 
-    let time_lock = 1;
-
-    let (a_wallet, b_wallet) = runtime
-        .block_on(make_wallets(&bitcoind, fund_amount))
-        .unwrap();
     let (mut a_transport, mut b_transport) = make_transports();
+    let (a_balance, b_balance) = generate_balances(fund_amount);
+    let (a_wallet, b_wallet) = make_wallets(&bitcoind, fund_amount)
+        .await
+        .expect("failed to make wallets");
+    let time_lock = 1;
 
     let a_create = Channel::create(&mut a_transport, &a_wallet, a_balance, time_lock);
     let b_create = Channel::create(&mut b_transport, &b_wallet, b_balance, time_lock);
 
-    let (_a_channel, _b_channel) = runtime
-        .block_on(future::try_join(a_create, b_create))
-        .unwrap();
+    let (a_channel, b_channel) = future::try_join(a_create, b_create)
+        .await
+        .expect("failed to create channels");
+
+    (
+        fund_amount,
+        a_channel,
+        b_channel,
+        a_transport,
+        b_transport,
+        a_wallet,
+        b_wallet,
+        time_lock,
+    )
 }
 
-#[test]
-fn e2e_channel_update() {
-    let mut runtime = build_runtime();
-
-    let tc_client = Cli::default();
-    let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
-    runtime.block_on(bitcoind.init(5)).unwrap();
-
-    let fund_amount = Amount::ONE_BTC;
-    let (a_balance, b_balance) = generate_balances(fund_amount);
-
-    let time_lock = 1;
-
-    let (a_wallet, b_wallet) = runtime
-        .block_on(make_wallets(&bitcoind, fund_amount))
-        .unwrap();
-    let (mut a_transport, mut b_transport) = make_transports();
-
-    let a_create = Channel::create(&mut a_transport, &a_wallet, a_balance, time_lock);
-    let b_create = Channel::create(&mut b_transport, &b_wallet, b_balance, time_lock);
-
-    let (mut a_channel, mut b_channel) = runtime
-        .block_on(future::try_join(a_create, b_create))
-        .unwrap();
+#[tokio::test]
+async fn e2e_channel_update() {
+    let (
+        fund_amount,
+        mut a_channel,
+        mut b_channel,
+        mut a_transport,
+        mut b_transport,
+        _,
+        _,
+        time_lock,
+    ) = create_channels().await;
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
-    let payment = Amount::from_btc(0.5).unwrap();
-    let alice_balance = fund_amount - payment;
-    let bob_balance = fund_amount + payment;
+    let payment = Amount::from_btc(0.5).expect("failed to create amount");
+    let a_balance = fund_amount - payment;
+    let b_balance = fund_amount + payment;
 
     let a_update = a_channel.update_balance(
         &mut a_transport,
         Balance {
-            ours: alice_balance,
-            theirs: bob_balance,
+            ours: a_balance,
+            theirs: b_balance,
         },
         time_lock,
     );
     let b_update = b_channel.update_balance(
         &mut b_transport,
         Balance {
-            ours: bob_balance,
-            theirs: alice_balance,
+            ours: b_balance,
+            theirs: a_balance,
         },
         time_lock,
     );
 
-    runtime
-        .block_on(future::try_join(a_update, b_update))
-        .unwrap();
+    future::try_join(a_update, b_update)
+        .await
+        .expect("update failed");
 
     // Assert expected balance changes
 
-    assert_eq!(a_channel.balance().ours, alice_balance);
-    assert_eq!(a_channel.balance().theirs, bob_balance);
+    assert_eq!(a_channel.balance().ours, a_balance);
+    assert_eq!(a_channel.balance().theirs, b_balance);
 
-    assert_eq!(b_channel.balance().ours, bob_balance);
-    assert_eq!(b_channel.balance().theirs, alice_balance);
+    assert_eq!(b_channel.balance().ours, b_balance);
+    assert_eq!(b_channel.balance().theirs, a_balance);
 }
 
 #[test]
