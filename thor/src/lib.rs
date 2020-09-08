@@ -833,12 +833,12 @@ pub enum Message {
 
 #[derive(Debug, thiserror::Error)]
 #[error("expected message of type {expected_type}, got {received:?}")]
-pub struct UnexpecteMessage {
+pub struct UnexpectedMessage {
     expected_type: String,
     received: Message,
 }
 
-impl UnexpecteMessage {
+impl UnexpectedMessage {
     pub fn new<T>(received: Message) -> Self {
         let expected_type = std::any::type_name::<T>();
 
@@ -849,6 +849,6 @@ impl UnexpecteMessage {
     }
 }
 
-fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpecteMessage> {
-    res.map_err(UnexpecteMessage::new::<T>)
+fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpectedMessage> {
+    res.map_err(UnexpectedMessage::new::<T>)
 }
