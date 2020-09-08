@@ -5,7 +5,7 @@ mod transport;
 mod wallet;
 
 pub use transport::{make_transports, Transport};
-pub use wallet::make_wallets;
+pub use wallet::{make_wallets, Wallet};
 
 pub fn build_runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new()
@@ -16,7 +16,11 @@ pub fn build_runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
-pub fn generate_balances(fund_amount_alice: Amount, fund_amount_bob: Amount) -> (Balance, Balance) {
+pub fn generate_balances(fund_amount: Amount) -> (Balance, Balance) {
+    _generate_balances(fund_amount, fund_amount)
+}
+
+fn _generate_balances(fund_amount_alice: Amount, fund_amount_bob: Amount) -> (Balance, Balance) {
     let balance_alice = Balance {
         ours: fund_amount_alice,
         theirs: fund_amount_bob,

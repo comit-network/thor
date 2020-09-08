@@ -20,6 +20,13 @@ impl Wallet {
 /// account for transaction fees.
 pub async fn make_wallets(
     bitcoind: &Bitcoind<'_>,
+    fund_amount: Amount,
+) -> anyhow::Result<(Wallet, Wallet)> {
+    _make_wallets(bitcoind, fund_amount, fund_amount).await
+}
+
+async fn _make_wallets(
+    bitcoind: &Bitcoind<'_>,
     fund_amount_alice: Amount,
     fund_amount_bob: Amount,
 ) -> Result<(Wallet, Wallet)> {
