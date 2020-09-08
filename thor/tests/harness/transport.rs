@@ -20,20 +20,20 @@ pub struct Transport {
 /// parties, allowing them to send and receive `thor::Message`s to and from each
 /// other.
 pub fn make_transports() -> (Transport, Transport) {
-    let (alice_sender, bob_receiver) = mpsc::channel(5);
-    let (bob_sender, alice_receiver) = mpsc::channel(5);
+    let (a_sender, b_receiver) = mpsc::channel(5);
+    let (b_sender, a_receiver) = mpsc::channel(5);
 
-    let alice_transport = Transport {
-        sender: alice_sender,
-        receiver: alice_receiver,
+    let a_transport = Transport {
+        sender: a_sender,
+        receiver: a_receiver,
     };
 
-    let bob_transport = Transport {
-        sender: bob_sender,
-        receiver: bob_receiver,
+    let b_transport = Transport {
+        sender: b_sender,
+        receiver: b_receiver,
     };
 
-    (alice_transport, bob_transport)
+    (a_transport, b_transport)
 }
 
 #[async_trait]

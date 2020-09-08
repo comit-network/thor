@@ -20,16 +20,16 @@ pub fn generate_balances(fund_amount: Amount) -> (Balance, Balance) {
     _generate_balances(fund_amount, fund_amount)
 }
 
-fn _generate_balances(fund_amount_alice: Amount, fund_amount_bob: Amount) -> (Balance, Balance) {
-    let balance_alice = Balance {
-        ours: fund_amount_alice,
-        theirs: fund_amount_bob,
+fn _generate_balances(a_fund_amount: Amount, b_fund_amount: Amount) -> (Balance, Balance) {
+    let a_balance = Balance {
+        ours: a_fund_amount,
+        theirs: b_fund_amount,
     };
 
-    let balance_bob = Balance {
-        ours: fund_amount_bob,
-        theirs: fund_amount_alice,
+    let b_balance = Balance {
+        ours: b_fund_amount,
+        theirs: a_fund_amount,
     };
 
-    (balance_alice, balance_bob)
+    (a_balance, b_balance)
 }

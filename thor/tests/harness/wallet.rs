@@ -27,15 +27,15 @@ pub async fn make_wallets(
 
 async fn _make_wallets(
     bitcoind: &Bitcoind<'_>,
-    fund_amount_alice: Amount,
-    fund_amount_bob: Amount,
-) -> Result<(Wallet, Wallet)> {
+    a_fund_amount: Amount,
+    b_fund_amount: Amount,
+) -> anyhow::Result<(Wallet, Wallet)> {
     let alice = Wallet::new("alice", bitcoind.node_url.clone()).await?;
     let bob = Wallet::new("bob", bitcoind.node_url.clone()).await?;
 
     let buffer = Amount::from_btc(1.0).unwrap();
 
-    for (wallet, amount) in vec![(&alice, fund_amount_alice), (&bob, fund_amount_bob)].iter() {
+    for (wallet, amount) in vec![(&alice, a_fund_amount), (&bob, b_fund_amount)].iter() {
         let address = wallet.0.new_address().await.unwrap();
         bitcoind.mint(address, *amount + buffer).await.unwrap();
     }
