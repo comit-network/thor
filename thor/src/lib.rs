@@ -46,6 +46,7 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
 use futures::{future::Either, pin_mut, Future};
 use genawaiter::sync::Gen;
+use std::convert::{TryFrom, TryInto};
 
 // TODO: We should handle fees dynamically
 
@@ -101,44 +102,33 @@ impl Channel {
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
     {
         let final_address = wallet.new_address().await?;
-        let state0 = create::State0::new(balance, time_lock, final_address);
+        let state = create::State0::new(balance, time_lock, final_address);
 
-        let send = state0.compose();
-        transport.send_message(Message::Create0(send)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response, wallet).await?;
 
-        let recv = map_err(transport.receive_message().await?.into_create0())?;
-        let state1 = state0.interpret(recv, wallet).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let send = state1.compose();
-        transport.send_message(Message::Create1(send)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let recv = map_err(transport.receive_message().await?.into_create1())?;
-        let state2 = state1.interpret(recv)?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let send = state2.compose();
-        transport.send_message(Message::Create2(send)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let recv = map_err(transport.receive_message().await?.into_create2())?;
-        let state3 = state2.interpret(recv)?;
-
-        let send = state3.compose();
-        transport.send_message(Message::Create3(send)).await?;
-
-        let recv = map_err(transport.receive_message().await?.into_create3())?;
-        let state_4 = state3.interpret(recv)?;
-
-        let send = state_4.compose();
-        transport.send_message(Message::Create4(send)).await?;
-
-        let recv = map_err(transport.receive_message().await?.into_create4())?;
-        let state5 = state_4.interpret(recv)?;
-
-        let send = state5.compose(wallet).await?;
-        transport.send_message(Message::Create5(send)).await?;
-
-        let recv = map_err(transport.receive_message().await?.into_create5())?;
-
-        let (channel, transaction) = state5.interpret(recv, wallet).await?;
+        transport
+            .send_message(state.compose(wallet).await?.into())
+            .await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let (channel, transaction) = state.interpret(response, wallet).await?;
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
@@ -851,4 +841,124 @@ impl UnexpectedMessage {
 
 fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpectedMessage> {
     res.map_err(UnexpectedMessage::new::<T>)
+}
+
+impl From<create::Message0> for Message {
+    fn from(m: create::Message0) -> Self {
+        Message::Create0(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message0 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create0(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create0".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message1> for Message {
+    fn from(m: create::Message1) -> Self {
+        Message::Create1(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message1 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create1(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create1".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message2> for Message {
+    fn from(m: create::Message2) -> Self {
+        Message::Create2(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message2 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create2(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create2".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message3> for Message {
+    fn from(m: create::Message3) -> Self {
+        Message::Create3(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message3 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create3(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create3".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message4> for Message {
+    fn from(m: create::Message4) -> Self {
+        Message::Create4(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message4 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create4(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create4".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message5> for Message {
+    fn from(m: create::Message5) -> Self {
+        Message::Create5(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message5 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create5(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create5".to_string(),
+                received: m,
+            }),
+        }
+    }
 }
