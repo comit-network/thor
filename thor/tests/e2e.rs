@@ -169,19 +169,19 @@ fn e2e_punish_publication_of_revoked_commit_transaction() {
 
     // Alice attempts to cheat by publishing a revoked commit transaction
 
-    let signed_revoked_TX_c = alice_channel.latest_revoked_signed_TX_c().unwrap().unwrap();
+    let signed_revoked_tx_c = alice_channel.latest_revoked_signed_tx_c().unwrap().unwrap();
     runtime
         .block_on(
             alice_wallet
                 .0
-                .send_raw_transaction(signed_revoked_TX_c.clone()),
+                .send_raw_transaction(signed_revoked_tx_c.clone()),
         )
         .unwrap();
 
     // Bob sees the transaction and punishes Alice
 
     runtime
-        .block_on(bob_channel.punish(&bob_wallet, signed_revoked_TX_c))
+        .block_on(bob_channel.punish(&bob_wallet, signed_revoked_tx_c))
         .unwrap();
 
     let after_punish_balance_alice = runtime.block_on(alice_wallet.0.balance()).unwrap();
@@ -862,7 +862,7 @@ fn e2e_atomic_swap_happy() {
     let point = secret.point();
     let ptlc_amount = Amount::from_btc(0.5).unwrap();
 
-    let (alpha_absolute_expiry, TX_s_time_lock, ptlc_redeem_time_lock) = (1_598_875_222, 1, 1);
+    let (alpha_absolute_expiry, tx_s_time_lock, ptlc_redeem_time_lock) = (1_598_875_222, 1, 1);
 
     let swap_beta_ptlc_alice = alice_channel.swap_beta_ptlc_alice(
         &mut alice_transport,
@@ -870,7 +870,7 @@ fn e2e_atomic_swap_happy() {
         ptlc_amount,
         secret,
         alpha_absolute_expiry,
-        TX_s_time_lock,
+        tx_s_time_lock,
         ptlc_redeem_time_lock,
     );
 
@@ -881,7 +881,7 @@ fn e2e_atomic_swap_happy() {
         ptlc_amount,
         point,
         alpha_absolute_expiry,
-        TX_s_time_lock,
+        tx_s_time_lock,
         ptlc_redeem_time_lock,
         skip_final_update,
     );
@@ -959,7 +959,7 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
 
     // TODO: produce redeem and refund transactions + fund alpha
 
-    let (alpha_absolute_expiry, TX_s_time_lock, ptlc_redeem_time_lock) = (1_598_875_222, 1, 1);
+    let (alpha_absolute_expiry, tx_s_time_lock, ptlc_redeem_time_lock) = (1_598_875_222, 1, 1);
 
     let swap_beta_ptlc_alice = alice_channel.swap_beta_ptlc_alice(
         &mut alice_transport,
@@ -967,7 +967,7 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         ptlc_amount,
         secret,
         alpha_absolute_expiry,
-        TX_s_time_lock,
+        tx_s_time_lock,
         ptlc_redeem_time_lock,
     );
 
@@ -978,7 +978,7 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         ptlc_amount,
         point,
         alpha_absolute_expiry,
-        TX_s_time_lock,
+        tx_s_time_lock,
         ptlc_redeem_time_lock,
         skip_final_update,
     );
@@ -1031,7 +1031,7 @@ async fn swap_beta_ptlc_bob(
     ptlc_amount: Amount,
     point: PtlcPoint,
     alpha_absolute_expiry: u32,
-    TX_s_time_lock: u32,
+    tx_s_time_lock: u32,
     ptlc_redeem_time_lock: u32,
     skip_update: bool,
 ) -> Result<()> {
@@ -1040,7 +1040,7 @@ async fn swap_beta_ptlc_bob(
         ptlc_amount,
         point,
         alpha_absolute_expiry,
-        TX_s_time_lock,
+        tx_s_time_lock,
         ptlc_redeem_time_lock,
     );
 

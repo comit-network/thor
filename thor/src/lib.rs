@@ -59,7 +59,7 @@ pub struct Channel {
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    TX_f_body: FundingTransaction,
+    tx_f_body: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
 }
@@ -191,7 +191,7 @@ impl Channel {
         ptlc_amount: Amount,
         secret: PtlcSecret,
         _alpha_absolute_expiry: u32,
-        TX_s_time_lock: u32,
+        tx_s_time_lock: u32,
         ptlc_refund_time_lock: u32,
     ) -> Result<()>
     where
@@ -234,7 +234,7 @@ impl Channel {
         self.update(
             transport,
             vec![balance_output_self, balance_output_other, ptlc_output],
-            TX_s_time_lock,
+            tx_s_time_lock,
         )
         .await?;
 
@@ -259,7 +259,7 @@ impl Channel {
         let final_update = self.update(
             transport,
             vec![balance_output_self, balance_output_other],
-            TX_s_time_lock,
+            tx_s_time_lock,
         );
 
         // TODO: Configure timeout based on expiries
@@ -269,12 +269,12 @@ impl Channel {
         pin_mut!(timeout);
 
         // If the channel update isn't finished before `timeout`, force close and
-        // publish `TX_ptlc_redeem`.
+        // publish `tx_ptlc_redeem`.
         match futures::future::select(final_update, timeout).await {
             Either::Left((Ok(_), _)) => (),
             Either::Left((Err(_), _)) | Either::Right(_) => {
                 // TODO: Have we dropped the other future execution if we reach this block?
-                let (_, _, TX_ptlc_redeem, _, encsig_funder, sig_redeemer, ..) = channel
+                let (_, _, tx_ptlc_redeem, _, encsig_funder, sig_redeemer, ..) = channel
                     .current_state
                     .clone()
                     .into_with_ptlc()
@@ -282,14 +282,14 @@ impl Channel {
 
                 let sig_funder = signature::decrypt(secret.into(), encsig_funder);
 
-                let TX_ptlc_redeem = TX_ptlc_redeem.add_signatures(
+                let tx_ptlc_redeem = tx_ptlc_redeem.add_signatures(
                     (channel.x_self.public(), sig_redeemer),
                     (channel.X_other.clone(), sig_funder),
                 )?;
 
                 channel.force_close(wallet).await?;
 
-                wallet.broadcast_signed_transaction(TX_ptlc_redeem).await?;
+                wallet.broadcast_signed_transaction(tx_ptlc_redeem).await?;
             }
         };
 
@@ -308,7 +308,7 @@ impl Channel {
         ptlc_amount: Amount,
         point: PtlcPoint,
         _alpha_absolute_expiry: u32,
-        TX_s_time_lock: u32,
+        tx_s_time_lock: u32,
         ptlc_refund_time_lock: u32,
     ) -> Gen<PtlcSecret, (), impl Future<Output = Result<()>> + 'a>
     where
@@ -348,7 +348,7 @@ impl Channel {
             self.update(
                 transport,
                 vec![balance_output_self, balance_output_other, ptlc_output],
-                TX_s_time_lock,
+                tx_s_time_lock,
             )
             .await?;
 
@@ -357,8 +357,8 @@ impl Channel {
             // TODO: If Alice doesn't reveal the secret and we're approaching
             // `alpha_absolute_expiry` force close the channel. Now monitor the
             // Bitcoin blockchain for Alice revealing the `secret` by publishing
-            // `TX_ptlc_redeem`. If she does yield the `secret`. If she doesn't do it before
-            // `ptlc_refund_time_lock`, publish `TX_ptlc_refund`.
+            // `tx_ptlc_redeem`. If she does yield the `secret`. If she doesn't do it before
+            // `ptlc_refund_time_lock`, publish `tx_ptlc_refund`.
             let secret = map_err(transport.receive_message().await?.into_secret())?;
 
             if secret.point() != point {
@@ -382,7 +382,7 @@ impl Channel {
             self.update(
                 transport,
                 vec![balance_output_self, balance_output_other],
-                TX_s_time_lock,
+                tx_s_time_lock,
             )
             .await?;
 
@@ -508,12 +508,12 @@ impl Channel {
         let current_state = StandardChannelState::from(self.current_state.clone());
 
         let commit_transaction =
-            current_state.signed_TX_c(&self.TX_f_body, &self.x_self, &self.X_other)?;
+            current_state.signed_tx_c(&self.tx_f_body, &self.x_self, &self.X_other)?;
         wallet
             .broadcast_signed_transaction(commit_transaction)
             .await?;
 
-        let split_transaction = current_state.signed_TX_s.clone();
+        let split_transaction = current_state.signed_tx_s.clone();
         wallet
             .broadcast_signed_transaction(split_transaction.clone().into())
             .await?;
@@ -550,17 +550,17 @@ impl Channel {
     }
 
     /// Get the transaction id of the initial fund transaction.
-    pub fn TX_f_txid(&self) -> Txid {
-        self.TX_f_body.txid()
+    pub fn tx_f_txid(&self) -> Txid {
+        self.tx_f_body.txid()
     }
 
     /// Retrieve the signed `CommitTransaction` of the state that was revoked
     /// during the last channel update.
-    pub fn latest_revoked_signed_TX_c(&self) -> Result<Option<Transaction>> {
+    pub fn latest_revoked_signed_tx_c(&self) -> Result<Option<Transaction>> {
         self.revoked_states
             .last()
             .map(|state| {
-                state.signed_TX_c(&self.TX_f_body, self.x_self.clone(), self.X_other.clone())
+                state.signed_tx_c(&self.tx_f_body, self.x_self.clone(), self.X_other.clone())
             })
             .transpose()
     }
@@ -593,7 +593,7 @@ impl Channel {
             final_address_self,
             final_address_other,
             balance,
-            self.TX_f_body,
+            self.tx_f_body,
             x_self,
             X_other,
             splice_in,
@@ -640,12 +640,12 @@ pub(crate) enum ChannelState {
     WithPtlc {
         inner: StandardChannelState,
         ptlc: Ptlc,
-        TX_ptlc_redeem: RedeemTransaction,
-        TX_ptlc_refund: RefundTransaction,
-        encsig_TX_ptlc_redeem_funder: EncryptedSignature,
-        sig_TX_ptlc_redeem_redeemer: Signature,
-        sig_TX_ptlc_refund_funder: Signature,
-        sig_TX_ptlc_refund_redeemer: Signature,
+        tx_ptlc_redeem: RedeemTransaction,
+        tx_ptlc_refund: RefundTransaction,
+        encsig_tx_ptlc_redeem_funder: EncryptedSignature,
+        sig_tx_ptlc_redeem_redeemer: Signature,
+        sig_tx_ptlc_refund_funder: Signature,
+        sig_tx_ptlc_refund_redeemer: Signature,
     },
 }
 
@@ -673,45 +673,45 @@ pub struct StandardChannelState {
     /// to be submitted to the blockchain, so in practice the balance will see a
     /// reduction to pay for transaction fees.
     balance: Balance,
-    TX_c: CommitTransaction,
+    tx_c: CommitTransaction,
     /// Encrypted signature received from the counterparty. It can be decrypted
-    /// using our `PublishingSecretKey` and used to sign `TX_c`. Keep in mind,
-    /// that publishing a revoked `TX_c` will allow the counterparty to punish
+    /// using our `PublishingSecretKey` and used to sign `tx_c`. Keep in mind,
+    /// that publishing a revoked `tx_c` will allow the counterparty to punish
     /// us.
-    encsig_TX_c_other: EncryptedSignature,
+    encsig_tx_c_other: EncryptedSignature,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
     /// Signed `SplitTransaction`.
-    signed_TX_s: SplitTransaction,
+    signed_tx_s: SplitTransaction,
 }
 
 impl StandardChannelState {
-    fn signed_TX_c(
+    fn signed_tx_c(
         &self,
-        TX_f: &FundingTransaction,
+        tx_f: &FundingTransaction,
         x_self: &OwnershipKeyPair,
         X_other: &OwnershipPublicKey,
     ) -> Result<Transaction> {
-        let sig_self = self.TX_c.sign_once(x_self);
-        let sig_other = decrypt(self.y_self.clone().into(), self.encsig_TX_c_other.clone());
+        let sig_self = self.tx_c.sign_once(x_self);
+        let sig_other = decrypt(self.y_self.clone().into(), self.encsig_tx_c_other.clone());
 
-        let signed_TX_c = self.TX_c.clone().add_signatures(
-            TX_f,
+        let signed_tx_c = self.tx_c.clone().add_signatures(
+            tx_f,
             (x_self.public(), sig_self),
             (X_other.clone(), sig_other),
         )?;
 
-        Ok(signed_TX_c)
+        Ok(signed_tx_c)
     }
 
     pub fn time_lock(&self) -> u32 {
-        self.TX_c.time_lock()
+        self.tx_c.time_lock()
     }
 
-    pub fn encsign_TX_c_self(&self, x_self: &OwnershipKeyPair) -> EncryptedSignature {
-        self.TX_c.encsign_once(x_self, self.Y_other.clone())
+    pub fn encsign_tx_c_self(&self, x_self: &OwnershipKeyPair) -> EncryptedSignature {
+        self.tx_c.encsign_once(x_self, self.Y_other.clone())
     }
 }
 
@@ -727,13 +727,13 @@ impl RevokedState {
     /// transaction is punishable by the counterparty, as they can recover the
     /// `PublishingSecretKey` from it and they already know the
     /// `RevocationSecretKey`, since this state has already been revoked.
-    pub fn signed_TX_c(
+    pub fn signed_tx_c(
         &self,
-        TX_f: &FundingTransaction,
+        tx_f: &FundingTransaction,
         x_self: OwnershipKeyPair,
         X_other: OwnershipPublicKey,
     ) -> Result<Transaction> {
-        StandardChannelState::from(self.channel_state.clone()).signed_TX_c(TX_f, &x_self, &X_other)
+        StandardChannelState::from(self.channel_state.clone()).signed_tx_c(tx_f, &x_self, &X_other)
     }
 }
 

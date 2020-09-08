@@ -22,22 +22,22 @@ pub(crate) fn punish(
                 state.r_other.clone(),
             )
         })
-        .find(|(state, _)| state.TX_c.txid() == old_commit_transaction.txid())
+        .find(|(state, _)| state.tx_c.txid() == old_commit_transaction.txid())
         .ok_or_else(|| NotOldCommitTransaction)?;
 
-    let encsig_TX_c_self = channel_state.encsign_TX_c_self(x_self);
+    let encsig_tx_c_self = channel_state.encsign_tx_c_self(x_self);
 
-    let StandardChannelState { TX_c, Y_other, .. } = channel_state;
+    let StandardChannelState { tx_c, Y_other, .. } = channel_state;
 
-    let TX_p = PunishTransaction::new(
+    let tx_p = PunishTransaction::new(
         x_self,
         final_address,
-        &TX_c,
-        &encsig_TX_c_self,
+        &tx_c,
+        &encsig_tx_c_self,
         &r_other.into(),
         Y_other,
         old_commit_transaction,
     )?;
 
-    Ok(TX_p)
+    Ok(tx_p)
 }

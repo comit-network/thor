@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) struct State0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
-    TX_f: FundingTransaction,
+    tx_f: FundingTransaction,
     final_address_self: Address,
     final_address_other: Address,
     balance: Balance,
@@ -29,7 +29,7 @@ impl State0 {
         Self {
             x_self: channel.x_self.clone(),
             X_other: channel.X_other.clone(),
-            TX_f: channel.TX_f_body.clone(),
+            tx_f: channel.tx_f_body.clone(),
             balance: channel.balance(),
             final_address_self: channel.final_address_self.clone(),
             final_address_other: channel.final_address_other.clone(),
@@ -37,7 +37,7 @@ impl State0 {
     }
 
     pub(crate) fn compose(&self) -> Result<Message0> {
-        let close_transaction = CloseTransaction::new(&self.TX_f, [
+        let close_transaction = CloseTransaction::new(&self.tx_f, [
             (self.balance.ours, self.final_address_self.clone()),
             (self.balance.theirs, self.final_address_other.clone()),
         ])?;
@@ -54,7 +54,7 @@ impl State0 {
             sig_close_transaction: sig_close_transaction_other,
         }: Message0,
     ) -> Result<Transaction> {
-        let close_transaction = CloseTransaction::new(&self.TX_f, [
+        let close_transaction = CloseTransaction::new(&self.tx_f, [
             (self.balance.ours, self.final_address_self),
             (self.balance.theirs, self.final_address_other),
         ])?;

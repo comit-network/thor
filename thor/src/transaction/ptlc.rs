@@ -24,9 +24,9 @@ pub(crate) struct RedeemTransaction {
 }
 
 impl RedeemTransaction {
-    pub fn new(TX_s: &SplitTransaction, ptlc: Ptlc, redeem_address: Address) -> Result<Self> {
+    pub fn new(tx_s: &SplitTransaction, ptlc: Ptlc, redeem_address: Address) -> Result<Self> {
         let (transaction, digest, input_descriptor) =
-            spend_transaction(TX_s, ptlc, redeem_address, 0xFFFF_FFFF)?;
+            spend_transaction(tx_s, ptlc, redeem_address, 0xFFFF_FFFF)?;
 
         Ok(Self {
             inner: transaction,
@@ -96,9 +96,9 @@ pub(crate) struct RefundTransaction {
 }
 
 impl RefundTransaction {
-    pub fn new(TX_s: &SplitTransaction, ptlc: Ptlc, refund_address: Address) -> Result<Self> {
+    pub fn new(tx_s: &SplitTransaction, ptlc: Ptlc, refund_address: Address) -> Result<Self> {
         let (transaction, digest, input_descriptor) =
-            spend_transaction(TX_s, ptlc.clone(), refund_address, ptlc.refund_time_lock)?;
+            spend_transaction(tx_s, ptlc.clone(), refund_address, ptlc.refund_time_lock)?;
 
         Ok(Self {
             inner: transaction,
@@ -155,7 +155,7 @@ impl RefundTransaction {
 }
 
 pub(crate) fn spend_transaction(
-    TX_s: &SplitTransaction,
+    tx_s: &SplitTransaction,
     ptlc: Ptlc,
     refund_address: Address,
     input_sequence: u32,
@@ -165,22 +165,22 @@ pub(crate) fn spend_transaction(
     let [X_0, X_1] = Xs;
     let ptlc_output_descriptor = build_shared_output_descriptor(X_0, X_1);
 
-    let vout = TX_s
+    let vout = tx_s
         .inner
         .output
         .iter()
         .position(|output| output.script_pubkey == ptlc_output_descriptor.script_pubkey())
-        .ok_or_else(|| anyhow!("TX_s does not contain PTLC output"))?;
+        .ok_or_else(|| anyhow!("tx_s does not contain PTLC output"))?;
 
     #[allow(clippy::cast_possible_truncation)]
     let input = TxIn {
-        previous_output: OutPoint::new(TX_s.txid(), vout as u32),
+        previous_output: OutPoint::new(tx_s.txid(), vout as u32),
         script_sig: Script::new(),
         sequence: input_sequence,
         witness: Vec::new(),
     };
 
-    let ptlc_output_value = TX_s.inner.output[vout].value;
+    let ptlc_output_value = tx_s.inner.output[vout].value;
     let output = TxOut {
         value: ptlc_output_value - TX_FEE,
         script_pubkey: refund_address.script_pubkey(),
