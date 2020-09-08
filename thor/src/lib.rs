@@ -103,42 +103,42 @@ impl Channel {
         let final_address = wallet.new_address().await?;
         let state0 = create::State0::new(balance, time_lock, final_address);
 
-        let send = state0.next_message();
+        let send = state0.compose();
         transport.send_message(Message::Create0(send)).await?;
 
         let recv = map_err(transport.receive_message().await?.into_create0())?;
-        let state1 = state0.receive(recv, wallet).await?;
+        let state1 = state0.interpret(recv, wallet).await?;
 
-        let send = state1.next_message();
+        let send = state1.compose();
         transport.send_message(Message::Create1(send)).await?;
 
         let recv = map_err(transport.receive_message().await?.into_create1())?;
-        let state2 = state1.receive(recv)?;
+        let state2 = state1.interpret(recv)?;
 
-        let send = state2.next_message();
+        let send = state2.compose();
         transport.send_message(Message::Create2(send)).await?;
 
         let recv = map_err(transport.receive_message().await?.into_create2())?;
-        let state3 = state2.receive(recv)?;
+        let state3 = state2.interpret(recv)?;
 
-        let send = state3.next_message();
+        let send = state3.compose();
         transport.send_message(Message::Create3(send)).await?;
 
         let recv = map_err(transport.receive_message().await?.into_create3())?;
-        let state_4 = state3.receive(recv)?;
+        let state_4 = state3.interpret(recv)?;
 
-        let send = state_4.next_message();
+        let send = state_4.compose();
         transport.send_message(Message::Create4(send)).await?;
 
         let recv = map_err(transport.receive_message().await?.into_create4())?;
-        let state5 = state_4.receive(recv)?;
+        let state5 = state_4.interpret(recv)?;
 
-        let send = state5.next_message(wallet).await?;
+        let send = state5.compose(wallet).await?;
         transport.send_message(Message::Create5(send)).await?;
 
         let recv = map_err(transport.receive_message().await?.into_create5())?;
 
-        let (channel, transaction) = state5.receive(recv, wallet).await?;
+        let (channel, transaction) = state5.interpret(recv, wallet).await?;
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
@@ -601,30 +601,30 @@ impl Channel {
         )
         .await?;
 
-        let msg0_self = state0.next_message();
+        let msg0_self = state0.compose();
         transport.send_message(Message::Splice0(msg0_self)).await?;
 
         let msg0_other = map_err(transport.receive_message().await?.into_splice0())?;
-        let state1 = state0.receive(msg0_other)?;
+        let state1 = state0.interpret(msg0_other)?;
 
-        let msg1_self = state1.next_message();
+        let msg1_self = state1.compose();
         transport.send_message(Message::Splice1(msg1_self)).await?;
 
         let msg1_other = map_err(transport.receive_message().await?.into_splice1())?;
-        let state2 = state1.receive(msg1_other)?;
+        let state2 = state1.interpret(msg1_other)?;
 
-        let msg2_self = state2.next_message();
+        let msg2_self = state2.compose();
         transport.send_message(Message::Splice2(msg2_self)).await?;
 
         let msg2_other = map_err(transport.receive_message().await?.into_splice2())?;
-        let state3 = state2.receive(msg2_other, wallet).await?;
+        let state3 = state2.interpret(msg2_other, wallet).await?;
 
-        let msg3_self = state3.next_message().await?;
+        let msg3_self = state3.compose().await?;
         transport.send_message(Message::Splice3(msg3_self)).await?;
 
         let msg3_other = map_err(transport.receive_message().await?.into_splice3())?;
 
-        let (channel, transaction) = state3.receive(msg3_other, wallet).await?;
+        let (channel, transaction) = state3.interpret(msg3_other, wallet).await?;
 
         wallet.broadcast_signed_transaction(transaction).await?;
 

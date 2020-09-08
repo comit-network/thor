@@ -87,14 +87,14 @@ impl State0 {
         }
     }
 
-    pub fn next_message(&self) -> Message0 {
+    pub fn compose(&self) -> Message0 {
         Message0 {
             X: self.x_self.public(),
             final_address: self.final_address_self.clone(),
         }
     }
 
-    pub async fn receive(
+    pub async fn interpret(
         self,
         Message0 {
             X: X_other,
@@ -131,13 +131,13 @@ pub(crate) struct State1 {
 }
 
 impl State1 {
-    pub fn next_message(&self) -> Message1 {
+    pub fn compose(&self) -> Message1 {
         Message1 {
             input_psbt: self.input_psbt_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub fn interpret(
         self,
         Message1 {
             input_psbt: input_pstb_other,
@@ -180,14 +180,14 @@ pub(crate) struct State2 {
 }
 
 impl State2 {
-    pub fn next_message(&self) -> Message2 {
+    pub fn compose(&self) -> Message2 {
         Message2 {
             R: self.r_self.public(),
             Y: self.y_self.public(),
         }
     }
 
-    pub fn receive(
+    pub fn interpret(
         self,
         Message2 {
             R: R_other,
@@ -256,13 +256,13 @@ pub(crate) struct Party3 {
 }
 
 impl Party3 {
-    pub fn next_message(&self) -> Message3 {
+    pub fn compose(&self) -> Message3 {
         Message3 {
             sig_tx_s: self.sig_tx_s_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub fn interpret(
         mut self,
         Message3 {
             sig_tx_s: sig_tx_s_other,
@@ -315,13 +315,13 @@ pub(crate) struct Party4 {
 }
 
 impl Party4 {
-    pub fn next_message(&self) -> Message4 {
+    pub fn compose(&self) -> Message4 {
         Message4 {
             encsig_tx_c: self.encsig_tx_c_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub fn interpret(
         self,
         Message4 {
             encsig_tx_c: encsig_tx_c_other,
@@ -380,7 +380,7 @@ pub trait SignFundingPSBT {
 }
 
 impl Party5 {
-    pub async fn next_message(&self, wallet: &impl SignFundingPSBT) -> Result<Message5> {
+    pub async fn compose(&self, wallet: &impl SignFundingPSBT) -> Result<Message5> {
         let tx_f_signed_once = wallet
             .sign_funding_psbt(self.tx_f.clone().into_psbt()?)
             .await?;
@@ -389,7 +389,7 @@ impl Party5 {
     }
 
     /// Returns the Channel and the transaction to broadcast.
-    pub async fn receive(
+    pub async fn interpret(
         self,
         Message5 { tx_f_signed_once }: Message5,
         wallet: &impl SignFundingPSBT,
