@@ -556,7 +556,7 @@ impl Channel {
         let x_self = self.x_self;
         let X_other = self.X_other;
 
-        let state0 = splice::State0::new(
+        let state = splice::State0::new(
             time_lock,
             final_address_self,
             final_address_other,
@@ -569,30 +569,23 @@ impl Channel {
         )
         .await?;
 
-        let msg0_self = state0.compose();
-        transport.send_message(Message::Splice0(msg0_self)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let msg0_other = map_err(transport.receive_message().await?.into_splice0())?;
-        let state1 = state0.interpret(msg0_other)?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let msg1_self = state1.compose();
-        transport.send_message(Message::Splice1(msg1_self)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response, wallet).await?;
 
-        let msg1_other = map_err(transport.receive_message().await?.into_splice1())?;
-        let state2 = state1.interpret(msg1_other)?;
-
-        let msg2_self = state2.compose();
-        transport.send_message(Message::Splice2(msg2_self)).await?;
-
-        let msg2_other = map_err(transport.receive_message().await?.into_splice2())?;
-        let state3 = state2.interpret(msg2_other, wallet).await?;
-
-        let msg3_self = state3.compose().await?;
-        transport.send_message(Message::Splice3(msg3_self)).await?;
-
-        let msg3_other = map_err(transport.receive_message().await?.into_splice3())?;
-
-        let (channel, transaction) = state3.interpret(msg3_other, wallet).await?;
+        transport
+            .send_message(state.compose().await?.into())
+            .await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let (channel, transaction) = state.interpret(response, wallet).await?;
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
@@ -1075,6 +1068,86 @@ impl TryFrom<Message> for close::Message0 {
             Message::Close0(m) => Ok(m),
             _ => Err(UnexpectedMessage {
                 expected_type: "Close0".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<splice::Message0> for Message {
+    fn from(m: splice::Message0) -> Self {
+        Message::Splice0(m)
+    }
+}
+
+impl TryFrom<Message> for splice::Message0 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Splice0(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Splice0".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<splice::Message1> for Message {
+    fn from(m: splice::Message1) -> Self {
+        Message::Splice1(m)
+    }
+}
+
+impl TryFrom<Message> for splice::Message1 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Splice1(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Splice1".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<splice::Message2> for Message {
+    fn from(m: splice::Message2) -> Self {
+        Message::Splice2(m)
+    }
+}
+
+impl TryFrom<Message> for splice::Message2 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Splice2(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Splice2".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<splice::Message3> for Message {
+    fn from(m: splice::Message3) -> Self {
+        Message::Splice3(m)
+    }
+}
+
+impl TryFrom<Message> for splice::Message3 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Splice3(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Splice3".to_string(),
                 received: m,
             }),
         }
