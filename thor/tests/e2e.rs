@@ -126,8 +126,8 @@ fn e2e_channel_collaborative_close() {
         .block_on(future::try_join(a_create, b_create))
         .unwrap();
 
-    let after_open_alice_balance = runtime.block_on(wallet_alice.0.balance()).unwrap();
-    let after_open_bob_balance = runtime.block_on(wallet_bob.0.balance()).unwrap();
+    let after_open_alice_balance = runtime.block_on(wallet_alice.balance()).unwrap();
+    let after_open_bob_balance = runtime.block_on(wallet_bob.balance()).unwrap();
 
     let a_close = a_channel.close(&mut a_transport, &wallet_alice);
     let b_close = b_channel.close(&mut b_transport, &wallet_bob);
@@ -136,8 +136,8 @@ fn e2e_channel_collaborative_close() {
         .block_on(future::try_join(a_close, b_close))
         .unwrap();
 
-    let after_close_alice_balance = runtime.block_on(wallet_alice.0.balance()).unwrap();
-    let after_close_bob_balance = runtime.block_on(wallet_bob.0.balance()).unwrap();
+    let after_close_alice_balance = runtime.block_on(wallet_alice.balance()).unwrap();
+    let after_close_bob_balance = runtime.block_on(wallet_bob.balance()).unwrap();
 
     // We pay half a `thor::TX_FEE` per output in fees for each transaction after
     // the `FundingTransaction`. Collaboratively closing the channel requires
@@ -182,8 +182,8 @@ fn e2e_punish_publication_of_revoked_commit_transaction() {
         .block_on(future::try_join(a_create, b_create))
         .unwrap();
 
-    let after_open_alice_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_open_bob_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_open_alice_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_open_bob_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
     let payment = Amount::from_btc(0.5).unwrap();
@@ -224,8 +224,8 @@ fn e2e_punish_publication_of_revoked_commit_transaction() {
         .block_on(b_channel.punish(&b_wallet, signed_revoked_tx_c))
         .unwrap();
 
-    let after_punish_a_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_punish_b_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_punish_a_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_punish_b_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     assert_eq!(
         after_punish_a_balance, after_open_alice_balance,
@@ -263,13 +263,13 @@ fn e2e_force_close_channel() {
         .block_on(future::try_join(a_create, b_create))
         .unwrap();
 
-    let after_open_alice_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_open_bob_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_open_alice_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_open_bob_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     runtime.block_on(a_channel.force_close(&a_wallet)).unwrap();
 
-    let after_close_alice_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_close_bob_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_close_alice_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_close_bob_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     // We pay half a `thor::TX_FEE` per output in fees for each transaction after
     // the `FundingTransaction`. Force closing the channel requires publishing
@@ -320,8 +320,8 @@ fn e2e_force_close_after_updates() {
         .block_on(future::try_join(a_create, b_create))
         .unwrap();
 
-    let after_create_a_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_create_b_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_create_a_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_create_b_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     // Alice pays Bob 0.1 BTC
 
@@ -356,8 +356,8 @@ fn e2e_force_close_after_updates() {
 
     // Assert:
 
-    let after_close_alice_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_close_bob_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_close_alice_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_close_bob_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     // We pay half a `thor::TX_FEE` per output in fees for each transaction after
     // the `FundingTransaction`. Force closing the channel requires
@@ -394,8 +394,8 @@ async fn e2e_splice_in() {
     let (a_wallet, b_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
     let (mut a_transport, mut b_transport) = make_transports();
 
-    let before_create_a_balance = a_wallet.0.balance().await.unwrap();
-    let before_create_b_balance = b_wallet.0.balance().await.unwrap();
+    let before_create_a_balance = a_wallet.balance().await.unwrap();
+    let before_create_b_balance = b_wallet.balance().await.unwrap();
 
     // Act: Create a new channel
 
@@ -580,9 +580,9 @@ async fn e2e_splice_out() {
     } = a_channel.balance();
 
     let bitcoind_fee_alice =
-        before_create_balance_alice - Amount::ONE_BTC - a_wallet.0.balance().await.unwrap();
+        before_create_balance_alice - Amount::ONE_BTC - a_wallet.balance().await.unwrap();
     let mut bitcoind_fee_bob =
-        before_create_balance_bob - Amount::ONE_BTC - b_wallet.0.balance().await.unwrap();
+        before_create_balance_bob - Amount::ONE_BTC - b_wallet.balance().await.unwrap();
 
     // Act: Alice pays Bob 0.3 BTC
 
@@ -631,7 +631,7 @@ async fn e2e_splice_out() {
         value: b_splice_out_amount.as_sat(),
     });
 
-    let before_splice_bob_balance = b_wallet.0.balance().await.unwrap();
+    let before_splice_bob_balance = b_wallet.balance().await.unwrap();
 
     let a_splice = a_channel.splice(&mut a_transport, &a_wallet, Splice::None);
     let b_splice = b_channel.splice(&mut b_transport, &b_wallet, b_splice);
@@ -658,7 +658,7 @@ async fn e2e_splice_out() {
     } = a_channel.balance();
 
     bitcoind_fee_bob +=
-        before_splice_bob_balance + b_splice_out_amount - b_wallet.0.balance().await.unwrap();
+        before_splice_bob_balance + b_splice_out_amount - b_wallet.balance().await.unwrap();
 
     // Act: Alice pays Bob 0.5 BTC
 
@@ -711,8 +711,8 @@ async fn e2e_splice_out() {
 
     future::try_join(a_close, b_close).await.unwrap();
 
-    let after_close_balance_alice = a_wallet.0.balance().await.unwrap();
-    let after_close_balance_bob = b_wallet.0.balance().await.unwrap();
+    let after_close_balance_alice = a_wallet.balance().await.unwrap();
+    let after_close_balance_bob = b_wallet.balance().await.unwrap();
 
     // We pay half a `thor::TX_FEE` per output in fees for each transaction after
     // the `FundingTransaction`. Collaboratively closing the channel requires
@@ -754,8 +754,8 @@ async fn e2e_channel_splice_in_and_force_close() {
     let (a_wallet, b_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
     let (mut a_transport, mut b_transport) = make_transports();
 
-    let before_create_a_balance = a_wallet.0.balance().await.unwrap();
-    let before_create_b_balance = b_wallet.0.balance().await.unwrap();
+    let before_create_a_balance = a_wallet.balance().await.unwrap();
+    let before_create_b_balance = b_wallet.balance().await.unwrap();
 
     // Act: Create a new channel
 
@@ -775,9 +775,9 @@ async fn e2e_channel_splice_in_and_force_close() {
     } = a_channel.balance();
 
     let mut bitcoind_fee_alice =
-        before_create_a_balance - Amount::ONE_BTC - a_wallet.0.balance().await.unwrap();
+        before_create_a_balance - Amount::ONE_BTC - a_wallet.balance().await.unwrap();
     let bitcoind_fee_bob =
-        before_create_b_balance - Amount::ONE_BTC - b_wallet.0.balance().await.unwrap();
+        before_create_b_balance - Amount::ONE_BTC - b_wallet.balance().await.unwrap();
 
     // Act: Alice pays Bob 0.9 BTC
 
@@ -821,7 +821,7 @@ async fn e2e_channel_splice_in_and_force_close() {
 
     let a_splice_in = Amount::from_btc(0.5).unwrap();
 
-    let before_splice_alice_balance = a_wallet.0.balance().await.unwrap();
+    let before_splice_alice_balance = a_wallet.balance().await.unwrap();
 
     let a_splice = a_channel.splice(&mut a_transport, &a_wallet, Splice::In(a_splice_in));
     let b_splice = b_channel.splice(&mut b_transport, &b_wallet, Splice::None);
@@ -842,7 +842,7 @@ async fn e2e_channel_splice_in_and_force_close() {
     } = a_channel.balance();
 
     bitcoind_fee_alice +=
-        before_splice_alice_balance - a_splice_in - a_wallet.0.balance().await.unwrap();
+        before_splice_alice_balance - a_splice_in - a_wallet.balance().await.unwrap();
 
     // Act: Bob pays Alice 0.3 BTC
 
@@ -881,8 +881,8 @@ async fn e2e_channel_splice_in_and_force_close() {
 
     a_channel.force_close(&a_wallet).await.unwrap();
 
-    let after_close_alice_balance = a_wallet.0.balance().await.unwrap();
-    let after_close_bob_balance = b_wallet.0.balance().await.unwrap();
+    let after_close_alice_balance = a_wallet.balance().await.unwrap();
+    let after_close_bob_balance = b_wallet.balance().await.unwrap();
     // We pay half a `thor::TX_FEE` per output in fees for each transaction after
     // the `FundingTransaction`. Force closing the channel requires
     // publishing two transactions: a `CommitTransaction` and a `SplitTransaction`,
@@ -936,8 +936,8 @@ fn e2e_atomic_swap_happy() {
         .block_on(future::try_join(a_create, b_create))
         .unwrap();
 
-    let after_open_alice_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_open_bob_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_open_alice_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_open_bob_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     let secret = PtlcSecret::new_random();
     let point = secret.point();
@@ -976,8 +976,8 @@ fn e2e_atomic_swap_happy() {
 
     runtime.block_on(a_channel.force_close(&a_wallet)).unwrap();
 
-    let after_close_alice_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_close_bob_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_close_alice_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_close_bob_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     // We pay half a `thor::TX_FEE` per output in fees for each transaction after
     // the `FundingTransaction`. Force closing the channel requires
@@ -1023,8 +1023,8 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         .block_on(future::try_join(a_create, b_create))
         .unwrap();
 
-    let after_open_alice_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_open_bob_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_open_alice_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_open_bob_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     let secret = PtlcSecret::new_random();
     let point = secret.point();
@@ -1063,8 +1063,8 @@ fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         ))
         .unwrap();
 
-    let after_close_alice_balance = runtime.block_on(a_wallet.0.balance()).unwrap();
-    let after_close_bob_balance = runtime.block_on(b_wallet.0.balance()).unwrap();
+    let after_close_alice_balance = runtime.block_on(a_wallet.balance()).unwrap();
+    let after_close_bob_balance = runtime.block_on(b_wallet.balance()).unwrap();
 
     // A `SplitTransaction` containing a PTLC output has 2 balance outputs and 1
     // PTLC output, for a total of 3

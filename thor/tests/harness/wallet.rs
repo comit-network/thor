@@ -13,6 +13,11 @@ impl Wallet {
 
         Ok(Self(wallet))
     }
+
+    pub async fn balance(&self) -> Result<Amount> {
+        let b = self.0.balance().await?;
+        Ok(b)
+    }
 }
 
 /// Create two bitcoind wallets on the `bitcoind` node and fund them with the
