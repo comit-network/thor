@@ -1,7 +1,10 @@
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use futures::{
-    channel::mpsc::{self, Receiver, Sender},
+    channel::{
+        mpsc,
+        mpsc::{Receiver, Sender},
+    },
     SinkExt, StreamExt,
 };
 use thor::{Message, ReceiveMessage, SendMessage};
