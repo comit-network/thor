@@ -21,7 +21,7 @@ impl Wallet {
 pub async fn make_wallets(
     bitcoind: &Bitcoind<'_>,
     fund_amount: Amount,
-) -> anyhow::Result<(Wallet, Wallet)> {
+) -> Result<(Wallet, Wallet)> {
     _make_wallets(bitcoind, fund_amount, fund_amount).await
 }
 
@@ -29,7 +29,7 @@ async fn _make_wallets(
     bitcoind: &Bitcoind<'_>,
     a_fund_amount: Amount,
     b_fund_amount: Amount,
-) -> anyhow::Result<(Wallet, Wallet)> {
+) -> Result<(Wallet, Wallet)> {
     let alice = Wallet::new("alice", bitcoind.node_url.clone()).await?;
     let bob = Wallet::new("bob", bitcoind.node_url.clone()).await?;
 
