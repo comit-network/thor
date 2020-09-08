@@ -15,32 +15,27 @@ impl Wallet {
     }
 }
 
-/// Create two bitcoind wallets on the node passed as an argument and fund them
-/// with the amount that they will contribute to the channel, plus a buffer to
-/// account for transaction fees.
+/// Create two bitcoind wallets on the `bitcoind` node and fund them with the
+/// amount that they will contribute to the channel, plus a buffer to account
+/// for transaction fees.
 pub async fn make_wallets(
     bitcoind: &Bitcoind<'_>,
     fund_amount: Amount,
 ) -> Result<(Wallet, Wallet)> {
-    _make_wallets(bitcoind, fund_amount, fund_amount).await
-}
-
-async fn _make_wallets(
-    bitcoind: &Bitcoind<'_>,
-    a_fund_amount: Amount,
-    b_fund_amount: Amount,
-) -> Result<(Wallet, Wallet)> {
-    let alice = Wallet::new("alice", bitcoind.node_url.clone()).await?;
-    let bob = Wallet::new("bob", bitcoind.node_url.clone()).await?;
-
-    let buffer = Amount::from_btc(1.0).unwrap();
-
-    for (wallet, amount) in vec![(&alice, a_fund_amount), (&bob, b_fund_amount)].iter() {
-        let address = wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, *amount + buffer).await.unwrap();
-    }
+    let alice = make_wallet("alice", bitcoind, fund_amount).await?;
+    let bob = make_wallet("bob", bitcoind, fund_amount).await?;
 
     Ok((alice, bob))
+}
+
+async fn make_wallet(name: &str, bitcoind: &Bitcoind<'_>, fund_amount: Amount) -> Result<Wallet> {
+    let wallet = Wallet::new(name, bitcoind.node_url.clone()).await?;
+
+    let buffer = Amount::from_btc(1.0)?;
+    let address = wallet.0.new_address().await.unwrap();
+    bitcoind.mint(address, fund_amount + buffer).await.unwrap();
+
+    Ok(wallet)
 }
 
 #[async_trait]
