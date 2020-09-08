@@ -455,13 +455,11 @@ impl Channel {
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
     {
-        let state0 = close::State0::new(&self);
+        let state = close::State0::new(&self);
 
-        let msg0_self = state0.compose()?;
-        transport.send_message(Message::Close0(msg0_self)).await?;
-
-        let msg0_other = map_err(transport.receive_message().await?.into_close0())?;
-        let close_transaction = state0.interpret(msg0_other)?;
+        transport.send_message(state.compose()?.into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let close_transaction = state.interpret(response)?;
 
         wallet
             .broadcast_signed_transaction(close_transaction)
@@ -1057,6 +1055,26 @@ impl TryFrom<Message> for update::RevealRevocationSecretKey {
             Message::Update3(m) => Ok(m),
             _ => Err(UnexpectedMessage {
                 expected_type: "Update3".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<close::Message0> for Message {
+    fn from(m: close::Message0) -> Self {
+        Message::Close0(m)
+    }
+}
+
+impl TryFrom<Message> for close::Message0 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Close0(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Close0".to_string(),
                 received: m,
             }),
         }
