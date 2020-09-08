@@ -473,18 +473,13 @@ impl Channel {
     where
         W: NewAddress + BroadcastSignedTransaction,
     {
-        let current_state = StandardChannelState::from(self.current_state.clone());
+        let state = StandardChannelState::from(self.current_state.clone());
 
-        let commit_transaction =
-            current_state.signed_tx_c(&self.tx_f_body, &self.x_self, &self.X_other)?;
-        wallet
-            .broadcast_signed_transaction(commit_transaction)
-            .await?;
+        let commit = state.signed_tx_c(&self.tx_f_body, &self.x_self, &self.X_other)?;
+        wallet.broadcast_signed_transaction(commit).await?;
 
-        let split_transaction = current_state.signed_tx_s.clone();
-        wallet
-            .broadcast_signed_transaction(split_transaction.clone().into())
-            .await?;
+        let split = state.signed_tx_s;
+        wallet.broadcast_signed_transaction(split.into()).await?;
 
         Ok(())
     }
