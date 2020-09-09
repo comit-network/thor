@@ -1,10 +1,11 @@
 use crate::{
+    channel::ChannelState,
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
     transaction::{balance, ptlc, CommitTransaction, FundingTransaction, SplitTransaction},
-    Channel, ChannelState, Ptlc, RevokedState, SplitOutput, StandardChannelState,
+    Channel, Ptlc, RevokedState, SplitOutput, StandardChannelState,
 };
 use anyhow::Context;
 use bitcoin::Address;
@@ -40,7 +41,7 @@ pub struct RevealRevocationSecretKey {
 }
 
 #[derive(Debug)]
-pub struct State0 {
+pub(in crate::channel) struct State0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -55,7 +56,11 @@ pub struct State0 {
 }
 
 impl State0 {
-    pub fn new(channel: Channel, new_split_outputs: Vec<SplitOutput>, time_lock: u32) -> Self {
+    pub(in crate::channel) fn new(
+        channel: Channel,
+        new_split_outputs: Vec<SplitOutput>,
+        time_lock: u32,
+    ) -> Self {
         let r_self = RevocationKeyPair::new_random();
         let y_self = PublishingKeyPair::new_random();
 
@@ -74,14 +79,14 @@ impl State0 {
         }
     }
 
-    pub fn compose(&self) -> ShareKeys {
+    pub(in crate::channel) fn compose(&self) -> ShareKeys {
         ShareKeys {
             R: self.r_self.public(),
             Y: self.y_self.public(),
         }
     }
 
-    pub fn interpret(
+    pub(in crate::channel) fn interpret(
         self,
         ShareKeys {
             R: R_other,
@@ -152,7 +157,8 @@ impl State0 {
 /// of said output, the party will transition to `State1PtlcFunder` or
 /// `State1PtlcRedeemer` respectively.
 #[allow(clippy::large_enum_variant)]
-pub enum State1Kind {
+#[derive(Debug)]
+pub(in crate::channel) enum State1Kind {
     State1(State1),
     State1PtlcFunder(State1PtlcFunder),
     State1PtlcRedeemer(State1PtlcRedeemer),
@@ -180,7 +186,8 @@ pub struct SignaturesPtlcRedeemer {
 /// with the counterparty and is ready to start exchanging signatures for the
 /// `ptlc::RedeemTransaction` and `ptlc::RefundTransaction` involving a PTLC
 /// output which they are funding.
-pub struct State1PtlcFunder {
+#[derive(Debug)]
+pub(in crate::channel) struct State1PtlcFunder {
     inner: State1,
     ptlc: Ptlc,
     TX_ptlc_redeem: ptlc::RedeemTransaction,
@@ -190,7 +197,7 @@ pub struct State1PtlcFunder {
 }
 
 impl State1PtlcFunder {
-    pub fn new(state: State1, ptlc: Ptlc) -> anyhow::Result<Self> {
+    pub(in crate::channel) fn new(state: State1, ptlc: Ptlc) -> anyhow::Result<Self> {
         let TX_ptlc_redeem = ptlc::RedeemTransaction::new(
             &state.TX_s,
             ptlc.clone(),
@@ -215,14 +222,17 @@ impl State1PtlcFunder {
         })
     }
 
-    pub fn compose(&self) -> SignaturesPtlcFunder {
+    pub(in crate::channel) fn compose(&self) -> SignaturesPtlcFunder {
         SignaturesPtlcFunder {
             encsig_TX_ptlc_redeem_funder: self.encsig_TX_ptlc_redeem_funder.clone(),
             sig_TX_ptlc_refund_funder: self.sig_TX_ptlc_refund_funder.clone(),
         }
     }
 
-    pub fn interpret(self, message: SignaturesPtlcRedeemer) -> anyhow::Result<WithPtlc<State1>> {
+    pub(in crate::channel) fn interpret(
+        self,
+        message: SignaturesPtlcRedeemer,
+    ) -> anyhow::Result<WithPtlc<State1>> {
         self.TX_ptlc_refund
             .verify_sig(
                 self.inner.X_other.clone(),
@@ -259,7 +269,8 @@ impl State1PtlcFunder {
 /// with the counterparty and is ready to start exchanging signatures for the
 /// `ptlc::RedeemTransaction` and `ptlc::RefundTransaction` involving a PTLC
 /// output which they are redeeming.
-pub struct State1PtlcRedeemer {
+#[derive(Debug)]
+pub(in crate::channel) struct State1PtlcRedeemer {
     inner: State1,
     ptlc: Ptlc,
     TX_ptlc_redeem: ptlc::RedeemTransaction,
@@ -269,7 +280,7 @@ pub struct State1PtlcRedeemer {
 }
 
 impl State1PtlcRedeemer {
-    pub fn new(state: State1, ptlc: Ptlc) -> anyhow::Result<Self> {
+    pub(in crate::channel) fn new(state: State1, ptlc: Ptlc) -> anyhow::Result<Self> {
         let TX_ptlc_redeem = ptlc::RedeemTransaction::new(
             &state.TX_s,
             ptlc.clone(),
@@ -294,14 +305,17 @@ impl State1PtlcRedeemer {
         })
     }
 
-    pub fn compose(&self) -> SignaturesPtlcRedeemer {
+    pub(in crate::channel) fn compose(&self) -> SignaturesPtlcRedeemer {
         SignaturesPtlcRedeemer {
             sig_TX_ptlc_redeem_redeemer: self.sig_TX_ptlc_redeem_redeemer.clone(),
             sig_TX_ptlc_refund_redeemer: self.sig_TX_ptlc_refund_redeemer.clone(),
         }
     }
 
-    pub fn interpret(self, message: SignaturesPtlcFunder) -> anyhow::Result<WithPtlc<State1>> {
+    pub(in crate::channel) fn interpret(
+        self,
+        message: SignaturesPtlcFunder,
+    ) -> anyhow::Result<WithPtlc<State1>> {
         self.TX_ptlc_redeem
             .verify_encsig(
                 self.inner.X_other.clone(),
@@ -326,7 +340,7 @@ impl State1PtlcRedeemer {
 /// A party who has exchanged `RevocationPublicKey`s and `PublishingPublicKey`s
 /// with the counterparty and is ready to start exchanging signatures.
 #[derive(Clone, Debug)]
-pub struct State1 {
+pub(in crate::channel) struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -346,13 +360,13 @@ pub struct State1 {
 }
 
 impl State1 {
-    pub fn compose(&self) -> ShareSplitSignature {
+    pub(in crate::channel) fn compose(&self) -> ShareSplitSignature {
         ShareSplitSignature {
             sig_TX_s: self.sig_TX_s_self.clone(),
         }
     }
 
-    pub fn interpret(
+    pub(in crate::channel) fn interpret(
         mut self,
         ShareSplitSignature {
             sig_TX_s: sig_TX_s_other,
@@ -391,7 +405,7 @@ impl State1 {
 /// and is ready to start exchanging encrypted signatures for the
 /// `CommitTransaction`.
 #[derive(Debug)]
-pub struct State2 {
+pub(in crate::channel) struct State2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -410,13 +424,13 @@ pub struct State2 {
 }
 
 impl State2 {
-    pub fn compose(&self) -> ShareCommitEncryptedSignature {
+    pub(in crate::channel) fn compose(&self) -> ShareCommitEncryptedSignature {
         ShareCommitEncryptedSignature {
             encsig_TX_c: self.encsig_TX_c_self.clone(),
         }
     }
 
-    pub fn interpret(
+    pub(in crate::channel) fn interpret(
         self,
         ShareCommitEncryptedSignature {
             encsig_TX_c: encsig_TX_c_other,
@@ -455,7 +469,7 @@ impl State2 {
 /// channel update and just needs to collaborate with the counterparty
 /// to revoke the previous `CommitTransaction`.
 #[derive(Debug)]
-pub struct State3 {
+pub(in crate::channel) struct State3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -475,7 +489,7 @@ pub struct State3 {
 }
 
 impl State3 {
-    pub fn compose(&self) -> RevealRevocationSecretKey {
+    pub(in crate::channel) fn compose(&self) -> RevealRevocationSecretKey {
         RevealRevocationSecretKey {
             r: StandardChannelState::from(self.current_state.clone())
                 .r_self
@@ -483,7 +497,7 @@ impl State3 {
         }
     }
 
-    pub fn interpret(
+    pub(in crate::channel) fn interpret(
         self,
         RevealRevocationSecretKey { r: r_other }: RevealRevocationSecretKey,
     ) -> anyhow::Result<Channel> {
@@ -525,8 +539,8 @@ impl State3 {
     }
 }
 
-#[derive(Clone)]
-pub struct WithPtlc<S> {
+#[derive(Debug, Clone)]
+pub(in crate::channel) struct WithPtlc<S> {
     state: S,
     ptlc: Ptlc,
     TX_ptlc_redeem: ptlc::RedeemTransaction,
@@ -538,11 +552,14 @@ pub struct WithPtlc<S> {
 }
 
 impl WithPtlc<State1> {
-    pub fn compose(&self) -> ShareSplitSignature {
+    pub(in crate::channel) fn compose(&self) -> ShareSplitSignature {
         self.state.compose()
     }
 
-    pub fn interpret(self, message: ShareSplitSignature) -> anyhow::Result<WithPtlc<State2>> {
+    pub(in crate::channel) fn interpret(
+        self,
+        message: ShareSplitSignature,
+    ) -> anyhow::Result<WithPtlc<State2>> {
         let state = self.state.interpret(message)?;
 
         Ok(WithPtlc {
@@ -559,11 +576,11 @@ impl WithPtlc<State1> {
 }
 
 impl WithPtlc<State2> {
-    pub fn compose(&self) -> ShareCommitEncryptedSignature {
+    pub(in crate::channel) fn compose(&self) -> ShareCommitEncryptedSignature {
         self.state.compose()
     }
 
-    pub fn interpret(
+    pub(in crate::channel) fn interpret(
         self,
         message: ShareCommitEncryptedSignature,
     ) -> anyhow::Result<WithPtlc<State3>> {
@@ -583,11 +600,14 @@ impl WithPtlc<State2> {
 }
 
 impl WithPtlc<State3> {
-    pub fn compose(&self) -> RevealRevocationSecretKey {
+    pub(in crate::channel) fn compose(&self) -> RevealRevocationSecretKey {
         self.state.compose()
     }
 
-    pub fn interpret(self, message: RevealRevocationSecretKey) -> anyhow::Result<Channel> {
+    pub(in crate::channel) fn interpret(
+        self,
+        message: RevealRevocationSecretKey,
+    ) -> anyhow::Result<Channel> {
         let mut channel = self.state.interpret(message)?;
 
         let current_state = ChannelState::WithPtlc {

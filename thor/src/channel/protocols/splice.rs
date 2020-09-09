@@ -1,4 +1,8 @@
 use crate::{
+    channel::{
+        protocols::create::{BuildFundingPSBT, SignFundingPSBT},
+        ChannelState,
+    },
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
@@ -6,8 +10,7 @@ use crate::{
     transaction::{
         CommitTransaction, FundOutput, FundingTransaction, SpliceTransaction, SplitTransaction,
     },
-    Balance, BuildFundingPSBT, Channel, ChannelState, SignFundingPSBT, SplitOutput,
-    StandardChannelState,
+    Balance, Channel, SplitOutput, StandardChannelState,
 };
 use anyhow::Context;
 use bitcoin::{
@@ -51,7 +54,7 @@ pub struct Message3 {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct State0 {
+pub(in crate::channel) struct State0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -66,7 +69,7 @@ pub(crate) struct State0 {
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug)]
-pub struct SpliceIn {
+struct SpliceIn {
     #[cfg_attr(
         feature = "serde",
         serde(with = "bitcoin::util::amount::serde::as_sat")
@@ -90,7 +93,7 @@ pub trait BuildSplicePSBT {
 
 impl State0 {
     #[allow(clippy::too_many_arguments)]
-    pub async fn new<W>(
+    pub(in crate::channel) async fn new<W>(
         time_lock: u32,
         final_address_self: Address,
         final_address_other: Address,
@@ -132,7 +135,7 @@ impl State0 {
         })
     }
 
-    pub fn next_message(&self) -> Message0 {
+    pub(in crate::channel) fn next_message(&self) -> Message0 {
         Message0 {
             R: self.r_self.public(),
             Y: self.y_self.public(),
@@ -140,7 +143,7 @@ impl State0 {
         }
     }
 
-    pub fn receive(
+    pub(in crate::channel) fn receive(
         self,
         Message0 {
             R: R_other,
@@ -250,7 +253,7 @@ impl State0 {
 }
 
 #[derive(Debug)]
-pub(crate) struct State1 {
+pub(in crate::channel) struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -271,13 +274,13 @@ pub(crate) struct State1 {
 }
 
 impl State1 {
-    pub fn next_message(&self) -> Message1 {
+    pub(in crate::channel) fn next_message(&self) -> Message1 {
         Message1 {
             sig_TX_s: self.sig_TX_s_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub(in crate::channel) fn receive(
         mut self,
         Message1 {
             sig_TX_s: sig_TX_s_other,
@@ -314,7 +317,7 @@ impl State1 {
 }
 
 #[derive(Debug)]
-pub(crate) struct State2 {
+pub(in crate::channel) struct State2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -334,13 +337,13 @@ pub(crate) struct State2 {
 }
 
 impl State2 {
-    pub fn next_message(&self) -> Message2 {
+    pub(in crate::channel) fn next_message(&self) -> Message2 {
         Message2 {
             encsig_TX_c: self.encsig_TX_c_self.clone(),
         }
     }
 
-    pub async fn receive(
+    pub(in crate::channel) async fn receive(
         self,
         Message2 {
             encsig_TX_c: encsig_TX_c_other,
@@ -388,7 +391,7 @@ impl State2 {
 }
 
 #[derive(Debug)]
-pub(crate) struct State3 {
+pub(in crate::channel) struct State3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -409,7 +412,7 @@ pub(crate) struct State3 {
 }
 
 impl State3 {
-    pub async fn next_message(&self) -> anyhow::Result<Message3> {
+    pub(in crate::channel) async fn next_message(&self) -> anyhow::Result<Message3> {
         Ok(Message3 {
             splice_transaction_signature: self.splice_transaction_signature.clone(),
             signed_splice_transaction: self.signed_splice_transaction.clone(),
@@ -417,7 +420,7 @@ impl State3 {
     }
 
     /// Returns the Channel and the transaction to broadcast.
-    pub async fn receive(
+    pub(in crate::channel) async fn receive(
         self,
         Message3 {
             splice_transaction_signature: splice_transaction_signature_other,
@@ -472,7 +475,7 @@ impl State3 {
     }
 }
 
-pub fn add_signatures(
+fn add_signatures(
     mut transaction: Transaction,
     input_descriptor: Descriptor<bitcoin::PublicKey>,
     (X_0, sig_0): (OwnershipPublicKey, Signature),

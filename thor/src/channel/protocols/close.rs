@@ -8,7 +8,7 @@ use bitcoin::{Address, Transaction};
 use ecdsa_fun::Signature;
 
 #[derive(Debug)]
-pub(crate) struct State0 {
+pub(in crate::channel) struct State0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     TX_f: FundingTransaction,
@@ -24,7 +24,7 @@ pub struct Message0 {
 }
 
 impl State0 {
-    pub(crate) fn new(channel: &Channel) -> Self {
+    pub(in crate::channel) fn new(channel: &Channel) -> Self {
         Self {
             x_self: channel.x_self.clone(),
             X_other: channel.X_other.clone(),
@@ -35,7 +35,7 @@ impl State0 {
         }
     }
 
-    pub(crate) fn compose(&self) -> anyhow::Result<Message0> {
+    pub(in crate::channel) fn compose(&self) -> anyhow::Result<Message0> {
         let close_transaction = CloseTransaction::new(&self.TX_f, [
             (self.balance.ours, self.final_address_self.clone()),
             (self.balance.theirs, self.final_address_other.clone()),
@@ -47,7 +47,7 @@ impl State0 {
         })
     }
 
-    pub(crate) fn interpret(
+    pub(in crate::channel) fn interpret(
         self,
         Message0 {
             sig_close_transaction: sig_close_transaction_other,

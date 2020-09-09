@@ -1,10 +1,11 @@
 use crate::{
+    channel::ChannelState,
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
     transaction::{balance, CommitTransaction, FundOutput, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, SplitOutput, StandardChannelState,
+    Balance, Channel, SplitOutput, StandardChannelState,
 };
 use anyhow::Context;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount, Transaction};
@@ -57,7 +58,7 @@ pub struct Message5 {
 }
 
 #[derive(Debug)]
-pub(crate) struct State0 {
+pub(in crate::channel) struct State0 {
     x_self: OwnershipKeyPair,
     final_address_self: Address,
     balance: Balance,
@@ -74,7 +75,11 @@ pub trait BuildFundingPSBT {
 }
 
 impl State0 {
-    pub fn new(balance: Balance, time_lock: u32, final_address: Address) -> Self {
+    pub(in crate::channel) fn new(
+        balance: Balance,
+        time_lock: u32,
+        final_address: Address,
+    ) -> Self {
         let x_self = OwnershipKeyPair::new_random();
 
         Self {
@@ -85,14 +90,14 @@ impl State0 {
         }
     }
 
-    pub fn next_message(&self) -> Message0 {
+    pub(in crate::channel) fn next_message(&self) -> Message0 {
         Message0 {
             X: self.x_self.public(),
             final_address: self.final_address_self.clone(),
         }
     }
 
-    pub async fn receive(
+    pub(in crate::channel) async fn receive(
         self,
         Message0 {
             X: X_other,
@@ -118,7 +123,7 @@ impl State0 {
 }
 
 #[derive(Debug)]
-pub(crate) struct State1 {
+pub(in crate::channel) struct State1 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -129,13 +134,13 @@ pub(crate) struct State1 {
 }
 
 impl State1 {
-    pub fn next_message(&self) -> Message1 {
+    pub(in crate::channel) fn next_message(&self) -> Message1 {
         Message1 {
             input_psbt: self.input_psbt_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub(in crate::channel) fn receive(
         self,
         Message1 {
             input_psbt: input_pstb_other,
@@ -165,7 +170,7 @@ impl State1 {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct State2 {
+pub(in crate::channel) struct State2 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -178,14 +183,14 @@ pub(crate) struct State2 {
 }
 
 impl State2 {
-    pub fn next_message(&self) -> Message2 {
+    pub(in crate::channel) fn next_message(&self) -> Message2 {
         Message2 {
             R: self.r_self.public(),
             Y: self.y_self.public(),
         }
     }
 
-    pub fn receive(
+    pub(in crate::channel) fn receive(
         self,
         Message2 {
             R: R_other,
@@ -237,7 +242,7 @@ impl State2 {
 }
 
 #[derive(Debug)]
-pub(crate) struct Party3 {
+pub(in crate::channel) struct Party3 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -254,13 +259,13 @@ pub(crate) struct Party3 {
 }
 
 impl Party3 {
-    pub fn next_message(&self) -> Message3 {
+    pub(in crate::channel) fn next_message(&self) -> Message3 {
         Message3 {
             sig_TX_s: self.sig_TX_s_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub(in crate::channel) fn receive(
         mut self,
         Message3 {
             sig_TX_s: sig_TX_s_other,
@@ -296,7 +301,7 @@ impl Party3 {
 }
 
 #[derive(Debug)]
-pub(crate) struct Party4 {
+pub(in crate::channel) struct Party4 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -313,13 +318,13 @@ pub(crate) struct Party4 {
 }
 
 impl Party4 {
-    pub fn next_message(&self) -> Message4 {
+    pub(in crate::channel) fn next_message(&self) -> Message4 {
         Message4 {
             encsig_TX_c: self.encsig_TX_c_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub(in crate::channel) fn receive(
         self,
         Message4 {
             encsig_TX_c: encsig_TX_c_other,
@@ -352,7 +357,7 @@ impl Party4 {
 }
 
 #[derive(Debug)]
-pub(crate) struct Party5 {
+pub(in crate::channel) struct Party5 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
@@ -378,7 +383,10 @@ pub trait SignFundingPSBT {
 }
 
 impl Party5 {
-    pub async fn next_message(&self, wallet: &impl SignFundingPSBT) -> anyhow::Result<Message5> {
+    pub(in crate::channel) async fn next_message(
+        &self,
+        wallet: &impl SignFundingPSBT,
+    ) -> anyhow::Result<Message5> {
         let TX_f_signed_once = wallet
             .sign_funding_psbt(self.TX_f.clone().into_psbt()?)
             .await?;
@@ -387,7 +395,7 @@ impl Party5 {
     }
 
     /// Returns the Channel and the transaction to broadcast.
-    pub async fn receive(
+    pub(in crate::channel) async fn receive(
         self,
         Message5 { TX_f_signed_once }: Message5,
         wallet: &impl SignFundingPSBT,

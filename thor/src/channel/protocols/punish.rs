@@ -5,9 +5,9 @@ use bitcoin::{Address, Transaction};
 
 #[derive(Copy, Clone, Debug, thiserror::Error)]
 #[error("transaction cannot be punished")]
-pub struct NotOldCommitTransaction;
+struct NotOldCommitTransaction;
 
-pub(crate) fn punish(
+pub(in crate::channel) fn build_punish_transaction(
     x_self: &OwnershipKeyPair,
     revoked_states: &[RevokedState],
     final_address: Address,
