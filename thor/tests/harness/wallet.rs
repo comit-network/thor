@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
+use bitcoin::{consensus, util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
 use thor::{BroadcastSignedTransaction, BuildFundingPsbt, NewAddress, SignFundingPsbt};
@@ -52,8 +52,7 @@ impl BuildFundingPsbt for Wallet {
     ) -> Result<PartiallySignedTransaction> {
         let psbt = self.0.fund_psbt(output_address, output_amount).await?;
         let as_hex = base64::decode(psbt)?;
-
-        let psbt = bitcoin::consensus::deserialize(&as_hex)?;
+        let psbt = consensus::deserialize(&as_hex)?;
 
         Ok(psbt)
     }
@@ -65,14 +64,14 @@ impl SignFundingPsbt for Wallet {
         &self,
         psbt: PartiallySignedTransaction,
     ) -> Result<PartiallySignedTransaction> {
-        let psbt = bitcoin::consensus::serialize(&psbt);
+        let psbt = consensus::serialize(&psbt);
         let as_base64 = base64::encode(psbt);
 
         let psbt = self.0.wallet_process_psbt(PsbtBase64(as_base64)).await?;
         let PsbtBase64(signed_psbt) = PsbtBase64::from(psbt);
 
         let as_hex = base64::decode(signed_psbt)?;
-        let psbt = bitcoin::consensus::deserialize(&as_hex)?;
+        let psbt = consensus::deserialize(&as_hex)?;
 
         Ok(psbt)
     }
