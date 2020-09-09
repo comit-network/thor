@@ -134,7 +134,7 @@ impl State0 {
         })
     }
 
-    pub fn next_message(&self) -> Message0 {
+    pub fn compose(&self) -> Message0 {
         Message0 {
             R: self.r_self.public(),
             Y: self.y_self.public(),
@@ -142,7 +142,7 @@ impl State0 {
         }
     }
 
-    pub fn receive(
+    pub fn interpret(
         self,
         Message0 {
             R: R_other,
@@ -273,13 +273,13 @@ pub(crate) struct State1 {
 }
 
 impl State1 {
-    pub fn next_message(&self) -> Message1 {
+    pub fn compose(&self) -> Message1 {
         Message1 {
             sig_tx_s: self.sig_tx_s_self.clone(),
         }
     }
 
-    pub fn receive(
+    pub fn interpret(
         mut self,
         Message1 {
             sig_tx_s: sig_tx_s_other,
@@ -336,13 +336,13 @@ pub(crate) struct State2 {
 }
 
 impl State2 {
-    pub fn next_message(&self) -> Message2 {
+    pub fn compose(&self) -> Message2 {
         Message2 {
             encsig_tx_c: self.encsig_tx_c_self.clone(),
         }
     }
 
-    pub async fn receive(
+    pub async fn interpret(
         self,
         Message2 {
             encsig_tx_c: encsig_tx_c_other,
@@ -411,7 +411,7 @@ pub(crate) struct State3 {
 }
 
 impl State3 {
-    pub async fn next_message(&self) -> Result<Message3> {
+    pub async fn compose(&self) -> Result<Message3> {
         Ok(Message3 {
             splice_transaction_signature: self.splice_transaction_signature.clone(),
             signed_splice_transaction: self.signed_splice_transaction.clone(),
@@ -419,7 +419,7 @@ impl State3 {
     }
 
     /// Returns the Channel and the transaction to broadcast.
-    pub async fn receive(
+    pub async fn interpret(
         self,
         Message3 {
             splice_transaction_signature: splice_transaction_signature_other,

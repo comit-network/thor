@@ -46,6 +46,7 @@ use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
 use futures::{future::Either, pin_mut, Future};
 use genawaiter::sync::Gen;
+use std::convert::{TryFrom, TryInto};
 
 // TODO: We should handle fees dynamically
 
@@ -101,44 +102,33 @@ impl Channel {
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
     {
         let final_address = wallet.new_address().await?;
-        let state0 = create::State0::new(balance, time_lock, final_address);
+        let state = create::State0::new(balance, time_lock, final_address);
 
-        let msg0_self = state0.next_message();
-        transport.send_message(Message::Create0(msg0_self)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response, wallet).await?;
 
-        let msg0_other = map_err(transport.receive_message().await?.into_create0())?;
-        let state1 = state0.receive(msg0_other, wallet).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let msg1_self = state1.next_message();
-        transport.send_message(Message::Create1(msg1_self)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let msg1_other = map_err(transport.receive_message().await?.into_create1())?;
-        let state2 = state1.receive(msg1_other)?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let msg2_self = state2.next_message();
-        transport.send_message(Message::Create2(msg2_self)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let msg2_other = map_err(transport.receive_message().await?.into_create2())?;
-        let state3 = state2.receive(msg2_other)?;
-
-        let msg3_self = state3.next_message();
-        transport.send_message(Message::Create3(msg3_self)).await?;
-
-        let msg3_other = map_err(transport.receive_message().await?.into_create3())?;
-        let state_4 = state3.receive(msg3_other)?;
-
-        let msg4_self = state_4.next_message();
-        transport.send_message(Message::Create4(msg4_self)).await?;
-
-        let msg4_other = map_err(transport.receive_message().await?.into_create4())?;
-        let state5 = state_4.receive(msg4_other)?;
-
-        let msg5_self = state5.next_message(wallet).await?;
-        transport.send_message(Message::Create5(msg5_self)).await?;
-
-        let msg5_other = map_err(transport.receive_message().await?.into_create5())?;
-
-        let (channel, transaction) = state5.receive(msg5_other, wallet).await?;
+        transport
+            .send_message(state.compose(wallet).await?.into())
+            .await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let (channel, transaction) = state.interpret(response, wallet).await?;
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
@@ -399,69 +389,49 @@ impl Channel {
     where
         T: SendMessage + ReceiveMessage,
     {
-        let state0 = update::State0::new(self.clone(), new_split_outputs, time_lock);
+        use update::*;
 
-        let msg0_self = state0.compose();
-        transport.send_message(Message::Update0(msg0_self)).await?;
+        let state = State0::new(self.clone(), new_split_outputs, time_lock);
 
-        let msg0_other = map_err(transport.receive_message().await?.into_update0())?;
-        let state1 = state0.interpret(msg0_other)?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let updated_channel = match state1 {
-            update::State1Kind::State1(state1) => update!(transport, state1),
-            update::State1Kind::State1PtlcFunder(state1_ptlc_funder) => {
-                let msg_self = state1_ptlc_funder.compose();
-                transport
-                    .send_message(Message::UpdatePtlcFunder(msg_self))
-                    .await?;
+        let updated_channel = match state {
+            State1Kind::State1(state) => update!(transport, state),
+            State1Kind::State1PtlcFunder(state) => {
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let state = state.interpret(response)?;
 
-                let msg_other = map_err(
-                    transport
-                        .receive_message()
-                        .await?
-                        .into_update_ptlc_redeemer(),
-                )?;
-                let state1 = state1_ptlc_funder.interpret(msg_other)?;
-
-                update!(transport, state1)
+                update!(transport, state)
             }
-            update::State1Kind::State1PtlcRedeemer(state1_ptlc_redeemer) => {
-                let msg_self = state1_ptlc_redeemer.compose();
-                transport
-                    .send_message(Message::UpdatePtlcRedeemer(msg_self))
-                    .await?;
+            State1Kind::State1PtlcRedeemer(state) => {
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let state = state.interpret(response)?;
 
-                let msg_other =
-                    map_err(transport.receive_message().await?.into_update_ptlc_funder())?;
-                let state1 = state1_ptlc_redeemer.interpret(msg_other)?;
-
-                update!(transport, state1)
+                update!(transport, state)
             }
         };
 
         #[macro_export]
         macro_rules! update {
-            ($transport:expr, $state1:expr) => {{
+            ($transport:expr, $state:expr) => {{
                 let transport = $transport;
-                let state1 = $state1;
+                let state = $state;
 
-                let msg1_self = state1.compose();
-                transport.send_message(Message::Update1(msg1_self)).await?;
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let state = state.interpret(response)?;
 
-                let msg1_other = map_err(transport.receive_message().await?.into_update1())?;
-                let state2 = state1.interpret(msg1_other)?;
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let state = state.interpret(response)?;
 
-                let msg2_self = state2.compose();
-                transport.send_message(Message::Update2(msg2_self)).await?;
-
-                let msg2_other = map_err(transport.receive_message().await?.into_update2())?;
-                let state3 = state2.interpret(msg2_other)?;
-
-                let msg3_self = state3.compose();
-                transport.send_message(Message::Update3(msg3_self)).await?;
-
-                let msg3_other = map_err(transport.receive_message().await?.into_update3())?;
-                let updated_channel = state3.interpret(msg3_other)?;
+                transport.send_message(state.compose().into()).await?;
+                let response = transport.receive_message().await?.try_into()?;
+                let updated_channel = state.interpret(response)?;
 
                 updated_channel
             }};
@@ -485,13 +455,11 @@ impl Channel {
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
     {
-        let state0 = close::State0::new(&self);
+        let state = close::State0::new(&self);
 
-        let msg0_self = state0.compose()?;
-        transport.send_message(Message::Close0(msg0_self)).await?;
-
-        let msg0_other = map_err(transport.receive_message().await?.into_close0())?;
-        let close_transaction = state0.interpret(msg0_other)?;
+        transport.send_message(state.compose()?.into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let close_transaction = state.interpret(response)?;
 
         wallet
             .broadcast_signed_transaction(close_transaction)
@@ -505,18 +473,13 @@ impl Channel {
     where
         W: NewAddress + BroadcastSignedTransaction,
     {
-        let current_state = StandardChannelState::from(self.current_state.clone());
+        let state = StandardChannelState::from(self.current_state.clone());
 
-        let commit_transaction =
-            current_state.signed_tx_c(&self.tx_f_body, &self.x_self, &self.X_other)?;
-        wallet
-            .broadcast_signed_transaction(commit_transaction)
-            .await?;
+        let commit = state.signed_tx_c(&self.tx_f_body, &self.x_self, &self.X_other)?;
+        wallet.broadcast_signed_transaction(commit).await?;
 
-        let split_transaction = current_state.signed_tx_s.clone();
-        wallet
-            .broadcast_signed_transaction(split_transaction.clone().into())
-            .await?;
+        let split = state.signed_tx_s;
+        wallet.broadcast_signed_transaction(split.into()).await?;
 
         Ok(())
     }
@@ -588,7 +551,7 @@ impl Channel {
         let x_self = self.x_self;
         let X_other = self.X_other;
 
-        let state0 = splice::State0::new(
+        let state = splice::State0::new(
             time_lock,
             final_address_self,
             final_address_other,
@@ -601,30 +564,23 @@ impl Channel {
         )
         .await?;
 
-        let msg0_self = state0.next_message();
-        transport.send_message(Message::Splice0(msg0_self)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let msg0_other = map_err(transport.receive_message().await?.into_splice0())?;
-        let state1 = state0.receive(msg0_other)?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response)?;
 
-        let msg1_self = state1.next_message();
-        transport.send_message(Message::Splice1(msg1_self)).await?;
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let state = state.interpret(response, wallet).await?;
 
-        let msg1_other = map_err(transport.receive_message().await?.into_splice1())?;
-        let state2 = state1.receive(msg1_other)?;
-
-        let msg2_self = state2.next_message();
-        transport.send_message(Message::Splice2(msg2_self)).await?;
-
-        let msg2_other = map_err(transport.receive_message().await?.into_splice2())?;
-        let state3 = state2.receive(msg2_other, wallet).await?;
-
-        let msg3_self = state3.next_message().await?;
-        transport.send_message(Message::Splice3(msg3_self)).await?;
-
-        let msg3_other = map_err(transport.receive_message().await?.into_splice3())?;
-
-        let (channel, transaction) = state3.receive(msg3_other, wallet).await?;
+        transport
+            .send_message(state.compose().await?.into())
+            .await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let (channel, transaction) = state.interpret(response, wallet).await?;
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
@@ -851,4 +807,344 @@ impl UnexpectedMessage {
 
 fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpectedMessage> {
     res.map_err(UnexpectedMessage::new::<T>)
+}
+
+impl From<create::Message0> for Message {
+    fn from(m: create::Message0) -> Self {
+        Message::Create0(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message0 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create0(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create0".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message1> for Message {
+    fn from(m: create::Message1) -> Self {
+        Message::Create1(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message1 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create1(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create1".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message2> for Message {
+    fn from(m: create::Message2) -> Self {
+        Message::Create2(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message2 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create2(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create2".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message3> for Message {
+    fn from(m: create::Message3) -> Self {
+        Message::Create3(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message3 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create3(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create3".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message4> for Message {
+    fn from(m: create::Message4) -> Self {
+        Message::Create4(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message4 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create4(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create4".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<create::Message5> for Message {
+    fn from(m: create::Message5) -> Self {
+        Message::Create5(m)
+    }
+}
+
+impl TryFrom<Message> for create::Message5 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Create5(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Create5".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::ShareKeys> for Message {
+    fn from(m: update::ShareKeys) -> Self {
+        Message::Update0(m)
+    }
+}
+
+impl TryFrom<Message> for update::ShareKeys {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Update0(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Update0".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::SignaturesPtlcFunder> for Message {
+    fn from(m: update::SignaturesPtlcFunder) -> Self {
+        Message::UpdatePtlcFunder(m)
+    }
+}
+
+impl TryFrom<Message> for update::SignaturesPtlcFunder {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::UpdatePtlcFunder(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "UpdatePtlcFunder".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::SignaturesPtlcRedeemer> for Message {
+    fn from(m: update::SignaturesPtlcRedeemer) -> Self {
+        Message::UpdatePtlcRedeemer(m)
+    }
+}
+
+impl TryFrom<Message> for update::SignaturesPtlcRedeemer {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::UpdatePtlcRedeemer(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "UpdatePtlcRedeemer".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::ShareSplitSignature> for Message {
+    fn from(m: update::ShareSplitSignature) -> Self {
+        Message::Update1(m)
+    }
+}
+
+impl TryFrom<Message> for update::ShareSplitSignature {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Update1(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Update1".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::ShareCommitEncryptedSignature> for Message {
+    fn from(m: update::ShareCommitEncryptedSignature) -> Self {
+        Message::Update2(m)
+    }
+}
+
+impl TryFrom<Message> for update::ShareCommitEncryptedSignature {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Update2(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Update2".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<update::RevealRevocationSecretKey> for Message {
+    fn from(m: update::RevealRevocationSecretKey) -> Self {
+        Message::Update3(m)
+    }
+}
+
+impl TryFrom<Message> for update::RevealRevocationSecretKey {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Update3(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Update3".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<close::Message0> for Message {
+    fn from(m: close::Message0) -> Self {
+        Message::Close0(m)
+    }
+}
+
+impl TryFrom<Message> for close::Message0 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Close0(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Close0".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<splice::Message0> for Message {
+    fn from(m: splice::Message0) -> Self {
+        Message::Splice0(m)
+    }
+}
+
+impl TryFrom<Message> for splice::Message0 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Splice0(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Splice0".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<splice::Message1> for Message {
+    fn from(m: splice::Message1) -> Self {
+        Message::Splice1(m)
+    }
+}
+
+impl TryFrom<Message> for splice::Message1 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Splice1(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Splice1".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<splice::Message2> for Message {
+    fn from(m: splice::Message2) -> Self {
+        Message::Splice2(m)
+    }
+}
+
+impl TryFrom<Message> for splice::Message2 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Splice2(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Splice2".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<splice::Message3> for Message {
+    fn from(m: splice::Message3) -> Self {
+        Message::Splice3(m)
+    }
+}
+
+impl TryFrom<Message> for splice::Message3 {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Splice3(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Splice3".to_string(),
+                received: m,
+            }),
+        }
+    }
 }
