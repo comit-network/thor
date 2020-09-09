@@ -5,15 +5,17 @@ use crate::{
     Ptlc, PtlcPoint, TX_FEE,
 };
 
+use anyhow::{anyhow, Result};
 use bitcoin::{
     util::bip143::SighashComponents, Address, OutPoint, Script, SigHash, Transaction, TxIn, TxOut,
 };
 use ecdsa_fun::{self, adaptor::EncryptedSignature, fun::Point, Signature};
 use miniscript::Descriptor;
+use serde::{Deserialize, Serialize};
 use signature::{verify_encsig, verify_sig};
 use std::collections::HashMap;
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub(crate) struct RedeemTransaction {
     inner: Transaction,
@@ -22,13 +24,9 @@ pub(crate) struct RedeemTransaction {
 }
 
 impl RedeemTransaction {
-    pub fn new(
-        TX_s: &SplitTransaction,
-        ptlc: Ptlc,
-        redeem_address: Address,
-    ) -> anyhow::Result<Self> {
+    pub fn new(tx_s: &SplitTransaction, ptlc: Ptlc, redeem_address: Address) -> Result<Self> {
         let (transaction, digest, input_descriptor) =
-            spend_transaction(TX_s, ptlc, redeem_address, 0xFFFF_FFFF)?;
+            spend_transaction(tx_s, ptlc, redeem_address, 0xFFFF_FFFF)?;
 
         Ok(Self {
             inner: transaction,
@@ -49,7 +47,7 @@ impl RedeemTransaction {
         &self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -82,14 +80,14 @@ impl RedeemTransaction {
         verification_key: OwnershipPublicKey,
         encryption_key: Point,
         encsig: &EncryptedSignature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_encsig(verification_key, encryption_key, &self.digest, encsig)?;
 
         Ok(())
     }
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub(crate) struct RefundTransaction {
     inner: Transaction,
@@ -98,13 +96,9 @@ pub(crate) struct RefundTransaction {
 }
 
 impl RefundTransaction {
-    pub fn new(
-        TX_s: &SplitTransaction,
-        ptlc: Ptlc,
-        refund_address: Address,
-    ) -> anyhow::Result<Self> {
+    pub fn new(tx_s: &SplitTransaction, ptlc: Ptlc, refund_address: Address) -> Result<Self> {
         let (transaction, digest, input_descriptor) =
-            spend_transaction(TX_s, ptlc.clone(), refund_address, ptlc.refund_time_lock)?;
+            spend_transaction(tx_s, ptlc.clone(), refund_address, ptlc.refund_time_lock)?;
 
         Ok(Self {
             inner: transaction,
@@ -121,7 +115,7 @@ impl RefundTransaction {
         &self,
         verification_key: OwnershipPublicKey,
         signature: &Signature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_sig(verification_key, &self.digest, signature)?;
 
         Ok(())
@@ -131,7 +125,7 @@ impl RefundTransaction {
         &mut self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -161,32 +155,32 @@ impl RefundTransaction {
 }
 
 pub(crate) fn spend_transaction(
-    TX_s: &SplitTransaction,
+    tx_s: &SplitTransaction,
     ptlc: Ptlc,
     refund_address: Address,
     input_sequence: u32,
-) -> anyhow::Result<(Transaction, SigHash, Descriptor<bitcoin::PublicKey>)> {
+) -> Result<(Transaction, SigHash, Descriptor<bitcoin::PublicKey>)> {
     let mut Xs = [ptlc.X_funder, ptlc.X_redeemer];
     Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
     let [X_0, X_1] = Xs;
     let ptlc_output_descriptor = build_shared_output_descriptor(X_0, X_1);
 
-    let vout = TX_s
+    let vout = tx_s
         .inner
         .output
         .iter()
         .position(|output| output.script_pubkey == ptlc_output_descriptor.script_pubkey())
-        .ok_or_else(|| anyhow::anyhow!("TX_s does not contain PTLC output"))?;
+        .ok_or_else(|| anyhow!("tx_s does not contain PTLC output"))?;
 
     #[allow(clippy::cast_possible_truncation)]
     let input = TxIn {
-        previous_output: OutPoint::new(TX_s.txid(), vout as u32),
+        previous_output: OutPoint::new(tx_s.txid(), vout as u32),
         script_sig: Script::new(),
         sequence: input_sequence,
         witness: Vec::new(),
     };
 
-    let ptlc_output_value = TX_s.inner.output[vout].value;
+    let ptlc_output_value = tx_s.inner.output[vout].value;
     let output = TxOut {
         value: ptlc_output_value - TX_FEE,
         script_pubkey: refund_address.script_pubkey(),

@@ -7,6 +7,7 @@ use ecdsa_fun::{
     Signature, ECDSA,
 };
 
+use anyhow::Result;
 use bitcoin::SigHash;
 use sha2::Sha256;
 

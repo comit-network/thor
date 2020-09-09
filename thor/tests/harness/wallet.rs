@@ -1,3 +1,5 @@
+use anyhow::Result;
+use async_trait::async_trait;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
@@ -6,7 +8,7 @@ use thor::{BroadcastSignedTransaction, BuildFundingPSBT, NewAddress, SignFunding
 pub struct Wallet(pub bitcoin_harness::Wallet);
 
 impl Wallet {
-    async fn new(name: &str, url: Url) -> anyhow::Result<Self> {
+    async fn new(name: &str, url: Url) -> Result<Self> {
         let wallet = bitcoin_harness::Wallet::new(name, url).await?;
 
         Ok(Self(wallet))
@@ -20,7 +22,7 @@ pub async fn make_wallets(
     bitcoind: &Bitcoind<'_>,
     fund_amount_alice: Amount,
     fund_amount_bob: Amount,
-) -> anyhow::Result<(Wallet, Wallet)> {
+) -> Result<(Wallet, Wallet)> {
     let alice = Wallet::new("alice", bitcoind.node_url.clone()).await?;
     let bob = Wallet::new("bob", bitcoind.node_url.clone()).await?;
 
@@ -34,13 +36,13 @@ pub async fn make_wallets(
     Ok((alice, bob))
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl BuildFundingPSBT for Wallet {
     async fn build_funding_psbt(
         &self,
         output_address: Address,
         output_amount: Amount,
-    ) -> anyhow::Result<PartiallySignedTransaction> {
+    ) -> Result<PartiallySignedTransaction> {
         let psbt = self.0.fund_psbt(output_address, output_amount).await?;
         let as_hex = base64::decode(psbt)?;
 
@@ -50,12 +52,12 @@ impl BuildFundingPSBT for Wallet {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl SignFundingPSBT for Wallet {
     async fn sign_funding_psbt(
         &self,
         psbt: PartiallySignedTransaction,
-    ) -> anyhow::Result<PartiallySignedTransaction> {
+    ) -> Result<PartiallySignedTransaction> {
         let psbt = bitcoin::consensus::serialize(&psbt);
         let as_base64 = base64::encode(psbt);
 
@@ -69,12 +71,9 @@ impl SignFundingPSBT for Wallet {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl BroadcastSignedTransaction for Wallet {
-    async fn broadcast_signed_transaction(
-        &self,
-        transaction: bitcoin::Transaction,
-    ) -> anyhow::Result<()> {
+    async fn broadcast_signed_transaction(&self, transaction: bitcoin::Transaction) -> Result<()> {
         let _txid = self.0.send_raw_transaction(transaction).await?;
 
         // TODO: Instead of guessing how long it will take for the transaction to be
@@ -87,9 +86,9 @@ impl BroadcastSignedTransaction for Wallet {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl NewAddress for Wallet {
-    async fn new_address(&self) -> anyhow::Result<Address> {
+    async fn new_address(&self) -> Result<Address> {
         self.0.new_address().await.map_err(Into::into)
     }
 }

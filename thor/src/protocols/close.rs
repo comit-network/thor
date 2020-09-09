@@ -3,21 +3,22 @@ use crate::{
     transaction::{CloseTransaction, FundingTransaction},
     Balance, Channel,
 };
-use anyhow::Context;
+use anyhow::{Context, Result};
 use bitcoin::{Address, Transaction};
 use ecdsa_fun::Signature;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub(crate) struct State0 {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
-    TX_f: FundingTransaction,
+    tx_f: FundingTransaction,
     final_address_self: Address,
     final_address_other: Address,
     balance: Balance,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
 pub struct Message0 {
     sig_close_transaction: Signature,
@@ -28,15 +29,15 @@ impl State0 {
         Self {
             x_self: channel.x_self.clone(),
             X_other: channel.X_other.clone(),
-            TX_f: channel.TX_f_body.clone(),
+            tx_f: channel.tx_f_body.clone(),
             balance: channel.balance(),
             final_address_self: channel.final_address_self.clone(),
             final_address_other: channel.final_address_other.clone(),
         }
     }
 
-    pub(crate) fn compose(&self) -> anyhow::Result<Message0> {
-        let close_transaction = CloseTransaction::new(&self.TX_f, [
+    pub(crate) fn compose(&self) -> Result<Message0> {
+        let close_transaction = CloseTransaction::new(&self.tx_f, [
             (self.balance.ours, self.final_address_self.clone()),
             (self.balance.theirs, self.final_address_other.clone()),
         ])?;
@@ -52,8 +53,8 @@ impl State0 {
         Message0 {
             sig_close_transaction: sig_close_transaction_other,
         }: Message0,
-    ) -> anyhow::Result<Transaction> {
-        let close_transaction = CloseTransaction::new(&self.TX_f, [
+    ) -> Result<Transaction> {
+        let close_transaction = CloseTransaction::new(&self.tx_f, [
             (self.balance.ours, self.final_address_self),
             (self.balance.theirs, self.final_address_other),
         ])?;

@@ -31,54 +31,57 @@ use crate::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
-    protocols::punish::punish,
-    transaction::{CommitTransaction, FundingTransaction, SplitTransaction},
+    protocols::{close, create, punish::punish, splice, update},
+    signature::decrypt,
+    transaction::{
+        CommitTransaction, FundingTransaction, RedeemTransaction, RefundTransaction,
+        SplitTransaction,
+    },
 };
-use anyhow::bail;
+use ::serde::{Deserialize, Serialize};
+use anyhow::{anyhow, bail, Result};
+use async_trait::async_trait;
 use bitcoin::{Address, Amount, Transaction, Txid};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
 use futures::{future::Either, pin_mut, Future};
 use genawaiter::sync::Gen;
-use protocols::{close, create, splice, update};
-use signature::decrypt;
-use transaction::ptlc;
 
 // TODO: We should handle fees dynamically
 
 /// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct Channel {
     x_self: OwnershipKeyPair,
     X_other: OwnershipPublicKey,
     final_address_self: Address,
     final_address_other: Address,
-    TX_f_body: FundingTransaction,
+    tx_f_body: FundingTransaction,
     current_state: ChannelState,
     revoked_states: Vec<RevokedState>,
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait NewAddress {
-    async fn new_address(&self) -> anyhow::Result<Address>;
+    async fn new_address(&self) -> Result<Address>;
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait BroadcastSignedTransaction {
-    async fn broadcast_signed_transaction(&self, transaction: Transaction) -> anyhow::Result<()>;
+    async fn broadcast_signed_transaction(&self, transaction: Transaction) -> Result<()>;
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait SendMessage {
-    async fn send_message(&mut self, message: Message) -> anyhow::Result<()>;
+    async fn send_message(&mut self, message: Message) -> Result<()>;
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait ReceiveMessage {
-    async fn receive_message(&mut self) -> anyhow::Result<Message>;
+    async fn receive_message(&mut self) -> Result<Message>;
 }
 
 impl Channel {
@@ -92,7 +95,7 @@ impl Channel {
         wallet: &W,
         balance: Balance,
         time_lock: u32,
-    ) -> anyhow::Result<Self>
+    ) -> Result<Self>
     where
         T: SendMessage + ReceiveMessage,
         W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
@@ -156,7 +159,7 @@ impl Channel {
         transport: &mut T,
         Balance { ours, theirs }: Balance,
         time_lock: u32,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
     {
@@ -188,9 +191,9 @@ impl Channel {
         ptlc_amount: Amount,
         secret: PtlcSecret,
         _alpha_absolute_expiry: u32,
-        TX_s_time_lock: u32,
+        tx_s_time_lock: u32,
         ptlc_refund_time_lock: u32,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
@@ -201,7 +204,7 @@ impl Channel {
         let Balance { ours, theirs } = self.balance();
 
         let theirs = theirs.checked_sub(ptlc_amount).ok_or_else(|| {
-            anyhow::anyhow!(
+            anyhow!(
                 "Bob's {} balance cannot cover PTLC output amount: {}",
                 theirs,
                 ptlc_amount
@@ -231,7 +234,7 @@ impl Channel {
         self.update(
             transport,
             vec![balance_output_self, balance_output_other, ptlc_output],
-            TX_s_time_lock,
+            tx_s_time_lock,
         )
         .await?;
 
@@ -256,7 +259,7 @@ impl Channel {
         let final_update = self.update(
             transport,
             vec![balance_output_self, balance_output_other],
-            TX_s_time_lock,
+            tx_s_time_lock,
         );
 
         // TODO: Configure timeout based on expiries
@@ -266,12 +269,12 @@ impl Channel {
         pin_mut!(timeout);
 
         // If the channel update isn't finished before `timeout`, force close and
-        // publish `TX_ptlc_redeem`.
+        // publish `tx_ptlc_redeem`.
         match futures::future::select(final_update, timeout).await {
             Either::Left((Ok(_), _)) => (),
             Either::Left((Err(_), _)) | Either::Right(_) => {
                 // TODO: Have we dropped the other future execution if we reach this block?
-                let (_, _, TX_ptlc_redeem, _, encsig_funder, sig_redeemer, ..) = channel
+                let (_, _, tx_ptlc_redeem, _, encsig_funder, sig_redeemer, ..) = channel
                     .current_state
                     .clone()
                     .into_with_ptlc()
@@ -279,14 +282,14 @@ impl Channel {
 
                 let sig_funder = signature::decrypt(secret.into(), encsig_funder);
 
-                let TX_ptlc_redeem = TX_ptlc_redeem.add_signatures(
+                let tx_ptlc_redeem = tx_ptlc_redeem.add_signatures(
                     (channel.x_self.public(), sig_redeemer),
                     (channel.X_other.clone(), sig_funder),
                 )?;
 
                 channel.force_close(wallet).await?;
 
-                wallet.broadcast_signed_transaction(TX_ptlc_redeem).await?;
+                wallet.broadcast_signed_transaction(tx_ptlc_redeem).await?;
             }
         };
 
@@ -305,9 +308,9 @@ impl Channel {
         ptlc_amount: Amount,
         point: PtlcPoint,
         _alpha_absolute_expiry: u32,
-        TX_s_time_lock: u32,
+        tx_s_time_lock: u32,
         ptlc_refund_time_lock: u32,
-    ) -> Gen<PtlcSecret, (), impl Future<Output = anyhow::Result<()>> + 'a>
+    ) -> Gen<PtlcSecret, (), impl Future<Output = Result<()>> + 'a>
     where
         T: SendMessage + ReceiveMessage,
     {
@@ -315,7 +318,7 @@ impl Channel {
             let Balance { ours, theirs } = self.balance();
 
             let ours = ours.checked_sub(ptlc_amount).ok_or_else(|| {
-                anyhow::anyhow!(
+                anyhow!(
                     "Bob's {} balance cannot cover PTLC output amount: {}",
                     ours,
                     ptlc_amount
@@ -345,7 +348,7 @@ impl Channel {
             self.update(
                 transport,
                 vec![balance_output_self, balance_output_other, ptlc_output],
-                TX_s_time_lock,
+                tx_s_time_lock,
             )
             .await?;
 
@@ -354,8 +357,8 @@ impl Channel {
             // TODO: If Alice doesn't reveal the secret and we're approaching
             // `alpha_absolute_expiry` force close the channel. Now monitor the
             // Bitcoin blockchain for Alice revealing the `secret` by publishing
-            // `TX_ptlc_redeem`. If she does yield the `secret`. If she doesn't do it before
-            // `ptlc_refund_time_lock`, publish `TX_ptlc_refund`.
+            // `tx_ptlc_redeem`. If she does yield the `secret`. If she doesn't do it before
+            // `ptlc_refund_time_lock`, publish `tx_ptlc_refund`.
             let secret = map_err(transport.receive_message().await?.into_secret())?;
 
             if secret.point() != point {
@@ -379,7 +382,7 @@ impl Channel {
             self.update(
                 transport,
                 vec![balance_output_self, balance_output_other],
-                TX_s_time_lock,
+                tx_s_time_lock,
             )
             .await?;
 
@@ -392,7 +395,7 @@ impl Channel {
         transport: &mut T,
         new_split_outputs: Vec<SplitOutput>,
         time_lock: u32,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
     {
@@ -477,7 +480,7 @@ impl Channel {
     /// Consumers should implement the traits `SendMessage` and `ReceiveMessage`
     /// on the `transport` they provide, allowing the parties to communicate
     /// with each other.
-    pub async fn close<T, W>(&self, transport: &mut T, wallet: &W) -> anyhow::Result<()>
+    pub async fn close<T, W>(&self, transport: &mut T, wallet: &W) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
@@ -497,19 +500,20 @@ impl Channel {
         Ok(())
     }
 
-    pub async fn force_close<W>(&self, wallet: &W) -> anyhow::Result<()>
+    /// Close the channel non-collaboratively.
+    pub async fn force_close<W>(&self, wallet: &W) -> Result<()>
     where
         W: NewAddress + BroadcastSignedTransaction,
     {
         let current_state = StandardChannelState::from(self.current_state.clone());
 
         let commit_transaction =
-            current_state.signed_TX_c(&self.TX_f_body, &self.x_self, &self.X_other)?;
+            current_state.signed_tx_c(&self.tx_f_body, &self.x_self, &self.X_other)?;
         wallet
             .broadcast_signed_transaction(commit_transaction)
             .await?;
 
-        let split_transaction = current_state.signed_TX_s.clone();
+        let split_transaction = current_state.signed_tx_s.clone();
         wallet
             .broadcast_signed_transaction(split_transaction.clone().into())
             .await?;
@@ -521,11 +525,7 @@ impl Channel {
     ///
     /// This effectively closes the channel, as all of the channel's funds go to
     /// our final address.
-    pub async fn punish<W>(
-        &self,
-        wallet: &W,
-        old_commit_transaction: Transaction,
-    ) -> anyhow::Result<()>
+    pub async fn punish<W>(&self, wallet: &W, old_commit_transaction: Transaction) -> Result<()>
     where
         W: BroadcastSignedTransaction,
     {
@@ -543,22 +543,24 @@ impl Channel {
         Ok(())
     }
 
+    /// Get the current channel balance.
     pub fn balance(&self) -> Balance {
         let channel_state: &StandardChannelState = self.current_state.as_ref();
         channel_state.balance
     }
 
-    pub fn TX_f_txid(&self) -> Txid {
-        self.TX_f_body.txid()
+    /// Get the transaction id of the initial fund transaction.
+    pub fn tx_f_txid(&self) -> Txid {
+        self.tx_f_body.txid()
     }
 
     /// Retrieve the signed `CommitTransaction` of the state that was revoked
     /// during the last channel update.
-    pub fn latest_revoked_signed_TX_c(&self) -> anyhow::Result<Option<Transaction>> {
+    pub fn latest_revoked_signed_tx_c(&self) -> Result<Option<Transaction>> {
         self.revoked_states
             .last()
             .map(|state| {
-                state.signed_TX_c(&self.TX_f_body, self.x_self.clone(), self.X_other.clone())
+                state.signed_tx_c(&self.tx_f_body, self.x_self.clone(), self.X_other.clone())
             })
             .transpose()
     }
@@ -572,7 +574,7 @@ impl Channel {
         transport: &mut T,
         wallet: &W,
         splice_in: Option<Amount>,
-    ) -> anyhow::Result<Self>
+    ) -> Result<Self>
     where
         W: BroadcastSignedTransaction + BuildFundingPSBT + SignFundingPSBT,
         T: SendMessage + ReceiveMessage,
@@ -591,7 +593,7 @@ impl Channel {
             final_address_self,
             final_address_other,
             balance,
-            self.TX_f_body,
+            self.tx_f_body,
             x_self,
             X_other,
             splice_in,
@@ -631,19 +633,19 @@ impl Channel {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, EnumAsInner)]
 pub(crate) enum ChannelState {
     Standard(StandardChannelState),
     WithPtlc {
         inner: StandardChannelState,
         ptlc: Ptlc,
-        TX_ptlc_redeem: ptlc::RedeemTransaction,
-        TX_ptlc_refund: ptlc::RefundTransaction,
-        encsig_TX_ptlc_redeem_funder: EncryptedSignature,
-        sig_TX_ptlc_redeem_redeemer: Signature,
-        sig_TX_ptlc_refund_funder: Signature,
-        sig_TX_ptlc_refund_redeemer: Signature,
+        tx_ptlc_redeem: RedeemTransaction,
+        tx_ptlc_refund: RefundTransaction,
+        encsig_tx_ptlc_redeem_funder: EncryptedSignature,
+        sig_tx_ptlc_redeem_redeemer: Signature,
+        sig_tx_ptlc_refund_funder: Signature,
+        sig_tx_ptlc_refund_redeemer: Signature,
     },
 }
 
@@ -663,7 +665,7 @@ impl AsRef<StandardChannelState> for ChannelState {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct StandardChannelState {
     /// Proportion of the coins in the channel that currently belong to either
@@ -671,49 +673,49 @@ pub struct StandardChannelState {
     /// to be submitted to the blockchain, so in practice the balance will see a
     /// reduction to pay for transaction fees.
     balance: Balance,
-    TX_c: CommitTransaction,
+    tx_c: CommitTransaction,
     /// Encrypted signature received from the counterparty. It can be decrypted
-    /// using our `PublishingSecretkey` and used to sign `TX_c`. Keep in mind,
-    /// that publishing a revoked `TX_c` will allow the counterparty to punish
+    /// using our `PublishingSecretKey` and used to sign `tx_c`. Keep in mind,
+    /// that publishing a revoked `tx_c` will allow the counterparty to punish
     /// us.
-    encsig_TX_c_other: EncryptedSignature,
+    encsig_tx_c_other: EncryptedSignature,
     r_self: RevocationKeyPair,
     R_other: RevocationPublicKey,
     y_self: PublishingKeyPair,
     Y_other: PublishingPublicKey,
     /// Signed `SplitTransaction`.
-    signed_TX_s: SplitTransaction,
+    signed_tx_s: SplitTransaction,
 }
 
 impl StandardChannelState {
-    fn signed_TX_c(
+    fn signed_tx_c(
         &self,
-        TX_f: &FundingTransaction,
+        tx_f: &FundingTransaction,
         x_self: &OwnershipKeyPair,
         X_other: &OwnershipPublicKey,
-    ) -> anyhow::Result<Transaction> {
-        let sig_self = self.TX_c.sign_once(x_self);
-        let sig_other = decrypt(self.y_self.clone().into(), self.encsig_TX_c_other.clone());
+    ) -> Result<Transaction> {
+        let sig_self = self.tx_c.sign_once(x_self);
+        let sig_other = decrypt(self.y_self.clone().into(), self.encsig_tx_c_other.clone());
 
-        let signed_TX_c = self.TX_c.clone().add_signatures(
-            TX_f,
+        let signed_tx_c = self.tx_c.clone().add_signatures(
+            tx_f,
             (x_self.public(), sig_self),
             (X_other.clone(), sig_other),
         )?;
 
-        Ok(signed_TX_c)
+        Ok(signed_tx_c)
     }
 
     pub fn time_lock(&self) -> u32 {
-        self.TX_c.time_lock()
+        self.tx_c.time_lock()
     }
 
-    pub fn encsign_TX_c_self(&self, x_self: &OwnershipKeyPair) -> EncryptedSignature {
-        self.TX_c.encsign_once(x_self, self.Y_other.clone())
+    pub fn encsign_tx_c_self(&self, x_self: &OwnershipKeyPair) -> EncryptedSignature {
+        self.tx_c.encsign_once(x_self, self.Y_other.clone())
     }
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub(crate) struct RevokedState {
     channel_state: ChannelState,
@@ -723,19 +725,19 @@ pub(crate) struct RevokedState {
 impl RevokedState {
     /// Add signatures to the `CommitTransaction`. Publishing the resulting
     /// transaction is punishable by the counterparty, as they can recover the
-    /// `PublishingSecretkey` from it and they already know the
+    /// `PublishingSecretKey` from it and they already know the
     /// `RevocationSecretKey`, since this state has already been revoked.
-    pub fn signed_TX_c(
+    pub fn signed_tx_c(
         &self,
-        TX_f: &FundingTransaction,
-        x_self: keys::OwnershipKeyPair,
+        tx_f: &FundingTransaction,
+        x_self: OwnershipKeyPair,
         X_other: OwnershipPublicKey,
-    ) -> anyhow::Result<Transaction> {
-        StandardChannelState::from(self.channel_state.clone()).signed_TX_c(TX_f, &x_self, &X_other)
+    ) -> Result<Transaction> {
+        StandardChannelState::from(self.channel_state.clone()).signed_tx_c(tx_f, &x_self, &X_other)
     }
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Balance {
     #[cfg_attr(
@@ -750,7 +752,7 @@ pub struct Balance {
     pub theirs: Amount,
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub enum SplitOutput {
     Ptlc(Ptlc),
@@ -764,7 +766,7 @@ pub enum SplitOutput {
     },
 }
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub struct Ptlc {
     #[cfg_attr(
@@ -788,7 +790,7 @@ impl Ptlc {
 }
 
 /// Role in an atomic swap.
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, EnumAsInner)]
 pub enum Role {
     Alice { secret: PtlcSecret },
@@ -806,7 +808,7 @@ impl SplitOutput {
 
 /// All possible messages that can be sent between two parties using this
 /// library.
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, EnumAsInner)]
 pub enum Message {
     Create0(create::Message0),
@@ -831,12 +833,12 @@ pub enum Message {
 
 #[derive(Debug, thiserror::Error)]
 #[error("expected message of type {expected_type}, got {received:?}")]
-pub struct UnexpecteMessage {
+pub struct UnexpectedMessage {
     expected_type: String,
     received: Message,
 }
 
-impl UnexpecteMessage {
+impl UnexpectedMessage {
     pub fn new<T>(received: Message) -> Self {
         let expected_type = std::any::type_name::<T>();
 
@@ -847,6 +849,6 @@ impl UnexpecteMessage {
     }
 }
 
-fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpecteMessage> {
-    res.map_err(UnexpecteMessage::new::<T>)
+fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpectedMessage> {
+    res.map_err(UnexpectedMessage::new::<T>)
 }

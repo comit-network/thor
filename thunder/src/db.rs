@@ -1,6 +1,7 @@
 use crate::{channel, ChannelId};
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use thor::Channel;
 
 // TODO: Use it
@@ -12,7 +13,7 @@ struct Database {
 // TODO: Use it
 #[allow(dead_code)]
 impl Database {
-    pub fn new(path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn new(path: &Path) -> Result<Self> {
         let path = path
             .to_str()
             .ok_or_else(|| anyhow!("The path is not utf-8 valid: {:?}", path))?;
@@ -21,7 +22,7 @@ impl Database {
         Ok(Database { db })
     }
 
-    pub async fn insert(&self, channel: Channel) -> anyhow::Result<()> {
+    pub async fn insert(&self, channel: Channel) -> Result<()> {
         let channel_id = channel.channel_id();
 
         let stored_channel = self.get_channel(&channel_id);
@@ -47,7 +48,7 @@ impl Database {
         }
     }
 
-    pub fn get_channel(&self, channel_id: &channel::Id) -> anyhow::Result<Channel> {
+    pub fn get_channel(&self, channel_id: &channel::Id) -> Result<Channel> {
         let key = serialize(channel_id)?;
 
         let swap = self
@@ -58,7 +59,7 @@ impl Database {
         deserialize(&swap).context("Could not deserialize channel")
     }
 
-    pub fn all(&self) -> anyhow::Result<Vec<Channel>> {
+    pub fn all(&self) -> Result<Vec<Channel>> {
         self.db
             .iter()
             .filter_map(|item| match item {
@@ -80,14 +81,14 @@ impl Database {
     }
 }
 
-pub fn serialize<T>(t: &T) -> anyhow::Result<Vec<u8>>
+pub fn serialize<T>(t: &T) -> Result<Vec<u8>>
 where
     T: Serialize,
 {
     Ok(serde_cbor::to_vec(t)?)
 }
 
-pub fn deserialize<'a, T>(v: &'a [u8]) -> anyhow::Result<T>
+pub fn deserialize<'a, T>(v: &'a [u8]) -> Result<T>
 where
     T: Deserialize<'a>,
 {
