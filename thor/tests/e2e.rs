@@ -11,7 +11,9 @@ use harness::{build_runtime, generate_balances, make_transports, make_wallets, T
 use testcontainers::clients::Cli;
 use thor::{Balance, Channel, PtlcPoint, PtlcSecret, Splice};
 
-async fn create_channels() -> (
+async fn create_channels(
+    bitcoind: &Bitcoind<'_>,
+) -> (
     Amount,
     Channel,
     Channel,
@@ -21,15 +23,11 @@ async fn create_channels() -> (
     Wallet,
     u32,
 ) {
-    let tc_client = Cli::default();
-    let bitcoind = Bitcoind::new(&tc_client, "0.19.1").expect("failed to create bitcoind");
-    let _ = bitcoind.init(5).await;
-
     let fund_amount = Amount::ONE_BTC;
 
     let (mut a_transport, mut b_transport) = make_transports();
     let (a_balance, b_balance) = generate_balances(fund_amount);
-    let (a_wallet, b_wallet) = make_wallets(&bitcoind, fund_amount)
+    let (a_wallet, b_wallet) = make_wallets(bitcoind, fund_amount)
         .await
         .expect("failed to make wallets");
     let time_lock = 1;
@@ -53,8 +51,23 @@ async fn create_channels() -> (
     )
 }
 
+async fn init_bitcoind(tc_client: &Cli) -> Bitcoind<'_> {
+    let bitcoind = Bitcoind::new(tc_client, "0.19.1").expect("failed to create bitcoind");
+    let _ = bitcoind.init(5).await;
+
+    bitcoind
+}
+
+fn init_cli() -> Cli {
+    Cli::default()
+}
+
 #[tokio::test]
 async fn e2e_channel_update() {
+    // TODO: Work out how lifetimes work so we can declare these inside
+    // create_channels().
+    let cli = init_cli();
+    let bitcoind = init_bitcoind(&cli).await;
     let (
         fund_amount,
         mut a_channel,
@@ -64,7 +77,7 @@ async fn e2e_channel_update() {
         _,
         _,
         time_lock,
-    ) = create_channels().await;
+    ) = create_channels(&bitcoind).await;
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
     let payment = Amount::from_btc(0.5).expect("failed to create amount");
