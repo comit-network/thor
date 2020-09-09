@@ -57,16 +57,14 @@ fn bob_can_refund_ptlc_if_alice_holds_onto_secret_after_first_update() {
         (alpha_absolute, ptlc_absolute, split_transaction_relative)
     };
 
-    let hold_secret = true;
-    let swap_beta_ptlc_alice = alice_channel.swap_beta_ptlc_alice(
+    // Alice collaborates to add the PTLC to the channel, but does not reveal the
+    // secret
+    let add_ptlc_alice = alice_channel.add_ptlc_redeemer(
         &mut alice_transport,
-        &alice_wallet,
         ptlc_amount,
         secret,
-        alpha_absolute_expiry,
         split_transaction_relative_expiry,
         ptlc_absolute_expiry,
-        hold_secret,
     );
 
     let skip_final_update = false;
@@ -84,7 +82,7 @@ fn bob_can_refund_ptlc_if_alice_holds_onto_secret_after_first_update() {
 
     runtime
         .block_on(futures::future::try_join(
-            swap_beta_ptlc_alice,
+            add_ptlc_alice,
             swap_beta_ptlc_bob,
         ))
         .unwrap();
