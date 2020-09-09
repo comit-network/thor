@@ -48,6 +48,9 @@ use futures::{future::Either, pin_mut, Future};
 use genawaiter::sync::Gen;
 use std::convert::{TryFrom, TryInto};
 
+#[cfg(feature = "serde")]
+use bitcoin::util::amount::serde::as_sat;
+
 // TODO: We should handle fees dynamically
 
 // TODO: Have it as an `Amount` instead
@@ -666,15 +669,9 @@ impl RevokedState {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Balance {
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     pub ours: Amount,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     pub theirs: Amount,
 }
 
@@ -683,10 +680,7 @@ pub struct Balance {
 pub enum SplitOutput {
     Ptlc(Ptlc),
     Balance {
-        #[cfg_attr(
-            feature = "serde",
-            serde(with = "bitcoin::util::amount::serde::as_sat")
-        )]
+        #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
         amount: Amount,
         address: Address,
     },
@@ -695,10 +689,7 @@ pub enum SplitOutput {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub struct Ptlc {
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     amount: Amount,
     X_funder: OwnershipPublicKey,
     X_redeemer: OwnershipPublicKey,

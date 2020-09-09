@@ -9,6 +9,7 @@ use crate::{
     Balance, BuildFundingPsbt, Channel, ChannelState, SignFundingPsbt, SplitOutput,
     StandardChannelState, TX_FEE,
 };
+
 use anyhow::{Context, Result};
 use bitcoin::{
     consensus::serialize, util::psbt::PartiallySignedTransaction, Address, Amount, Transaction,
@@ -17,6 +18,11 @@ use bitcoin::{
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use miniscript::Descriptor;
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "serde")]
+use crate::serde::partially_signed_transaction as pst;
+#[cfg(feature = "serde")]
+use bitcoin::util::amount::serde::as_sat;
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug)]
@@ -69,15 +75,9 @@ pub(crate) struct State0 {
 #[derive(Clone, Debug)]
 pub(crate) enum Splice {
     In {
-        #[cfg_attr(
-            feature = "serde",
-            serde(with = "bitcoin::util::amount::serde::as_sat")
-        )]
+        #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
         amount: Amount,
-        #[cfg_attr(
-            feature = "serde",
-            serde(with = "crate::serde::partially_signed_transaction")
-        )]
+        #[cfg_attr(feature = "serde", serde(with = "pst"))]
         input_psbt: PartiallySignedTransaction,
     },
     Out(TxOut),

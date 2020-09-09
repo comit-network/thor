@@ -11,7 +11,7 @@ use bitcoin::{
     consensus::encode::serialize,
     hashes::{hash160, Hash},
     secp256k1,
-    util::{bip143::SighashComponents, psbt::PartiallySignedTransaction},
+    util::{amount::serde::as_sat, bip143::SighashComponents, psbt::PartiallySignedTransaction},
     Address, Amount, Network, OutPoint, Script, SigHash, Transaction, TxIn, TxOut, Txid,
 };
 use ecdsa_fun::{
@@ -58,10 +58,7 @@ impl FundOutput {
 pub(crate) struct FundingTransaction {
     inner: Transaction,
     fund_output_descriptor: Descriptor<bitcoin::PublicKey>,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     fund_output_amount: Amount,
 }
 
@@ -169,10 +166,7 @@ pub(crate) struct CommitTransaction {
     output_descriptor: Descriptor<bitcoin::PublicKey>,
     time_lock: u32,
     digest: SigHash,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     fee: Amount,
 }
 
@@ -952,15 +946,9 @@ pub(crate) fn balance(
 pub(crate) struct SpliceTransaction {
     inner: Transaction,
     fund_output_descriptor: Descriptor<bitcoin::PublicKey>,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     amount_0: Amount,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     amount_1: Amount,
 }
 
