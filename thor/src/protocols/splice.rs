@@ -230,7 +230,7 @@ impl State0 {
         ])?;
 
         // Signed to spend TX_f
-        let sig_tx_splice_tx_f_input =
+        let sig_TX_splice_TX_f_input =
             splice_transaction.sign_once(self.x_self.clone(), &self.previous_tx_f);
 
         let tx_c = CommitTransaction::new(
