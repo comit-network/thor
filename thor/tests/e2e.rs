@@ -17,10 +17,12 @@ use thor::{Balance, Channel, PtlcPoint, PtlcSecret, Splice};
 //
 //     RUST_MIN_STACK=10000000 cargo test
 
+// Alice and Bob both fund the channel with this much.
+const FUND: Amount = Amount::ONE_BTC;
+
 async fn create_channels(
     bitcoind: &Bitcoind<'_>,
 ) -> (
-    Amount,
     Channel,
     Channel,
     Transport,
@@ -30,11 +32,9 @@ async fn create_channels(
     u32,
     Amount,
 ) {
-    let fund_amount = Amount::ONE_BTC;
-
     let (mut a_transport, mut b_transport) = make_transports();
-    let (a_balance, b_balance) = generate_balances(fund_amount);
-    let (a_wallet, b_wallet) = make_wallets(bitcoind, fund_amount)
+    let (a_balance, b_balance) = generate_balances(FUND);
+    let (a_wallet, b_wallet) = make_wallets(bitcoind, FUND)
         .await
         .expect("failed to make wallets");
     let time_lock = 1;
@@ -48,13 +48,12 @@ async fn create_channels(
         .await
         .expect("failed to create channels");
 
-    assert_channel_balances(&a_channel, &b_channel, fund_amount, fund_amount);
+    assert_channel_balances(&a_channel, &b_channel, FUND, FUND);
 
     let final_balance = a_wallet.balance().await.unwrap();
-    let tx_fee = initial_balance - final_balance - fund_amount;
+    let tx_fee = initial_balance - final_balance - FUND;
 
     (
-        fund_amount,
         a_channel,
         b_channel,
         a_transport,
@@ -126,22 +125,13 @@ async fn e2e_channel_update() {
     // TODO: Work out how to declare cli and bitcoind inside create_channels().
     let cli = init_cli();
     let bitcoind = init_bitcoind(&cli).await;
-    let (
-        fund_amount,
-        mut a_channel,
-        mut b_channel,
-        mut a_transport,
-        mut b_transport,
-        _,
-        _,
-        time_lock,
-        _,
-    ) = create_channels(&bitcoind).await;
+    let (mut a_channel, mut b_channel, mut a_transport, mut b_transport, _, _, time_lock, _) =
+        create_channels(&bitcoind).await;
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
     let payment = Amount::from_btc(0.5).expect("failed to create amount");
-    let a_balance = fund_amount - payment;
-    let b_balance = fund_amount + payment;
+    let a_balance = FUND - payment;
+    let b_balance = FUND + payment;
 
     update_balances(
         &mut a_channel,
@@ -162,7 +152,6 @@ async fn e2e_channel_collaborative_close() {
     let cli = init_cli();
     let bitcoind = init_bitcoind(&cli).await;
     let (
-        fund_amount,
         a_channel,
         b_channel,
         mut a_transport,
@@ -195,8 +184,8 @@ async fn e2e_channel_collaborative_close() {
 
     // The balance after closing channel should equal balance after opening plus the
     // (refunded) fund amount minus tx fee.
-    let a_want = a_balance_after_open + fund_amount - fee_deduction_per_output;
-    let b_want = b_balance_after_open + fund_amount - fee_deduction_per_output;
+    let a_want = a_balance_after_open + FUND - fee_deduction_per_output;
+    let b_want = b_balance_after_open + FUND - fee_deduction_per_output;
 
     assert_eq!(a_balance_after_close, a_want);
     assert_eq!(b_balance_after_close, b_want);
@@ -207,7 +196,6 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
     let cli = init_cli();
     let bitcoind = init_bitcoind(&cli).await;
     let (
-        fund_amount,
         mut a_channel,
         mut b_channel,
         mut a_transport,
@@ -223,8 +211,8 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
     let payment = Amount::from_btc(0.5).unwrap();
-    let a_balance = fund_amount - payment;
-    let b_balance = fund_amount + payment;
+    let a_balance = FUND - payment;
+    let b_balance = FUND + payment;
 
     update_balances(
         &mut a_channel,
@@ -260,7 +248,7 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
     );
     assert_eq!(
         b_balance_after_punish,
-        b_balance_after_open + fund_amount * 2 - Amount::from_sat(thor::TX_FEE) * 2,
+        b_balance_after_open + FUND * 2 - Amount::from_sat(thor::TX_FEE) * 2,
         "Bob should get all the money back after punishing Alice"
     );
 }
@@ -269,8 +257,7 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
 async fn e2e_force_close_channel() {
     let cli = init_cli();
     let bitcoind = init_bitcoind(&cli).await;
-    let (fund_amount, a_channel, _, _, _, a_wallet, b_wallet, ..) =
-        create_channels(&bitcoind).await;
+    let (a_channel, _, _, _, a_wallet, b_wallet, ..) = create_channels(&bitcoind).await;
 
     let a_balance_after_open = a_wallet.balance().await.unwrap();
     let b_balance_after_open = b_wallet.balance().await.unwrap();
@@ -288,8 +275,8 @@ async fn e2e_force_close_channel() {
 
     // The balance after closing channel should equal balance after opening plus the
     // (refunded) fund amount minus tx fee.
-    let a_want = a_balance_after_open + fund_amount - fee_deduction_per_output;
-    let b_want = b_balance_after_open + fund_amount - fee_deduction_per_output;
+    let a_want = a_balance_after_open + FUND - fee_deduction_per_output;
+    let b_want = b_balance_after_open + FUND - fee_deduction_per_output;
 
     assert_eq!(a_balance_after_close, a_want,);
     assert_eq!(b_balance_after_close, b_want,);
@@ -300,7 +287,6 @@ async fn e2e_force_close_after_updates() {
     let cli = init_cli();
     let bitcoind = init_bitcoind(&cli).await;
     let (
-        fund_amount,
         mut a_channel,
         mut b_channel,
         mut a_transport,
@@ -316,8 +302,8 @@ async fn e2e_force_close_after_updates() {
 
     // Alice pays Bob 0.1 BTC
     let payment = Amount::from_btc(0.1).unwrap();
-    let a_balance = fund_amount - payment;
-    let b_balance = fund_amount + payment;
+    let a_balance = FUND - payment;
+    let b_balance = FUND + payment;
     update_balances(
         &mut a_channel,
         &mut b_channel,
@@ -343,12 +329,12 @@ async fn e2e_force_close_after_updates() {
 
     assert_eq!(
         a_balance_after_close,
-        a_balance_after_open + fund_amount - payment - fee_deduction_per_output,
+        a_balance_after_open + FUND - payment - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus payment, minus transaction fees"
     );
     assert_eq!(
         b_balance_after_close,
-        b_balance_after_open + fund_amount + payment - fee_deduction_per_output,
+        b_balance_after_open + FUND + payment - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening plus payment, minus transaction fees"
     );
 }
@@ -361,12 +347,11 @@ async fn e2e_splice_in() {
     let bitcoind = Bitcoind::new(&tc_client, "0.19.1").unwrap();
     bitcoind.init(5).await.unwrap();
 
-    let fund_amount = Amount::ONE_BTC;
-    let (a_balance, b_balance) = generate_balances(fund_amount);
+    let (a_balance, b_balance) = generate_balances(FUND);
 
     let time_lock = 1;
 
-    let (a_wallet, b_wallet) = make_wallets(&bitcoind, fund_amount).await.unwrap();
+    let (a_wallet, b_wallet) = make_wallets(&bitcoind, FUND).await.unwrap();
     let (mut a_transport, mut b_transport) = make_transports();
 
     let before_create_a_balance = a_wallet.balance().await.unwrap();
@@ -519,7 +504,6 @@ async fn e2e_atomic_swap_happy() {
     let cli = init_cli();
     let bitcoind = init_bitcoind(&cli).await;
     let (
-        fund_amount,
         mut a_channel,
         mut b_channel,
         mut a_transport,
@@ -530,7 +514,7 @@ async fn e2e_atomic_swap_happy() {
         _tx_fee,
     ) = create_channels(&bitcoind).await;
 
-    assert_channel_balances(&a_channel, &b_channel, fund_amount, fund_amount);
+    assert_channel_balances(&a_channel, &b_channel, FUND, FUND);
 
     let a_balance_after_open = a_wallet.balance().await.unwrap();
     let b_balance_after_open = b_wallet.balance().await.unwrap();
@@ -576,12 +560,12 @@ async fn e2e_atomic_swap_happy() {
 
     assert_eq!(
         a_balance_after_close,
-        a_balance_after_open + fund_amount + ptlc_amount - fee_deduction_per_output,
+        a_balance_after_open + FUND + ptlc_amount - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening plus PTLC amount, minus transaction fees"
     );
     assert_eq!(
         b_balance_after_close,
-        b_balance_after_open + fund_amount - ptlc_amount - fee_deduction_per_output,
+        b_balance_after_open + FUND - ptlc_amount - fee_deduction_per_output,
         "Balance after closing channel should equal balance after opening minus PTLC amount, minus transaction fees"
     );
 }
@@ -591,7 +575,6 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
     let cli = init_cli();
     let bitcoind = init_bitcoind(&cli).await;
     let (
-        fund_amount,
         mut a_channel,
         mut b_channel,
         mut a_transport,
@@ -602,7 +585,7 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         _tx_fee,
     ) = create_channels(&bitcoind).await;
 
-    assert_channel_balances(&a_channel, &b_channel, fund_amount, fund_amount);
+    assert_channel_balances(&a_channel, &b_channel, FUND, FUND);
 
     let a_balance_after_open = a_wallet.balance().await.unwrap();
     let b_balance_after_open = b_wallet.balance().await.unwrap();
@@ -667,13 +650,13 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
 
     assert_eq!(
         a_balance_after_close,
-        a_balance_after_open + fund_amount + ptlc_amount
+        a_balance_after_open + FUND + ptlc_amount
             - split_transaction_fee_alice - fee_deduction_for_ptlc_redeem,
         "Balance after closing channel should equal balance after opening plus PTLC amount, minus transaction fees"
     );
     assert_eq!(
         b_balance_after_close,
-        b_balance_after_open + fund_amount - ptlc_amount - split_transaction_fee_bob,
+        b_balance_after_open + FUND - ptlc_amount - split_transaction_fee_bob,
         "Balance after closing channel should equal balance after opening minus PTLC amount, minus transaction fees"
     );
 }
