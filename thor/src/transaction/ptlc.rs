@@ -56,7 +56,7 @@ impl RedeemTransaction {
         &self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> Result<Transaction> {
+    ) -> Result<RedeemTransaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -76,9 +76,9 @@ impl RedeemTransaction {
             satisfier
         };
 
-        let mut transaction = self.inner.clone();
+        let mut transaction = self.clone();
         self.input_descriptor
-            .satisfy(&mut transaction.input[0], satisfier)?;
+            .satisfy(&mut transaction.inner.input[0], satisfier)?;
 
         Ok(transaction)
     }
@@ -209,6 +209,12 @@ pub(crate) fn spend_transaction(
     );
 
     Ok((transaction, digest, ptlc_output_descriptor))
+}
+
+impl From<RedeemTransaction> for Transaction {
+    fn from(from: RedeemTransaction) -> Self {
+        from.inner
+    }
 }
 
 impl From<RefundTransaction> for Transaction {

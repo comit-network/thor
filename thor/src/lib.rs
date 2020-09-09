@@ -232,14 +232,52 @@ impl Channel {
         wallet: &W,
         ptlc_amount: Amount,
         secret: PtlcSecret,
-        _alpha_absolute_expiry: u32,
+        alpha_absolute_expiry: u32,
         tx_s_time_lock: u32,
         ptlc_refund_time_lock: u32,
-        #[cfg(test)] hold_secret: bool,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
+    {
+        let tx_ptlc_redeem = self
+            .add_ptlc_redeemer(
+                transport,
+                ptlc_amount,
+                secret.clone(),
+                tx_s_time_lock,
+                ptlc_refund_time_lock,
+            )
+            .await?;
+
+        self.redeem_ptlc_redeemer(
+            transport,
+            wallet,
+            ptlc_amount,
+            secret,
+            alpha_absolute_expiry,
+            tx_s_time_lock,
+            ptlc_refund_time_lock,
+            tx_ptlc_redeem,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Update the channel to add a PTLC output whose funds will come from the
+    /// balance output of the counterparty and, if successfully redeemed,
+    /// will pay to us.
+    async fn add_ptlc_redeemer<T>(
+        &mut self,
+        transport: &mut T,
+        ptlc_amount: Amount,
+        secret: PtlcSecret,
+        tx_s_time_lock: u32,
+        ptlc_refund_time_lock: u32,
+    ) -> Result<ptlc::RedeemTransaction>
+    where
+        T: SendMessage + ReceiveMessage,
     {
         let Balance { ours, theirs } = self.balance();
 
@@ -286,19 +324,38 @@ impl Channel {
             )?
         };
 
-        #[cfg(not(test))]
-        let hold_secret = false;
-        #[cfg(test)]
-        let hold_secret = hold_secret;
+        Ok(tx_ptlc_redeem)
+    }
 
-        if cfg!(test) && hold_secret {
-            return Ok(());
-        }
-
+    /// Attempt to redeem a PTLC output.
+    ///
+    /// If it's still safe (PTLC is not close to expiry), send the secret to the
+    /// counterparty and attempt to perform a channel update to merge the PTLC
+    /// output into our balance output. If the counterparty does not cooperate
+    /// soon enough after the revelation of the secret, force close the channel
+    /// and publish the redeem transaction.
+    #[allow(clippy::too_many_arguments)]
+    async fn redeem_ptlc_redeemer<T, W>(
+        &mut self,
+        transport: &mut T,
+        wallet: &W,
+        ptlc_amount: Amount,
+        secret: PtlcSecret,
+        _alpha_absolute_expiry: u32,
+        tx_s_time_lock: u32,
+        _ptlc_refund_time_lock: u32,
+        tx_ptlc_redeem: ptlc::RedeemTransaction,
+    ) -> anyhow::Result<()>
+    where
+        T: SendMessage + ReceiveMessage,
+        W: NewAddress + BroadcastSignedTransaction,
+    {
+        // TODO: Check that `ptlc_refund_time_lock` is not close, otherwise abort
         transport.send_message(Message::Secret(secret)).await?;
 
         // Attempt to perform a channel update to merge PTLC output into Alice's balance
         // output
+        let Balance { ours, theirs } = self.balance();
 
         let out_ours = self.split_balance_output_ours(ours + ptlc_amount);
         let out_theirs = self.split_balance_output_theirs(theirs);
@@ -318,7 +375,10 @@ impl Channel {
             Either::Left((Ok(_), _)) => (),
             Either::Left((Err(_), _)) | Either::Right(_) => {
                 channel.force_close(wallet).await?;
-                wallet.broadcast_signed_transaction(tx_ptlc_redeem).await?;
+
+                wallet
+                    .broadcast_signed_transaction(tx_ptlc_redeem.into())
+                    .await?;
             }
         };
 

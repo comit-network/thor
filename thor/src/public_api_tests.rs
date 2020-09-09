@@ -353,7 +353,6 @@ async fn e2e_atomic_swap_happy() {
 
     let expiries = generate_expiries(&a_wallet).await.unwrap();
 
-    let hold_secret = false;
     let swap_beta_ptlc_alice = a_channel.swap_beta_ptlc_alice(
         &mut a_transport,
         &a_wallet,
@@ -362,7 +361,6 @@ async fn e2e_atomic_swap_happy() {
         expiries.alpha_absolute,
         expiries.split_transaction_relative,
         expiries.ptlc_absolute,
-        hold_secret,
     );
 
     let skip_final_update = false;
@@ -429,7 +427,6 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
 
     let expiries = generate_expiries(&a_wallet).await.unwrap();
 
-    let hold_secret = false;
     let swap_beta_ptlc_alice = a_channel.swap_beta_ptlc_alice(
         &mut a_transport,
         &a_wallet,
@@ -438,7 +435,6 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         expiries.alpha_absolute,
         expiries.split_transaction_relative,
         expiries.ptlc_absolute,
-        hold_secret,
     );
 
     let skip_final_update = true;
