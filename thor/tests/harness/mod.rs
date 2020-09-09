@@ -7,15 +7,6 @@ mod wallet;
 pub use transport::{make_transports, Transport};
 pub use wallet::{make_wallets, Wallet};
 
-pub fn build_runtime() -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new()
-        .enable_all()
-        .threaded_scheduler()
-        .thread_stack_size(1024 * 1024 * 8)
-        .build()
-        .unwrap()
-}
-
 pub fn generate_balances(fund_amount: Amount) -> (Balance, Balance) {
     _generate_balances(fund_amount, fund_amount)
 }
