@@ -12,6 +12,11 @@ use spectral::prelude::*;
 use testcontainers::clients::Cli;
 use thor::{Balance, Channel, PtlcPoint, PtlcSecret, Splice};
 
+// NOTE: For some reason running these tests overflows the stack. In order to
+// mitigate this run them with:
+//
+//     RUST_MIN_STACK=10000000 cargo test
+
 async fn create_channels(
     bitcoind: &Bitcoind<'_>,
 ) -> (
