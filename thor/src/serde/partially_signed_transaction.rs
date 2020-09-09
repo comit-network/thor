@@ -1,3 +1,4 @@
+use anyhow::Result;
 use bitcoin::{consensus::encode, util::psbt::PartiallySignedTransaction};
 use serde::{de::Error, Deserialize, Deserializer, Serializer};
 

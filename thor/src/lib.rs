@@ -31,6 +31,7 @@ pub use ::bitcoin;
 pub use channel::*;
 pub use keys::{PtlcPoint, PtlcSecret};
 
+use ::serde::{Deserialize, Serialize};
 use bitcoin::Amount;
 use enum_as_inner::EnumAsInner;
 use keys::OwnershipPublicKey;
@@ -40,7 +41,7 @@ use keys::OwnershipPublicKey;
 /// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
 
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone)]
 pub struct Ptlc {
     #[cfg_attr(
@@ -64,7 +65,7 @@ impl Ptlc {
 }
 
 /// Role in an atomic swap.
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, EnumAsInner)]
 pub enum Role {
     Alice { secret: PtlcSecret },

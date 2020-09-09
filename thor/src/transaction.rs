@@ -5,7 +5,7 @@ use crate::{
     },
     signature, Balance, Ptlc, SplitOutput, TX_FEE,
 };
-use anyhow::bail;
+use anyhow::{anyhow, bail, Result};
 use arrayvec::ArrayVec;
 use bitcoin::{
     consensus::encode::serialize,
@@ -21,6 +21,7 @@ use ecdsa_fun::{
     Signature,
 };
 use miniscript::{self, Descriptor, Segwitv0};
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use signature::{verify_encsig, verify_sig};
 use std::{collections::HashMap, str::FromStr};
@@ -28,7 +29,7 @@ use std::{collections::HashMap, str::FromStr};
 pub mod ptlc;
 
 #[derive(Clone, Debug)]
-pub(crate) struct FundOutput(miniscript::Descriptor<bitcoin::PublicKey>);
+pub(crate) struct FundOutput(Descriptor<bitcoin::PublicKey>);
 
 impl FundOutput {
     pub fn new(mut Xs: [OwnershipPublicKey; 2]) -> Self {
@@ -42,7 +43,7 @@ impl FundOutput {
         Self(descriptor)
     }
 
-    fn descriptor(&self) -> miniscript::Descriptor<bitcoin::PublicKey> {
+    fn descriptor(&self) -> Descriptor<bitcoin::PublicKey> {
         self.0.clone()
     }
 
@@ -51,11 +52,11 @@ impl FundOutput {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct FundingTransaction {
     inner: Transaction,
-    fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+    fund_output_descriptor: Descriptor<bitcoin::PublicKey>,
     #[cfg_attr(
         feature = "serde",
         serde(with = "bitcoin::util::amount::serde::as_sat")
@@ -67,9 +68,9 @@ impl FundingTransaction {
     pub fn new(
         mut input_psbts: Vec<PartiallySignedTransaction>,
         channel_balance: [(OwnershipPublicKey, Amount); 2],
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         if input_psbts.is_empty() {
-            anyhow::bail!("Cannot build a transaction without inputs")
+            bail!("Cannot build a transaction without inputs")
         }
 
         // Sort the tuples of arguments based on the ascending lexicographical order of
@@ -112,7 +113,7 @@ impl FundingTransaction {
         };
 
         // Both parties _must_ insert inputs and outputs in the order defined above
-        let TX_f = Transaction {
+        let tx_f = Transaction {
             version: 2,
             lock_time: 0,
             input: inputs,
@@ -120,7 +121,7 @@ impl FundingTransaction {
         };
 
         Ok(Self {
-            inner: TX_f,
+            inner: tx_f,
             fund_output_descriptor,
             fund_output_amount,
         })
@@ -147,13 +148,13 @@ impl FundingTransaction {
         self.fund_output_amount
     }
 
-    pub fn fund_output_descriptor(&self) -> miniscript::Descriptor<bitcoin::PublicKey> {
+    pub fn fund_output_descriptor(&self) -> Descriptor<bitcoin::PublicKey> {
         self.fund_output_descriptor.clone()
     }
 
-    pub fn into_psbt(self) -> anyhow::Result<PartiallySignedTransaction> {
+    pub fn into_psbt(self) -> Result<PartiallySignedTransaction> {
         PartiallySignedTransaction::from_unsigned_tx(self.inner)
-            .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
+            .map_err(|_| anyhow!("could not convert to psbt"))
     }
 
     pub fn txid(&self) -> Txid {
@@ -161,7 +162,7 @@ impl FundingTransaction {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CommitTransaction {
     inner: Transaction,
@@ -177,28 +178,28 @@ pub(crate) struct CommitTransaction {
 
 impl CommitTransaction {
     pub(crate) fn new(
-        TX_f: &FundingTransaction,
+        tx_f: &FundingTransaction,
         keys: [(OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey); 2],
         time_lock: u32,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let output_descriptor = Self::build_descriptor(keys, time_lock)?;
 
-        let input = TX_f.as_txin();
+        let input = tx_f.as_txin();
         let fee = Amount::from_sat(TX_FEE);
-        let TX_c = Transaction {
+        let tx_c = Transaction {
             version: 2,
             lock_time: 0,
             input: vec![input],
             output: vec![TxOut {
-                value: TX_f.value().as_sat() - fee.as_sat(),
+                value: tx_f.value().as_sat() - fee.as_sat(),
                 script_pubkey: output_descriptor.script_pubkey(),
             }],
         };
 
-        let digest = Self::compute_digest(&TX_c, TX_f);
+        let digest = Self::compute_digest(&tx_c, tx_f);
 
         Ok(Self {
-            inner: TX_c,
+            inner: tx_c,
             output_descriptor,
             time_lock,
             digest,
@@ -221,10 +222,10 @@ impl CommitTransaction {
     /// Add signatures to CommitTransaction.
     pub fn add_signatures(
         self,
-        TX_f: &FundingTransaction,
+        tx_f: &FundingTransaction,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -244,18 +245,18 @@ impl CommitTransaction {
             satisfier
         };
 
-        let mut TX_c = self.inner;
-        TX_f.fund_output_descriptor()
-            .satisfy(&mut TX_c.input[0], satisfier)?;
+        let mut tx_c = self.inner;
+        tx_f.fund_output_descriptor()
+            .satisfy(&mut tx_c.input[0], satisfier)?;
 
-        Ok(TX_c)
+        Ok(tx_c)
     }
 
     /// Use `CommitTransaction` as a Transaction Input for the
     /// `SplitTransaction`. The sequence number is set to the value of
     /// `time_lock` since the `SplitTransaction` uses the time-locked path
     /// of the `CommitTransaction`'s script.
-    pub fn as_txin_for_TX_s(&self) -> TxIn {
+    pub fn as_txin_for_tx_s(&self) -> TxIn {
         TxIn {
             previous_output: OutPoint::new(self.inner.txid(), 0),
             script_sig: Script::new(),
@@ -268,7 +269,7 @@ impl CommitTransaction {
     /// `PunishTransaction`. The sequence number is set to `OxFFFF_FFFF` since
     /// the `PunishTransaction` does not use the time-locked path of the
     /// `CommitTransaction`'s script.
-    pub fn as_txin_for_TX_p(&self) -> TxIn {
+    pub fn as_txin_for_tx_p(&self) -> TxIn {
         TxIn {
             previous_output: OutPoint::new(self.inner.txid(), 0),
             script_sig: Script::new(),
@@ -290,7 +291,7 @@ impl CommitTransaction {
         verification_key: OwnershipPublicKey,
         encryption_key: PublishingPublicKey,
         encsig: &EncryptedSignature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_encsig(
             verification_key,
             encryption_key.into(),
@@ -314,18 +315,18 @@ impl CommitTransaction {
     }
 
     // TODO: Remove code duplication.
-    fn compute_digest(TX_c: &Transaction, TX_f: &FundingTransaction) -> SigHash {
-        SighashComponents::new(&TX_c).sighash_all(
-            &TX_f.as_txin(),
-            &TX_f.fund_output_descriptor().witness_script(),
-            TX_f.value().as_sat(),
+    fn compute_digest(tx_c: &Transaction, tx_f: &FundingTransaction) -> SigHash {
+        SighashComponents::new(&tx_c).sighash_all(
+            &tx_f.as_txin(),
+            &tx_f.fund_output_descriptor().witness_script(),
+            tx_f.value().as_sat(),
         )
     }
 
     fn build_descriptor(
         mut keys: [(OwnershipPublicKey, RevocationPublicKey, PublishingPublicKey); 2],
         time_lock: u32,
-    ) -> anyhow::Result<Descriptor<bitcoin::PublicKey>> {
+    ) -> Result<Descriptor<bitcoin::PublicKey>> {
         // Sort the tuples of arguments based on the ascending lexicographical order of
         // bytes of each ownership public key. Both parties _must_ do this so that they
         // build the same commit transaction descriptor
@@ -355,7 +356,7 @@ impl CommitTransaction {
         let Y_0_hash = hash160::Hash::hash(&Y_0.serialize()[..]);
         let Y_1_hash = hash160::Hash::hash(&Y_1.serialize()[..]);
 
-        // Describes the spending policy of the channel commit transaction TX_c.
+        // Describes the spending policy of the channel commit transaction tx_c.
         // There are three possible way to spend this transaction:
         // 1. Channel state: It is correctly signed w.r.t X_0, X_1 and after relative
         // timelock
@@ -387,7 +388,7 @@ impl CommitTransaction {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SplitTransaction {
     inner: Transaction,
@@ -407,45 +408,45 @@ pub enum FeeError {
         fee: Amount,
     },
     #[error(
-        "Total output {total_output} is less than the sum of fees to be paid: {TX_c_fee} &
-    {TX_s_fee}"
+        "Total output {total_output} is less than the sum of fees to be paid: {tx_c_fee} &
+    {tx_s_fee}"
     )]
     DustOutput {
         total_output: Amount,
-        TX_c_fee: Amount,
-        TX_s_fee: Amount,
+        tx_c_fee: Amount,
+        tx_s_fee: Amount,
     },
-    #[error("Total output {total_output} should equal the value of the TX_c output {TX_c_value}")]
+    #[error("Total output {total_output} should equal the value of the tx_c output {tx_c_value}")]
     OutputMismatch {
-        TX_c_value: Amount,
+        tx_c_value: Amount,
         total_output: Amount,
     },
 }
 
 impl SplitTransaction {
     pub(crate) fn new(
-        TX_c: &CommitTransaction,
+        tx_c: &CommitTransaction,
         outputs: Vec<SplitOutput>,
     ) -> Result<Self, FeeError> {
-        let total_input = TX_c.value();
+        let total_input = tx_c.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|output| output.amount().as_sat()).sum());
-        let TX_s_fee = Amount::from_sat(TX_FEE);
-        if total_input < total_output - TX_c.fee() - TX_s_fee {
+        let tx_s_fee = Amount::from_sat(TX_FEE);
+        if total_input < total_output - tx_c.fee() - tx_s_fee {
             return Err(FeeError::InsufficientFunds {
                 input: total_input,
-                output: total_output - TX_c.fee(),
-                fee: TX_s_fee,
+                output: total_output - tx_c.fee(),
+                fee: tx_s_fee,
             });
         }
 
         let n_outputs = outputs.len();
 
-        // Distribute transaction TX_c fee costs evenly between outputs
-        let TX_c_fee_per_output = TX_c.fee() / n_outputs as u64;
+        // Distribute transaction tx_c fee costs evenly between outputs
+        let tx_c_fee_per_output = tx_c.fee() / n_outputs as u64;
 
-        // Distribute transaction TX_s fee costs evenly between outputs
-        let TX_s_fee_per_output = TX_s_fee / n_outputs as u64;
+        // Distribute transaction tx_s fee costs evenly between outputs
+        let tx_s_fee_per_output = tx_s_fee / n_outputs as u64;
 
         let mut outputs = outputs
             .iter()
@@ -481,7 +482,7 @@ impl SplitTransaction {
                     // Distribute transaction fee costs evenly between outputs
                     // TODO: Currently fails if there value is too small. Proposal would be to
                     // exclude outputs smaller than the fees
-                    value: value - TX_c_fee_per_output.as_sat() - TX_s_fee_per_output.as_sat(),
+                    value: value - tx_c_fee_per_output.as_sat() - tx_s_fee_per_output.as_sat(),
                     script_pubkey,
                 },
             )
@@ -492,10 +493,10 @@ impl SplitTransaction {
         // transaction
         outputs.sort_by(|a, b| a.script_pubkey.cmp(&b.script_pubkey));
 
-        let input = TX_c.as_txin_for_TX_s();
+        let input = tx_c.as_txin_for_tx_s();
 
         // Both parties _must_ insert the outputs in the order defined above
-        let TX_s = {
+        let tx_s = {
             Transaction {
                 version: 2,
                 lock_time: 0,
@@ -504,12 +505,12 @@ impl SplitTransaction {
             }
         };
 
-        let digest = Self::compute_digest(&TX_s, TX_c);
+        let digest = Self::compute_digest(&tx_s, tx_c);
 
-        let input_descriptor = TX_c.output_descriptor();
+        let input_descriptor = tx_c.output_descriptor();
 
         Ok(Self {
-            inner: TX_s,
+            inner: tx_s,
             input_descriptor,
             digest,
         })
@@ -518,39 +519,39 @@ impl SplitTransaction {
     // TODO: use it
     #[allow(dead_code)]
     pub(crate) fn fees(
-        TX_c_value: Amount,
-        TX_c_fee: Amount,
+        tx_c_value: Amount,
+        tx_c_fee: Amount,
         amount_0: Amount,
         amount_1: Amount,
     ) -> Result<(Amount, Amount), FeeError> {
         let total_output = amount_0 + amount_1;
-        let TX_s_fee = Amount::from_sat(TX_FEE);
+        let tx_s_fee = Amount::from_sat(TX_FEE);
 
-        if total_output != TX_c_value {
+        if total_output != tx_c_value {
             return Err(FeeError::OutputMismatch {
-                TX_c_value,
+                tx_c_value,
                 total_output,
             });
         }
 
-        if total_output < TX_c_fee + TX_s_fee {
+        if total_output < tx_c_fee + tx_s_fee {
             return Err(FeeError::DustOutput {
                 total_output,
-                TX_c_fee,
-                TX_s_fee,
+                tx_c_fee,
+                tx_s_fee,
             });
         }
 
-        if TX_c_value <= total_output - TX_c_fee - TX_s_fee {
+        if tx_c_value <= total_output - tx_c_fee - tx_s_fee {
             return Err(FeeError::InsufficientFunds {
-                input: TX_c_value,
-                output: total_output - TX_c_fee,
-                fee: TX_s_fee,
+                input: tx_c_value,
+                output: total_output - tx_c_fee,
+                fee: tx_s_fee,
             });
         }
 
-        // Distribute transaction TX_c & TX_s fee costs evenly between outputs
-        let half_the_fees = (TX_c_fee + TX_s_fee) / 2;
+        // Distribute transaction tx_c & tx_s fee costs evenly between outputs
+        let half_the_fees = (tx_c_fee + tx_s_fee) / 2;
 
         // Fee allocation: if a side does not have enough to pay the fees, the other
         // side pay their part.
@@ -578,7 +579,7 @@ impl SplitTransaction {
         &self,
         verification_key: OwnershipPublicKey,
         signature: &Signature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_sig(verification_key, &self.digest, signature)?;
 
         Ok(())
@@ -589,7 +590,7 @@ impl SplitTransaction {
         &mut self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         struct Satisfier {
             a: (bitcoin::PublicKey, bitcoin::secp256k1::Signature),
             b: (bitcoin::PublicKey, bitcoin::secp256k1::Signature),
@@ -637,11 +638,11 @@ impl SplitTransaction {
         self.inner.txid()
     }
 
-    fn compute_digest(TX_s: &Transaction, TX_c: &CommitTransaction) -> SigHash {
-        SighashComponents::new(&TX_s).sighash_all(
-            &TX_c.as_txin_for_TX_s(),
-            &TX_c.output_descriptor().witness_script(),
-            TX_c.value().as_sat(),
+    fn compute_digest(tx_s: &Transaction, tx_c: &CommitTransaction) -> SigHash {
+        SighashComponents::new(&tx_s).sighash_all(
+            &tx_c.as_txin_for_tx_s(),
+            &tx_c.output_descriptor().witness_script(),
+            tx_c.value().as_sat(),
         )
     }
 }
@@ -667,16 +668,16 @@ impl PunishTransaction {
     pub(crate) fn new(
         x_self: &OwnershipKeyPair,
         final_address: Address,
-        TX_c: &CommitTransaction,
-        encsig_TX_c_self: &EncryptedSignature,
+        tx_c: &CommitTransaction,
+        encsig_tx_c_self: &EncryptedSignature,
         r_other: &RevocationKeyPair,
         Y_other: PublishingPublicKey,
-        revoked_TX_c_candidate: Transaction,
-    ) -> anyhow::Result<Self> {
+        revoked_tx_c_candidate: Transaction,
+    ) -> Result<Self> {
         let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
         // CommitTransaction's only have one input
-        let input = revoked_TX_c_candidate.input[0].clone();
+        let input = revoked_tx_c_candidate.input[0].clone();
 
         // Extract all signatures from witness stack
         let mut sigs = Vec::new();
@@ -701,25 +702,25 @@ impl PunishTransaction {
             .into_iter()
             .find_map(|sig| {
                 adaptor
-                    .recover_decryption_key(&Y_other.clone().into(), &sig.into(), &encsig_TX_c_self)
+                    .recover_decryption_key(&Y_other.clone().into(), &sig.into(), &encsig_tx_c_self)
                     .map(PublishingKeyPair::from)
             })
             .ok_or_else(|| PunishError::RecoveryFailure)?;
 
-        let mut TX_p = {
+        let mut tx_p = {
             let output = TxOut {
-                value: TX_c.value().as_sat() - TX_FEE,
+                value: tx_c.value().as_sat() - TX_FEE,
                 script_pubkey: final_address.script_pubkey(),
             };
             Transaction {
                 version: 2,
                 lock_time: 0,
-                input: vec![TX_c.as_txin_for_TX_p()],
+                input: vec![tx_c.as_txin_for_tx_p()],
                 output: vec![output],
             }
         };
 
-        let digest = Self::compute_digest(&TX_p, &TX_c);
+        let digest = Self::compute_digest(&tx_p, &tx_c);
 
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(3);
@@ -765,17 +766,17 @@ impl PunishTransaction {
             satisfier
         };
 
-        TX_c.output_descriptor()
-            .satisfy(&mut TX_p.input[0], satisfier)?;
+        tx_c.output_descriptor()
+            .satisfy(&mut tx_p.input[0], satisfier)?;
 
-        Ok(Self(TX_p))
+        Ok(Self(tx_p))
     }
 
-    fn compute_digest(TX_p: &Transaction, TX_c: &CommitTransaction) -> SigHash {
-        SighashComponents::new(&TX_p).sighash_all(
-            &TX_c.as_txin_for_TX_p(),
-            &TX_c.output_descriptor().witness_script(),
-            TX_c.value().as_sat(),
+    fn compute_digest(tx_p: &Transaction, tx_c: &CommitTransaction) -> SigHash {
+        SighashComponents::new(&tx_p).sighash_all(
+            &tx_c.as_txin_for_tx_p(),
+            &tx_c.output_descriptor().witness_script(),
+            tx_c.value().as_sat(),
         )
     }
 }
@@ -795,10 +796,10 @@ pub(crate) struct CloseTransaction {
 
 impl CloseTransaction {
     pub(crate) fn new(
-        TX_f: &FundingTransaction,
+        tx_f: &FundingTransaction,
         mut outputs: [(Amount, Address); 2],
     ) -> Result<Self, FeeError> {
-        let total_input = TX_f.value();
+        let total_input = tx_f.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|(amount, _)| amount.as_sat()).sum());
         let close_transaction_fee = Amount::from_sat(TX_FEE);
@@ -830,7 +831,7 @@ impl CloseTransaction {
             script_pubkey: address_1.script_pubkey(),
         };
 
-        let input = TX_f.as_txin();
+        let input = tx_f.as_txin();
 
         // Both parties _must_ insert the outputs in the order defined above
         let close_transaction = Transaction {
@@ -840,20 +841,20 @@ impl CloseTransaction {
             output: vec![output_0, output_1],
         };
 
-        let digest = Self::compute_digest(&close_transaction, &TX_f);
+        let digest = Self::compute_digest(&close_transaction, &tx_f);
 
         Ok(Self {
             inner: close_transaction,
-            input_descriptor: TX_f.fund_output_descriptor(),
+            input_descriptor: tx_f.fund_output_descriptor(),
             digest,
         })
     }
 
-    fn compute_digest(close_transaction: &Transaction, TX_f: &FundingTransaction) -> SigHash {
+    fn compute_digest(close_transaction: &Transaction, tx_f: &FundingTransaction) -> SigHash {
         SighashComponents::new(&close_transaction).sighash_all(
-            &TX_f.as_txin(),
-            &TX_f.fund_output_descriptor().witness_script(),
-            TX_f.value().as_sat(),
+            &tx_f.as_txin(),
+            &tx_f.fund_output_descriptor().witness_script(),
+            tx_f.value().as_sat(),
         )
     }
 
@@ -861,7 +862,7 @@ impl CloseTransaction {
         &self,
         verification_key: OwnershipPublicKey,
         signature: &Signature,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
         verify_sig(verification_key, &self.digest, signature)?;
 
         Ok(())
@@ -871,7 +872,7 @@ impl CloseTransaction {
         self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -906,8 +907,8 @@ impl CloseTransaction {
 fn build_shared_output_descriptor(
     X_0: OwnershipPublicKey,
     X_1: OwnershipPublicKey,
-) -> miniscript::Descriptor<bitcoin::PublicKey> {
-    // Describes the spending policy of the channel fund transaction TX_f.
+) -> Descriptor<bitcoin::PublicKey> {
+    // Describes the spending policy of the channel fund transaction tx_f.
     // For now we use `and(X_0, X_1)` - eventually we might want to replace this
     // with a threshold signature.
     const MINISCRIPT_TEMPLATE: &str = "c:and_v(v:pk(X_0),pk_k(X_1))";
@@ -922,7 +923,7 @@ fn build_shared_output_descriptor(
     let miniscript = miniscript::Miniscript::<bitcoin::PublicKey, Segwitv0>::from_str(&miniscript)
         .expect("a valid miniscript");
 
-    miniscript::Descriptor::Wsh(miniscript)
+    Descriptor::Wsh(miniscript)
 }
 
 /// Calculate the balance held in the split outputs for the given final address
@@ -950,11 +951,11 @@ pub(crate) fn balance(
     )
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct SpliceTransaction {
     inner: Transaction,
-    fund_output_descriptor: miniscript::Descriptor<bitcoin::PublicKey>,
+    fund_output_descriptor: Descriptor<bitcoin::PublicKey>,
     #[cfg_attr(
         feature = "serde",
         serde(with = "bitcoin::util::amount::serde::as_sat")
@@ -971,9 +972,9 @@ impl SpliceTransaction {
     pub fn new(
         mut inputs: Vec<PartiallySignedTransaction>,
         channel_balance: [(OwnershipPublicKey, Amount); 2],
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         if inputs.is_empty() {
-            anyhow::bail!("Cannot build a transaction without inputs")
+            bail!("Cannot build a transaction without inputs")
         }
 
         // Sort the tuples of arguments based on the ascending lexicographical order of
@@ -1015,7 +1016,7 @@ impl SpliceTransaction {
         };
 
         // Both parties _must_ insert inputs and outputs in the order defined above
-        let TX_f = Transaction {
+        let tx_f = Transaction {
             version: 2,
             lock_time: 0,
             input: inputs,
@@ -1023,32 +1024,32 @@ impl SpliceTransaction {
         };
 
         Ok(Self {
-            inner: TX_f,
+            inner: tx_f,
             fund_output_descriptor,
             amount_0,
             amount_1,
         })
     }
 
-    pub fn into_psbt(self) -> anyhow::Result<PartiallySignedTransaction> {
+    pub fn into_psbt(self) -> Result<PartiallySignedTransaction> {
         PartiallySignedTransaction::from_unsigned_tx(self.inner)
-            .map_err(|_| anyhow::anyhow!("could not convert to psbt"))
+            .map_err(|_| anyhow!("could not convert to psbt"))
     }
 
-    fn compute_digest(&self, previous_TX_f: &FundingTransaction) -> SigHash {
+    fn compute_digest(&self, previous_tx_f: &FundingTransaction) -> SigHash {
         SighashComponents::new(&self.inner).sighash_all(
-            &previous_TX_f.as_txin(),
-            &previous_TX_f.fund_output_descriptor().witness_script(),
-            previous_TX_f.value().as_sat(),
+            &previous_tx_f.as_txin(),
+            &previous_tx_f.fund_output_descriptor().witness_script(),
+            previous_tx_f.value().as_sat(),
         )
     }
 
     pub fn sign_once(
         &self,
         x_self: OwnershipKeyPair,
-        previous_TX_f: &FundingTransaction,
+        previous_tx_f: &FundingTransaction,
     ) -> Signature {
-        let digest = self.compute_digest(previous_TX_f);
+        let digest = self.compute_digest(previous_tx_f);
         x_self.sign(digest)
     }
 }
@@ -1152,14 +1153,14 @@ mod tests {
     proptest! {
         #[test]
         fn check_fees_are_unreachable(
-                TX_c_value in arb_amount(),
-                TX_c_fee in arb_amount(),
+                tx_c_value in arb_amount(),
+                tx_c_fee in arb_amount(),
                 amount_0 in arb_amount(),
                 amount_1 in arb_amount()
             ) {
                 let _ = SplitTransaction::fees(
-                            TX_c_value,
-                            TX_c_fee,
+                            tx_c_value,
+                            tx_c_fee,
                             amount_0,
                             amount_1,
                         );

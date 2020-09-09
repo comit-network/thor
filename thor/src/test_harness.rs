@@ -1,4 +1,5 @@
 use crate::{Balance, Channel, MedianTime, PtlcPoint};
+use anyhow::Result;
 use bitcoin::Amount;
 use genawaiter::GeneratorState;
 
@@ -37,7 +38,7 @@ pub struct SwapExpiries {
     pub split_transaction_relative: u32,
 }
 
-pub async fn generate_expiries<C>(connector: &C) -> anyhow::Result<SwapExpiries>
+pub async fn generate_expiries<C>(connector: &C) -> Result<SwapExpiries>
 where
     C: MedianTime,
 {
@@ -67,17 +68,17 @@ pub async fn swap_beta_ptlc_bob(
     ptlc_amount: Amount,
     point: PtlcPoint,
     alpha_absolute_expiry: u32,
-    TX_s_time_lock: u32,
+    tx_s_time_lock: u32,
     ptlc_redeem_time_lock: u32,
     skip_update: bool,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     let mut swap_beta_ptlc_bob = channel.swap_beta_ptlc_bob(
         transport,
         wallet,
         ptlc_amount,
         point,
         alpha_absolute_expiry,
-        TX_s_time_lock,
+        tx_s_time_lock,
         ptlc_redeem_time_lock,
     );
 

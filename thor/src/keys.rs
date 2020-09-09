@@ -1,4 +1,7 @@
-use anyhow::bail;
+use ::serde::{Deserialize, Serialize};
+#[cfg(test)]
+use anyhow::anyhow;
+use anyhow::{bail, Result};
 use bitcoin::{hashes::Hash, SigHash};
 use ecdsa_fun::{
     adaptor::{Adaptor, EncryptedSignature},
@@ -9,14 +12,14 @@ use ecdsa_fun::{
 use sha2::Sha256;
 use std::fmt;
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct OwnershipKeyPair {
     secret_key: Scalar,
     public_key: Point,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct OwnershipPublicKey(Point);
 
@@ -74,18 +77,18 @@ impl From<Scalar> for OwnershipKeyPair {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevocationKeyPair {
     secret_key: Scalar,
     public_key: Point,
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevocationSecretKey(Scalar);
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct RevocationPublicKey(Point);
 
@@ -113,10 +116,7 @@ impl RevocationKeyPair {
 pub struct WrongRevocationSecretKey;
 
 impl RevocationPublicKey {
-    pub fn verify_revocation_secret_key(
-        &self,
-        secret_key: &RevocationSecretKey,
-    ) -> anyhow::Result<()> {
+    pub fn verify_revocation_secret_key(&self, secret_key: &RevocationSecretKey) -> Result<()> {
         if self.0 != public_key(&secret_key.0) {
             bail!(WrongRevocationSecretKey)
         }
@@ -155,7 +155,7 @@ impl From<RevocationSecretKey> for RevocationKeyPair {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct PublishingKeyPair {
     secret_key: Scalar,
@@ -165,7 +165,7 @@ pub struct PublishingKeyPair {
 #[derive(Clone, Debug)]
 pub struct PublishingSecretKey(Scalar);
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct PublishingPublicKey(Point);
 
@@ -241,7 +241,7 @@ impl fmt::Display for PublishingPublicKey {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct PtlcSecret(Scalar);
 
@@ -257,7 +257,7 @@ impl PtlcSecret {
     }
 }
 
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct PtlcPoint(Point);
 
@@ -317,14 +317,13 @@ fn sign(secret_key: &Scalar, digest: SigHash) -> Signature {
 }
 
 #[cfg(test)]
-pub fn point_from_str(from: &str) -> anyhow::Result<Point> {
+pub fn point_from_str(from: &str) -> Result<Point> {
     let point = hex::decode(from)?;
 
     let mut bytes = [0u8; 33];
     bytes.copy_from_slice(point.as_slice());
 
-    let point =
-        Point::from_bytes(bytes).ok_or_else(|| anyhow::anyhow!("string slice is not a Point"))?;
+    let point = Point::from_bytes(bytes).ok_or_else(|| anyhow!("string slice is not a Point"))?;
 
     Ok(point)
 }

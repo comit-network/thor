@@ -69,19 +69,19 @@ fn punish_publication_of_revoked_commit_transaction() {
 
     // Alice attempts to cheat by publishing a revoked commit transaction
 
-    let signed_revoked_TX_c = alice_channel.latest_revoked_signed_TX_c().unwrap().unwrap();
+    let signed_revoked_tx_c = alice_channel.latest_revoked_signed_tx_c().unwrap().unwrap();
     runtime
         .block_on(
             alice_wallet
                 .0
-                .send_raw_transaction(signed_revoked_TX_c.clone()),
+                .send_raw_transaction(signed_revoked_tx_c.clone()),
         )
         .unwrap();
 
     // Bob sees the transaction and punishes Alice
 
     runtime
-        .block_on(bob_channel.punish(&bob_wallet, signed_revoked_TX_c))
+        .block_on(bob_channel.punish(&bob_wallet, signed_revoked_tx_c))
         .unwrap();
 
     let after_punish_balance_alice = runtime.block_on(alice_wallet.0.balance()).unwrap();
