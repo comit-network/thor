@@ -21,8 +21,8 @@ impl Wallet {
 }
 
 /// Create two bitcoind wallets on the `bitcoind` node and fund them with the
-/// amount that they will contribute to the channel, plus a buffer to account
-/// for transaction fees.
+/// amount that they will contribute to the channel, plus a little extra to
+/// cover transaction fees.
 pub async fn make_wallets(
     bitcoind: &Bitcoind<'_>,
     fund_amount: Amount,
@@ -35,10 +35,10 @@ pub async fn make_wallets(
 
 async fn make_wallet(name: &str, bitcoind: &Bitcoind<'_>, fund_amount: Amount) -> Result<Wallet> {
     let wallet = Wallet::new(name, bitcoind.node_url.clone()).await?;
-
-    let buffer = Amount::from_btc(1.0)?;
     let address = wallet.0.new_address().await.unwrap();
-    bitcoind.mint(address, fund_amount + buffer).await.unwrap();
+    let extra = Amount::from_btc(1.0)?;
+
+    bitcoind.mint(address, fund_amount + extra).await.unwrap();
 
     Ok(wallet)
 }
