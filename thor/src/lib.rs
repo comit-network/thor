@@ -349,7 +349,7 @@ impl Channel {
             // Bitcoin blockchain for Alice revealing the `secret` by publishing
             // `tx_ptlc_redeem`. If she does yield the `secret`. If she doesn't do it before
             // `ptlc_refund_time_lock`, publish `tx_ptlc_refund`.
-            let secret = map_err(transport.receive_message().await?.into_secret())?;
+            let secret: PtlcSecret = transport.receive_message().await?.try_into()?;
 
             if secret.point() != point {
                 bail!("Alice sent incorrect secret")
@@ -805,10 +805,6 @@ impl UnexpectedMessage {
     }
 }
 
-fn map_err<T>(res: Result<T, Message>) -> Result<T, UnexpectedMessage> {
-    res.map_err(UnexpectedMessage::new::<T>)
-}
-
 impl From<create::Message0> for Message {
     fn from(m: create::Message0) -> Self {
         Message::Create0(m)
@@ -1143,6 +1139,26 @@ impl TryFrom<Message> for splice::Message3 {
             Message::Splice3(m) => Ok(m),
             _ => Err(UnexpectedMessage {
                 expected_type: "Splice3".to_string(),
+                received: m,
+            }),
+        }
+    }
+}
+
+impl From<PtlcSecret> for Message {
+    fn from(m: PtlcSecret) -> Self {
+        Message::Secret(m)
+    }
+}
+
+impl TryFrom<Message> for PtlcSecret {
+    type Error = UnexpectedMessage;
+
+    fn try_from(m: Message) -> Result<Self, Self::Error> {
+        match m {
+            Message::Secret(m) => Ok(m),
+            _ => Err(UnexpectedMessage {
+                expected_type: "Secret".to_string(),
                 received: m,
             }),
         }
