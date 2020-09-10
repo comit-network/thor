@@ -425,9 +425,9 @@ impl Channel {
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,
     {
-        let state = close::State0::new(&self);
+        let state = close::State0::new(&self)?;
 
-        transport.send_message(state.compose()?.into()).await?;
+        transport.send_message(state.compose().into()).await?;
         let response = transport.receive_message().await?.try_into()?;
         let close_transaction = state.interpret(response)?;
 
