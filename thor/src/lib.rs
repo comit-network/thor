@@ -89,6 +89,40 @@ pub trait ReceiveMessage {
     async fn receive_message(&mut self) -> Result<Message>;
 }
 
+/// Conceptually each step in a channel protocol is made up of a send message, a
+/// receive message, and a transition to the next state based on interpreting
+/// the received message. This macro combines these three into a single step.
+/// Returns the output of transitioning to the next state.
+#[macro_export]
+macro_rules! step {
+    ($transport:expr, $state:expr) => {{
+        let transport = $transport;
+        let state = $state;
+
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let res = state.interpret(response)?;
+
+        (transport, res)
+    }};
+}
+
+/// The same as [step] but passes `wallet` into `interpret()`.
+#[macro_export]
+macro_rules! step_wallet {
+    ($transport:expr, $state:expr, $wallet:expr) => {{
+        let transport = $transport;
+        let state = $state;
+        let wallet = $wallet;
+
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let res = state.interpret(response, wallet).await?;
+
+        (transport, res)
+    }};
+}
+
 impl Channel {
     /// Create a channel.
     ///
@@ -108,26 +142,14 @@ impl Channel {
         let final_address = wallet.new_address().await?;
         let state = create::State0::new(balance, time_lock, final_address);
 
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let state = state.interpret(response, wallet).await?;
+        let (transport, state) = step_wallet!(transport, state, wallet);
 
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let state = state.interpret(response)?;
+        let (transport, state) = step!(transport, state);
+        let (transport, state) = step!(transport, state);
+        let (transport, state) = step!(transport, state);
+        let (transport, state) = step!(transport, state);
 
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let state = state.interpret(response)?;
-
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let state = state.interpret(response)?;
-
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let state = state.interpret(response)?;
-
+        // No step macro because compose() requires the wallet.
         transport
             .send_message(state.compose(wallet).await?.into())
             .await?;
@@ -360,27 +382,20 @@ impl Channel {
         T: SendMessage + ReceiveMessage,
     {
         use update::*;
+        use State1Kind::*;
 
         let state = State0::new(self.clone(), new_split_outputs, time_lock);
 
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let state = state.interpret(response)?;
+        let (transport, state) = step!(transport, state);
 
         let updated_channel = match state {
-            State1Kind::State1(state) => update!(transport, state),
-            State1Kind::State1PtlcFunder(state) => {
-                transport.send_message(state.compose().into()).await?;
-                let response = transport.receive_message().await?.try_into()?;
-                let state = state.interpret(response)?;
-
+            State1(state) => update!(transport, state),
+            State1PtlcFunder(state) => {
+                let (transport, state) = step!(transport, state);
                 update!(transport, state)
             }
-            State1Kind::State1PtlcRedeemer(state) => {
-                transport.send_message(state.compose().into()).await?;
-                let response = transport.receive_message().await?.try_into()?;
-                let state = state.interpret(response)?;
-
+            State1PtlcRedeemer(state) => {
+                let (transport, state) = step!(transport, state);
                 update!(transport, state)
             }
         };
@@ -391,17 +406,9 @@ impl Channel {
                 let transport = $transport;
                 let state = $state;
 
-                transport.send_message(state.compose().into()).await?;
-                let response = transport.receive_message().await?.try_into()?;
-                let state = state.interpret(response)?;
-
-                transport.send_message(state.compose().into()).await?;
-                let response = transport.receive_message().await?.try_into()?;
-                let state = state.interpret(response)?;
-
-                transport.send_message(state.compose().into()).await?;
-                let response = transport.receive_message().await?.try_into()?;
-                let updated_channel = state.interpret(response)?;
+                let (transport, state) = step!(transport, state);
+                let (transport, state) = step!(transport, state);
+                let (_, updated_channel) = step!(transport, state);
 
                 updated_channel
             }};
@@ -427,10 +434,7 @@ impl Channel {
     {
         let state = close::State0::new(&self)?;
 
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let close_transaction = state.interpret(response)?;
-
+        let (_, close_transaction) = step!(transport, state);
         wallet
             .broadcast_signed_transaction(close_transaction)
             .await?;
@@ -529,23 +533,10 @@ impl Channel {
         )
         .await?;
 
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let state = state.interpret(response)?;
-
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let state = state.interpret(response)?;
-
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let state = state.interpret(response, wallet).await?;
-
-        transport
-            .send_message(state.compose().await?.into())
-            .await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let (channel, transaction) = state.interpret(response, wallet).await?;
+        let (transport, state) = step!(transport, state);
+        let (transport, state) = step!(transport, state);
+        let (transport, state) = step_wallet!(transport, state, wallet);
+        let (_, (channel, transaction)) = step_wallet!(transport, state, wallet);
 
         wallet.broadcast_signed_transaction(transaction).await?;
 
