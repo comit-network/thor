@@ -6,7 +6,7 @@ use crate::{
     transaction::{
         CommitTransaction, FundOutput, FundingTransaction, SpliceTransaction, SplitTransaction,
     },
-    Balance, BuildFundingPSBT, Channel, ChannelState, SignFundingPSBT, SplitOutput,
+    Balance, BuildFundingPsbt, Channel, ChannelState, SignFundingPsbt, SplitOutput,
     StandardChannelState,
 };
 use anyhow::{Context, Result};
@@ -82,7 +82,7 @@ pub struct SpliceIn {
 }
 
 #[async_trait]
-pub trait BuildSplicePSBT {
+pub trait BuildSplicePsbt {
     async fn build_funding_psbt(
         &self,
         output_address: Address,
@@ -104,7 +104,7 @@ impl State0 {
         wallet: &W,
     ) -> Result<State0>
     where
-        W: BuildFundingPSBT,
+        W: BuildFundingPsbt,
     {
         let splice_in_self = match splice_in {
             Some(amount) => {
@@ -174,7 +174,7 @@ impl State0 {
             their_balance += splice_in.amount;
         }
 
-        // Sort the PSBT inputs based on the ascending lexicographical order of
+        // Sort the Psbt inputs based on the ascending lexicographical order of
         // bytes of their consensus serialization. Both parties _must_ do this so that
         // they compute the same splice transaction.
         splice_in_inputs.sort_by(|a, b| {
@@ -198,7 +198,7 @@ impl State0 {
             (self.X_other.clone(), balance.theirs),
         ])?;
 
-        // TODO: Clean-up the signature/PSBT mix (if possible)
+        // TODO: Clean-up the signature/Psbt mix (if possible)
 
         // Signed to spend tx_f
         let sig_tx_f = tx_f.sign_once(self.x_self.clone(), &self.previous_tx_f);
@@ -347,7 +347,7 @@ impl State2 {
         Message2 {
             encsig_tx_c: encsig_tx_c_other,
         }: Message2,
-        wallet: &impl SignFundingPSBT,
+        wallet: &impl SignFundingPsbt,
     ) -> Result<State3> {
         self.tx_c
             .verify_encsig(
@@ -425,7 +425,7 @@ impl State3 {
             splice_transaction_signature: splice_transaction_signature_other,
             signed_splice_transaction: signed_splice_transaction_other,
         }: Message3,
-        wallet: &impl SignFundingPSBT,
+        wallet: &impl SignFundingPsbt,
     ) -> Result<(Channel, Transaction)> {
         // TODO: Check that the received splice transaction is the same than we expect
         // If the other party sent a splice-in signed tx_f, use it, otherwise, use our

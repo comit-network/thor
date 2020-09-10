@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
-use thor::{BroadcastSignedTransaction, BuildFundingPSBT, NewAddress, SignFundingPSBT};
+use thor::{BroadcastSignedTransaction, BuildFundingPsbt, NewAddress, SignFundingPsbt};
 
 pub struct Wallet(pub bitcoin_harness::Wallet);
 
@@ -37,7 +37,7 @@ pub async fn make_wallets(
 }
 
 #[async_trait]
-impl BuildFundingPSBT for Wallet {
+impl BuildFundingPsbt for Wallet {
     async fn build_funding_psbt(
         &self,
         output_address: Address,
@@ -53,7 +53,7 @@ impl BuildFundingPSBT for Wallet {
 }
 
 #[async_trait]
-impl SignFundingPSBT for Wallet {
+impl SignFundingPsbt for Wallet {
     async fn sign_funding_psbt(
         &self,
         psbt: PartiallySignedTransaction,
