@@ -23,9 +23,7 @@ mod signature;
 mod transaction;
 
 #[cfg(test)]
-mod public_api_tests;
-#[cfg(test)]
-mod test_harness;
+pub mod tests;
 
 pub use ::bitcoin;
 pub use channel::*;

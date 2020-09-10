@@ -6,6 +6,7 @@ use futures::{
     SinkExt, StreamExt,
 };
 
+#[derive(Debug)]
 pub struct Transport {
     // While it would be more efficient to use `Message` this allows us to test the `use-serde`
     // feature

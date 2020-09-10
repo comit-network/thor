@@ -1,10 +1,18 @@
-use crate::{
-    test_harness::{
-        build_runtime, generate_balances, generate_expiries, make_transports, make_wallets,
-        swap_beta_ptlc_bob,
-    },
-    Balance, Channel, PtlcSecret,
+//! Tests module provides two things, integration tests for the crate and also a
+//! test harness. The reason this code is here and not in `../tests` is that we
+//! want to use the test harness for testing the channel module
+//! (`src/channel/test.rs`). Now, the reason that we want to test the channel
+//! module like this is because we want access to private methods in order to
+//! mock up a malicious counterparty.
+
+pub mod harness;
+
+use crate::{Balance, Channel, PtlcSecret};
+use harness::{
+    build_runtime, generate_balances, generate_expiries, make_transports, make_wallets,
+    swap_beta_ptlc_bob,
 };
+
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
 

@@ -32,6 +32,7 @@ pub fn generate_balances(fund_amount_alice: Amount, fund_amount_bob: Amount) -> 
     (balance_alice, balance_bob)
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct SwapExpiries {
     pub alpha_absolute: u32,
     pub ptlc_absolute: u32,

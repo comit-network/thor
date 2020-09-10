@@ -1,9 +1,10 @@
 use crate::{
-    test_harness::{
+    tests::harness::{
         build_runtime, generate_balances, make_transports, make_wallets, swap_beta_ptlc_bob,
     },
     Balance, Channel, MedianTime, PtlcSecret,
 };
+
 use bitcoin::Amount;
 use bitcoin_harness::Bitcoind;
 

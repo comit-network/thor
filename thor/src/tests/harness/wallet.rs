@@ -8,6 +8,7 @@ use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
 
+#[derive(Debug)]
 pub struct Wallet(pub bitcoin_harness::Wallet);
 
 impl Wallet {

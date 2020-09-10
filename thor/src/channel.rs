@@ -29,7 +29,7 @@ use std::{
 };
 
 #[cfg(test)]
-mod internal_tests;
+mod tests;
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
