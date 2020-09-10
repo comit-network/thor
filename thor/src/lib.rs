@@ -24,7 +24,7 @@ mod transaction;
 
 pub use ::bitcoin;
 pub use keys::{PtlcPoint, PtlcSecret};
-pub use protocols::create::{BuildFundingPSBT, SignFundingPSBT};
+pub use protocols::create::{BuildFundingPsbt, SignFundingPsbt};
 
 use crate::{
     keys::{
@@ -99,7 +99,7 @@ impl Channel {
     ) -> Result<Self>
     where
         T: SendMessage + ReceiveMessage,
-        W: BuildFundingPSBT + SignFundingPSBT + BroadcastSignedTransaction + NewAddress,
+        W: BuildFundingPsbt + SignFundingPsbt + BroadcastSignedTransaction + NewAddress,
     {
         let final_address = wallet.new_address().await?;
         let state = create::State0::new(balance, time_lock, final_address);
@@ -539,7 +539,7 @@ impl Channel {
         splice_in: Option<Amount>,
     ) -> Result<Self>
     where
-        W: BroadcastSignedTransaction + BuildFundingPSBT + SignFundingPSBT,
+        W: BroadcastSignedTransaction + BuildFundingPsbt + SignFundingPsbt,
         T: SendMessage + ReceiveMessage,
     {
         // Re-use timelock, final addresses, balance, ownership keys

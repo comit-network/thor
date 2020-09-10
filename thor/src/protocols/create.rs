@@ -67,7 +67,7 @@ pub(crate) struct State0 {
 }
 
 #[async_trait]
-pub trait BuildFundingPSBT {
+pub trait BuildFundingPsbt {
     async fn build_funding_psbt(
         &self,
         output_address: Address,
@@ -100,7 +100,7 @@ impl State0 {
             X: X_other,
             final_address: final_address_other,
         }: Message0,
-        wallet: &impl BuildFundingPSBT,
+        wallet: &impl BuildFundingPsbt,
     ) -> Result<State1> {
         let fund_output = FundOutput::new([self.x_self.public(), X_other.clone()]);
         let input_psbt_self = wallet
@@ -372,7 +372,7 @@ pub(crate) struct Party5 {
 
 /// Sign one of the inputs of the `FundingTransaction`.
 #[async_trait]
-pub trait SignFundingPSBT {
+pub trait SignFundingPsbt {
     async fn sign_funding_psbt(
         &self,
         psbt: PartiallySignedTransaction,
@@ -380,7 +380,7 @@ pub trait SignFundingPSBT {
 }
 
 impl Party5 {
-    pub async fn compose(&self, wallet: &impl SignFundingPSBT) -> Result<Message5> {
+    pub async fn compose(&self, wallet: &impl SignFundingPsbt) -> Result<Message5> {
         let tx_f_signed_once = wallet
             .sign_funding_psbt(self.tx_f.clone().into_psbt()?)
             .await?;
@@ -392,7 +392,7 @@ impl Party5 {
     pub async fn interpret(
         self,
         Message5 { tx_f_signed_once }: Message5,
-        wallet: &impl SignFundingPSBT,
+        wallet: &impl SignFundingPsbt,
     ) -> Result<(Channel, Transaction)> {
         let signed_tx_f = wallet.sign_funding_psbt(tx_f_signed_once).await?;
         let signed_tx_f = signed_tx_f.extract_tx();
