@@ -218,7 +218,7 @@ impl State2 {
             },
         ];
         let tx_s = SplitTransaction::new(&tx_c, split_outputs.clone())?;
-        let sig_tx_s_self = tx_s.sign_once(&self.x_self);
+        let sig_tx_s_self = tx_s.sign(&self.x_self);
 
         Ok(Party3 {
             x_self: self.x_self,
@@ -277,7 +277,7 @@ impl Party3 {
             (self.X_other.clone(), sig_tx_s_other),
         )?;
 
-        let encsig_tx_c_self = self.tx_c.encsign_once(&self.x_self, self.Y_other.clone());
+        let encsig_tx_c_self = self.tx_c.encsign(&self.x_self, self.Y_other.clone());
 
         Ok(Party4 {
             x_self: self.x_self,

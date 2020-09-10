@@ -231,7 +231,7 @@ impl State0 {
 
         // Signed to spend TX_f
         let sig_TX_splice_TX_f_input =
-            splice_transaction.sign_once(self.x_self.clone(), &self.previous_tx_f);
+            splice_transaction.sign(self.x_self.clone(), &self.previous_tx_f);
 
         let tx_c = CommitTransaction::new(
             &splice_transaction.clone().into(),
@@ -245,7 +245,7 @@ impl State0 {
             ],
             self.time_lock,
         )?;
-        let encsig_tx_c_self = tx_c.encsign_once(&self.x_self, Y_other.clone());
+        let encsig_tx_c_self = tx_c.encsign(&self.x_self, Y_other.clone());
 
         let tx_s = SplitTransaction::new(&tx_c, vec![
             SplitOutput::Balance {
@@ -257,7 +257,7 @@ impl State0 {
                 address: self.final_address_other.clone(),
             },
         ])?;
-        let sig_tx_s_self = tx_s.sign_once(&self.x_self);
+        let sig_tx_s_self = tx_s.sign(&self.x_self);
 
         Ok(State1 {
             x_self: self.x_self,

@@ -620,7 +620,7 @@ impl StandardChannelState {
         x_self: &OwnershipKeyPair,
         X_other: &OwnershipPublicKey,
     ) -> Result<Transaction> {
-        let sig_self = self.tx_c.sign_once(x_self);
+        let sig_self = self.tx_c.sign(x_self);
         let sig_other = decrypt(self.y_self.clone().into(), self.encsig_tx_c_other.clone());
 
         let signed_tx_c = self.tx_c.clone().add_signatures(
@@ -637,7 +637,7 @@ impl StandardChannelState {
     }
 
     pub fn encsign_tx_c_self(&self, x_self: &OwnershipKeyPair) -> EncryptedSignature {
-        self.tx_c.encsign_once(x_self, self.Y_other.clone())
+        self.tx_c.encsign(x_self, self.Y_other.clone())
     }
 }
 

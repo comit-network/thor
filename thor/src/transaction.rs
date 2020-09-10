@@ -207,7 +207,7 @@ impl CommitTransaction {
         })
     }
 
-    pub fn encsign_once(
+    pub fn encsign(
         &self,
         x_self: &OwnershipKeyPair,
         Y_other: PublishingPublicKey,
@@ -215,7 +215,7 @@ impl CommitTransaction {
         x_self.encsign(Y_other.into(), self.digest)
     }
 
-    pub fn sign_once(&self, x_self: &OwnershipKeyPair) -> Signature {
+    pub fn sign(&self, x_self: &OwnershipKeyPair) -> Signature {
         x_self.sign(self.digest)
     }
 
@@ -567,7 +567,7 @@ impl SplitTransaction {
         Ok((input_0_fees, input_1_fees))
     }
 
-    pub fn sign_once(&self, x_self: &OwnershipKeyPair) -> Signature {
+    pub fn sign(&self, x_self: &OwnershipKeyPair) -> Signature {
         x_self.sign(self.digest)
     }
 
@@ -895,7 +895,7 @@ impl CloseTransaction {
         Ok(close_transaction)
     }
 
-    pub fn sign_once(&self, x_self: &OwnershipKeyPair) -> Signature {
+    pub fn sign(&self, x_self: &OwnershipKeyPair) -> Signature {
         x_self.sign(self.digest)
     }
 }
@@ -1045,11 +1045,7 @@ impl SpliceTransaction {
         )
     }
 
-    pub fn sign_once(
-        &self,
-        x_self: OwnershipKeyPair,
-        previous_tx_f: &FundingTransaction,
-    ) -> Signature {
+    pub fn sign(&self, x_self: OwnershipKeyPair, previous_tx_f: &FundingTransaction) -> Signature {
         let digest = self.compute_digest(previous_tx_f);
         x_self.sign(digest)
     }
