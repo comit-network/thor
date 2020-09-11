@@ -41,7 +41,7 @@ use crate::{
 use ::serde::{Deserialize, Serialize};
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
-use bitcoin::{Address, Amount, Transaction, Txid};
+use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
 use futures::{future::Either, pin_mut, Future};
@@ -50,6 +50,7 @@ use std::convert::{TryFrom, TryInto};
 
 // TODO: We should handle fees dynamically
 
+// TODO: Have it as an `Amount` instead
 /// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
 
@@ -532,12 +533,7 @@ impl Channel {
     ///
     /// Create a new funding transaction using a previous funding transaction as
     /// input. Also inject own funds to channel by passing a splice-in amount.
-    pub async fn splice<T, W>(
-        self,
-        transport: &mut T,
-        wallet: &W,
-        splice_in: Option<Amount>,
-    ) -> Result<Self>
+    pub async fn splice<T, W>(self, transport: &mut T, wallet: &W, splice: Splice) -> Result<Self>
     where
         W: BroadcastSignedTransaction + BuildFundingPsbt + SignFundingPsbt,
         T: SendMessage + ReceiveMessage,
@@ -559,7 +555,7 @@ impl Channel {
             self.tx_f_body,
             x_self,
             X_other,
-            splice_in,
+            splice,
             wallet,
         )
         .await?;
@@ -586,6 +582,14 @@ impl Channel {
 
         Ok(channel)
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum Splice {
+    /// Useful if the other party wants to splice in or out
+    None,
+    In(Amount),
+    Out(TxOut),
 }
 
 #[allow(clippy::large_enum_variant)]

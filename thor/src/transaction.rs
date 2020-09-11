@@ -86,8 +86,7 @@ impl FundingTransaction {
         let [(X_0, amount_0), (X_1, amount_1)] = channel_balance;
         let fund_output_amount = amount_0 + amount_1;
 
-        let fund_output = FundOutput::new([X_0, X_1]);
-        let fund_output_descriptor = fund_output.descriptor();
+        let fund_output_descriptor = FundOutput::new([X_0, X_1]).descriptor();
 
         // Extract inputs and change_outputs from each party's input_psbt
         let (inputs, change_outputs) = input_psbts
@@ -398,8 +397,7 @@ pub(crate) struct SplitTransaction {
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
-
-pub enum FeeError {
+pub(crate) enum Error {
     #[error(
     "input amount {input} does not cover total transaction output amount {output} and fee {fee}"
     )]
@@ -425,16 +423,13 @@ pub enum FeeError {
 }
 
 impl SplitTransaction {
-    pub(crate) fn new(
-        tx_c: &CommitTransaction,
-        outputs: Vec<SplitOutput>,
-    ) -> Result<Self, FeeError> {
+    pub(crate) fn new(tx_c: &CommitTransaction, outputs: Vec<SplitOutput>) -> Result<Self, Error> {
         let total_input = tx_c.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|output| output.amount().as_sat()).sum());
         let tx_s_fee = Amount::from_sat(TX_FEE);
         if total_input < total_output - tx_c.fee() - tx_s_fee {
-            return Err(FeeError::InsufficientFunds {
+            return Err(Error::InsufficientFunds {
                 input: total_input,
                 output: total_output - tx_c.fee(),
                 fee: tx_s_fee,
@@ -524,19 +519,19 @@ impl SplitTransaction {
         tx_c_fee: Amount,
         amount_0: Amount,
         amount_1: Amount,
-    ) -> Result<(Amount, Amount), FeeError> {
+    ) -> Result<(Amount, Amount), Error> {
         let total_output = amount_0 + amount_1;
         let tx_s_fee = Amount::from_sat(TX_FEE);
 
         if total_output != tx_c_value {
-            return Err(FeeError::OutputMismatch {
+            return Err(Error::OutputMismatch {
                 tx_c_value,
                 total_output,
             });
         }
 
         if total_output < tx_c_fee + tx_s_fee {
-            return Err(FeeError::DustOutput {
+            return Err(Error::DustOutput {
                 total_output,
                 tx_c_fee,
                 tx_s_fee,
@@ -544,7 +539,7 @@ impl SplitTransaction {
         }
 
         if tx_c_value <= total_output - tx_c_fee - tx_s_fee {
-            return Err(FeeError::InsufficientFunds {
+            return Err(Error::InsufficientFunds {
                 input: tx_c_value,
                 output: total_output - tx_c_fee,
                 fee: tx_s_fee,
@@ -658,7 +653,7 @@ impl From<SplitTransaction> for Transaction {
 pub(crate) struct PunishTransaction(Transaction);
 
 #[derive(Debug, thiserror::Error)]
-pub enum PunishError {
+pub(crate) enum PunishError {
     #[error("no signatures found in witness stack")]
     NoSignatures,
     #[error("could not recover PublishingSecretKey from signatures in transaction")]
@@ -799,13 +794,13 @@ impl CloseTransaction {
     pub(crate) fn new(
         tx_f: &FundingTransaction,
         mut outputs: [(Amount, Address); 2],
-    ) -> Result<Self, FeeError> {
+    ) -> Result<Self, Error> {
         let total_input = tx_f.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|(amount, _)| amount.as_sat()).sum());
         let close_transaction_fee = Amount::from_sat(TX_FEE);
         if total_input <= total_output - close_transaction_fee {
-            return Err(FeeError::InsufficientFunds {
+            return Err(Error::InsufficientFunds {
                 input: total_input,
                 output: total_output,
                 fee: close_transaction_fee,
@@ -972,6 +967,7 @@ pub(crate) struct SpliceTransaction {
 impl SpliceTransaction {
     pub fn new(
         mut inputs: Vec<PartiallySignedTransaction>,
+        mut splice_outputs: Vec<TxOut>,
         channel_balance: [(OwnershipPublicKey, Amount); 2],
     ) -> Result<Self> {
         if inputs.is_empty() {
@@ -993,7 +989,7 @@ impl SpliceTransaction {
         let fund_output_descriptor = fund_output.descriptor();
 
         // Extract inputs and change_outputs from each party's input_psbt
-        let (inputs, change_outputs) = inputs
+        let (inputs, mut change_outputs) = inputs
             .into_iter()
             .map(|psbt| {
                 let Transaction { input, output, .. } = psbt.extract_tx();
@@ -1016,12 +1012,16 @@ impl SpliceTransaction {
             script_pubkey: fund_output_descriptor.script_pubkey(),
         };
 
+        let mut outputs = vec![fund_output];
+        outputs.append(&mut change_outputs);
+        outputs.append(&mut splice_outputs);
+
         // Both parties _must_ insert inputs and outputs in the order defined above
         let tx_f = Transaction {
             version: 2,
             lock_time: 0,
             input: inputs,
-            output: vec![vec![fund_output], change_outputs].concat(),
+            output: outputs,
         };
 
         Ok(Self {
@@ -1053,6 +1053,36 @@ impl SpliceTransaction {
         let digest = self.compute_digest(previous_tx_f);
         x_self.sign(digest)
     }
+
+    pub fn add_signatures(
+        mut transaction: Transaction,
+        input_descriptor: Descriptor<bitcoin::PublicKey>,
+        (X_0, sig_0): (OwnershipPublicKey, Signature),
+        (X_1, sig_1): (OwnershipPublicKey, Signature),
+    ) -> anyhow::Result<Transaction> {
+        let satisfier = {
+            let mut satisfier = HashMap::with_capacity(2);
+
+            let X_0 = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_0.into(),
+            };
+            let X_1 = ::bitcoin::PublicKey {
+                compressed: true,
+                key: X_1.into(),
+            };
+
+            // The order in which these are inserted doesn't matter
+            satisfier.insert(X_0, (sig_0.into(), ::bitcoin::SigHashType::All));
+            satisfier.insert(X_1, (sig_1.into(), ::bitcoin::SigHashType::All));
+
+            satisfier
+        };
+
+        input_descriptor.satisfy(&mut transaction.input[0], satisfier)?;
+
+        Ok(transaction)
+    }
 }
 
 impl From<SpliceTransaction> for FundingTransaction {
@@ -1063,14 +1093,6 @@ impl From<SpliceTransaction> for FundingTransaction {
             fund_output_amount: splice_tx.amount_0 + splice_tx.amount_1,
         }
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("Miniscript compiler: ")]
-    MiniscriptCompiler(#[from] miniscript::policy::compiler::CompilerError),
-    #[error("Miniscript: ")]
-    Miniscript(#[from] miniscript::Error),
 }
 
 #[cfg(test)]
