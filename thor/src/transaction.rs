@@ -11,7 +11,7 @@ use bitcoin::{
     consensus::encode::serialize,
     hashes::{hash160, Hash},
     secp256k1,
-    util::{bip143::SighashComponents, psbt::PartiallySignedTransaction},
+    util::{amount::serde::as_sat, bip143::SighashComponents, psbt::PartiallySignedTransaction},
     Address, Amount, Network, OutPoint, Script, SigHash, Transaction, TxIn, TxOut, Txid,
 };
 use ecdsa_fun::{
@@ -37,9 +37,7 @@ impl FundOutput {
         // Both parties _must_ insert the ownership public keys into the script in
         // ascending lexicographical order of bytes
         Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
-        let [X_0, X_1] = Xs;
-
-        let descriptor = build_shared_output_descriptor(X_0, X_1);
+        let descriptor = build_shared_output_descriptor(Xs[0].clone(), Xs[1].clone());
 
         Self(descriptor)
     }
@@ -58,22 +56,16 @@ impl FundOutput {
 pub(crate) struct FundingTransaction {
     inner: Transaction,
     fund_output_descriptor: Descriptor<bitcoin::PublicKey>,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     fund_output_amount: Amount,
 }
 
 impl FundingTransaction {
     pub fn new(
-        mut input_psbts: Vec<PartiallySignedTransaction>,
+        input_psbts: [PartiallySignedTransaction; 2],
         channel_balance: [(OwnershipPublicKey, Amount); 2],
     ) -> Result<Self> {
-        if input_psbts.is_empty() {
-            bail!("Cannot build a transaction without inputs")
-        }
-
+        let mut input_psbts = input_psbts.to_vec();
         // Sort the tuples of arguments based on the ascending lexicographical order of
         // bytes of each consensus encoded PSBT. Both parties _must_ do this so that
         // they compute the same funding transaction
@@ -169,10 +161,7 @@ pub(crate) struct CommitTransaction {
     output_descriptor: Descriptor<bitcoin::PublicKey>,
     time_lock: u32,
     digest: SigHash,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     fee: Amount,
 }
 
@@ -424,6 +413,7 @@ pub(crate) enum Error {
 
 impl SplitTransaction {
     pub(crate) fn new(tx_c: &CommitTransaction, outputs: Vec<SplitOutput>) -> Result<Self, Error> {
+        debug_assert!(outputs.len() >= 2); // One for each party and optionally a PTLC.
         let total_input = tx_c.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|output| output.amount().as_sat()).sum());
@@ -457,8 +447,7 @@ impl SplitTransaction {
                     // ascending lexicographical order of bytes
                     let mut Xs = [X_funder, X_redeemer];
                     Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
-                    let [X_0, X_1] = Xs;
-                    let descriptor = build_shared_output_descriptor(X_0.clone(), X_1.clone());
+                    let descriptor = build_shared_output_descriptor(Xs[0].clone(), Xs[1].clone());
 
                     TxOut {
                         value: amount.as_sat(),
@@ -952,15 +941,9 @@ pub(crate) fn balance(
 pub(crate) struct SpliceTransaction {
     inner: Transaction,
     fund_output_descriptor: Descriptor<bitcoin::PublicKey>,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     amount_0: Amount,
-    #[cfg_attr(
-        feature = "serde",
-        serde(with = "bitcoin::util::amount::serde::as_sat")
-    )]
+    #[cfg_attr(feature = "serde", serde(with = "as_sat"))]
     amount_1: Amount,
 }
 
