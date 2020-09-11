@@ -75,7 +75,7 @@ impl FundingTransaction {
         }
 
         // Sort the tuples of arguments based on the ascending lexicographical order of
-        // bytes of each consensus encoded Psbt. Both parties _must_ do this so that
+        // bytes of each consensus encoded PSBT. Both parties _must_ do this so that
         // they compute the same funding transaction
         input_psbts.sort_by(|a, b| {
             serialize(a)
@@ -975,7 +975,7 @@ impl SpliceTransaction {
         }
 
         // Sort the tuples of arguments based on the ascending lexicographical order of
-        // bytes of each consensus encoded Psbt. Both parties _must_ do this so that
+        // bytes of each consensus encoded PSBT. Both parties _must_ do this so that
         // they compute the same funding transaction
         inputs.sort_by(|a, b| {
             serialize(a)

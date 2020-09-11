@@ -196,7 +196,7 @@ impl State0 {
             Splice::None => (),
         }
 
-        // Sort the Psbt inputs based on the ascending lexicographical order of
+        // Sort the PSBT inputs based on the ascending lexicographical order of
         // bytes of their consensus serialization. Both parties _must_ do this so that
         // they compute the same splice transaction.
         splice_in_inputs.sort_by(|a, b| {
@@ -230,7 +230,7 @@ impl State0 {
         ])?;
 
         // Signed to spend TX_f
-        let sig_TX_splice_TX_f_input =
+        let sig_tx_splice_tx_f_input =
             splice_transaction.sign_once(self.x_self.clone(), &self.previous_tx_f);
 
         let tx_c = CommitTransaction::new(
