@@ -37,9 +37,7 @@ impl FundOutput {
         // Both parties _must_ insert the ownership public keys into the script in
         // ascending lexicographical order of bytes
         Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
-        let [X_0, X_1] = Xs;
-
-        let descriptor = build_shared_output_descriptor(X_0, X_1);
+        let descriptor = build_shared_output_descriptor(Xs[0].clone(), Xs[1].clone());
 
         Self(descriptor)
     }
@@ -449,8 +447,7 @@ impl SplitTransaction {
                     // ascending lexicographical order of bytes
                     let mut Xs = [X_funder, X_redeemer];
                     Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
-                    let [X_0, X_1] = Xs;
-                    let descriptor = build_shared_output_descriptor(X_0.clone(), X_1.clone());
+                    let descriptor = build_shared_output_descriptor(Xs[0].clone(), Xs[1].clone());
 
                     TxOut {
                         value: amount.as_sat(),

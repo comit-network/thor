@@ -162,8 +162,7 @@ pub(crate) fn spend_transaction(
 ) -> Result<(Transaction, SigHash, Descriptor<bitcoin::PublicKey>)> {
     let mut Xs = [ptlc.X_funder, ptlc.X_redeemer];
     Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
-    let [X_0, X_1] = Xs;
-    let ptlc_output_descriptor = build_shared_output_descriptor(X_0, X_1);
+    let ptlc_output_descriptor = build_shared_output_descriptor(Xs[0].clone(), Xs[1].clone());
 
     let vout = tx_s
         .inner
