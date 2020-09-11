@@ -441,11 +441,11 @@ pub(crate) struct State3 {
 }
 
 impl State3 {
-    pub async fn compose(&self) -> Result<Message3> {
-        Ok(Message3 {
+    pub fn compose(&self) -> Message3 {
+        Message3 {
             sig_TX_splice_TX_f_input: self.sig_TX_splice_TX_f_input.clone(),
             signed_TX_splice_psbt_input: self.signed_TX_splice_psbt_self_input.clone(),
-        })
+        }
     }
 
     /// Returns the Channel and the transaction to broadcast.
