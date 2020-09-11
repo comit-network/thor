@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
+use bitcoin::{consensus, util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
 use thor::{BroadcastSignedTransaction, BuildFundingPsbt, NewAddress, SignFundingPsbt};
@@ -13,27 +13,34 @@ impl Wallet {
 
         Ok(Self(wallet))
     }
+
+    pub async fn balance(&self) -> Result<Amount> {
+        let b = self.0.balance().await?;
+        Ok(b)
+    }
 }
 
-/// Create two bitcoind wallets on the node passed as an argument and fund them
-/// with the amount that they will contribute to the channel, plus a buffer to
-/// account for transaction fees.
+/// Create two bitcoind wallets on the `bitcoind` node and fund them with the
+/// amount that they will contribute to the channel, plus a little extra to
+/// cover transaction fees.
 pub async fn make_wallets(
     bitcoind: &Bitcoind<'_>,
-    fund_amount_alice: Amount,
-    fund_amount_bob: Amount,
+    fund_amount: Amount,
 ) -> Result<(Wallet, Wallet)> {
-    let alice = Wallet::new("alice", bitcoind.node_url.clone()).await?;
-    let bob = Wallet::new("bob", bitcoind.node_url.clone()).await?;
-
-    let buffer = Amount::from_btc(1.0).unwrap();
-
-    for (wallet, amount) in vec![(&alice, fund_amount_alice), (&bob, fund_amount_bob)].iter() {
-        let address = wallet.0.new_address().await.unwrap();
-        bitcoind.mint(address, *amount + buffer).await.unwrap();
-    }
+    let alice = make_wallet("alice", bitcoind, fund_amount).await?;
+    let bob = make_wallet("bob", bitcoind, fund_amount).await?;
 
     Ok((alice, bob))
+}
+
+async fn make_wallet(name: &str, bitcoind: &Bitcoind<'_>, fund_amount: Amount) -> Result<Wallet> {
+    let wallet = Wallet::new(name, bitcoind.node_url.clone()).await?;
+    let address = wallet.0.new_address().await.unwrap();
+    let extra = Amount::from_btc(1.0)?;
+
+    bitcoind.mint(address, fund_amount + extra).await.unwrap();
+
+    Ok(wallet)
 }
 
 #[async_trait]
@@ -45,8 +52,7 @@ impl BuildFundingPsbt for Wallet {
     ) -> Result<PartiallySignedTransaction> {
         let psbt = self.0.fund_psbt(output_address, output_amount).await?;
         let as_hex = base64::decode(psbt)?;
-
-        let psbt = bitcoin::consensus::deserialize(&as_hex)?;
+        let psbt = consensus::deserialize(&as_hex)?;
 
         Ok(psbt)
     }
@@ -58,14 +64,14 @@ impl SignFundingPsbt for Wallet {
         &self,
         psbt: PartiallySignedTransaction,
     ) -> Result<PartiallySignedTransaction> {
-        let psbt = bitcoin::consensus::serialize(&psbt);
+        let psbt = consensus::serialize(&psbt);
         let as_base64 = base64::encode(psbt);
 
         let psbt = self.0.wallet_process_psbt(PsbtBase64(as_base64)).await?;
         let PsbtBase64(signed_psbt) = PsbtBase64::from(psbt);
 
         let as_hex = base64::decode(signed_psbt)?;
-        let psbt = bitcoin::consensus::deserialize(&as_hex)?;
+        let psbt = consensus::deserialize(&as_hex)?;
 
         Ok(psbt)
     }
@@ -79,7 +85,7 @@ impl BroadcastSignedTransaction for Wallet {
         // TODO: Instead of guessing how long it will take for the transaction to be
         // mined we should ask bitcoind for the number of confirmations on `txid`
 
-        // give time for transaction to be mined
+        // Give time for transaction to be mined.
         tokio::time::delay_for(std::time::Duration::from_millis(1100)).await;
 
         Ok(())
