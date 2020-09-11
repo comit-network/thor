@@ -307,7 +307,7 @@ fn public_key(secret_key: &Scalar) -> Point {
 fn sign(secret_key: &Scalar, digest: SigHash) -> Signature {
     let ecdsa = ECDSA::<Deterministic<Sha256>>::default();
 
-    ecdsa.sign(&secret_key, &digest.into_inner())
+    ecdsa.sign(secret_key, &digest.into_inner())
 }
 
 #[cfg(test)]

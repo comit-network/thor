@@ -41,7 +41,7 @@ impl State0 {
             (self.balance.ours, self.final_address_self.clone()),
             (self.balance.theirs, self.final_address_other.clone()),
         ])?;
-        let sig_close_transaction = close_transaction.sign_once(&self.x_self);
+        let sig_close_transaction = close_transaction.sign(&self.x_self);
 
         Ok(Message0 {
             sig_close_transaction,
@@ -63,7 +63,7 @@ impl State0 {
             .verify_sig(self.X_other.clone(), &sig_close_transaction_other)
             .context("failed to verify close transaction signature sent by counterparty")?;
 
-        let sig_close_transaction_self = close_transaction.sign_once(&self.x_self);
+        let sig_close_transaction_self = close_transaction.sign(&self.x_self);
         let close_transaction = close_transaction.add_signatures(
             (self.x_self.public(), sig_close_transaction_self),
             (self.X_other, sig_close_transaction_other),

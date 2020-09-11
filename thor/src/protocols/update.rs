@@ -104,10 +104,10 @@ impl State0 {
             ],
             self.time_lock,
         )?;
-        let encsig_tx_c_self = tx_c.encsign_once(&self.x_self, Y_other.clone());
+        let encsig_tx_c_self = tx_c.encsign(&self.x_self, Y_other.clone());
 
         let tx_s = SplitTransaction::new(&tx_c, self.new_split_outputs.clone())?;
-        let sig_tx_s_self = tx_s.sign_once(&self.x_self);
+        let sig_tx_s_self = tx_s.sign(&self.x_self);
 
         let state = State1 {
             x_self: self.x_self.clone(),
@@ -197,11 +197,11 @@ impl State1PtlcFunder {
     pub fn new(state: State1, ptlc: Ptlc) -> Result<Self> {
         let tx_ptlc_redeem =
             RedeemTransaction::new(&state.tx_s, ptlc.clone(), state.final_address_other.clone())?;
-        let encsig_tx_ptlc_redeem_funder = tx_ptlc_redeem.encsign_once(&state.x_self, ptlc.point());
+        let encsig_tx_ptlc_redeem_funder = tx_ptlc_redeem.encsign(&state.x_self, ptlc.point());
 
         let tx_ptlc_refund =
             RefundTransaction::new(&state.tx_s, ptlc.clone(), state.final_address_self.clone())?;
-        let sig_tx_ptlc_refund_funder = tx_ptlc_refund.sign_once(&state.x_self);
+        let sig_tx_ptlc_refund_funder = tx_ptlc_refund.sign(&state.x_self);
 
         Ok(Self {
             inner: state,
@@ -268,11 +268,11 @@ impl State1PtlcRedeemer {
     pub fn new(state: State1, ptlc: Ptlc) -> Result<Self> {
         let tx_ptlc_redeem =
             RedeemTransaction::new(&state.tx_s, ptlc.clone(), state.final_address_self.clone())?;
-        let sig_tx_ptlc_redeem_redeemer = tx_ptlc_redeem.sign_once(&state.x_self);
+        let sig_tx_ptlc_redeem_redeemer = tx_ptlc_redeem.sign(&state.x_self);
 
         let tx_ptlc_refund =
             RefundTransaction::new(&state.tx_s, ptlc.clone(), state.final_address_other.clone())?;
-        let sig_tx_ptlc_refund_redeemer = tx_ptlc_refund.sign_once(&state.x_self);
+        let sig_tx_ptlc_refund_redeemer = tx_ptlc_refund.sign(&state.x_self);
 
         Ok(Self {
             inner: state,

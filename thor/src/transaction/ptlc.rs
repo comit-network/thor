@@ -35,11 +35,11 @@ impl RedeemTransaction {
         })
     }
 
-    pub fn sign_once(&self, x_self: &OwnershipKeyPair) -> Signature {
+    pub fn sign(&self, x_self: &OwnershipKeyPair) -> Signature {
         x_self.sign(self.digest)
     }
 
-    pub fn encsign_once(&self, x_self: &OwnershipKeyPair, point: PtlcPoint) -> EncryptedSignature {
+    pub fn encsign(&self, x_self: &OwnershipKeyPair, point: PtlcPoint) -> EncryptedSignature {
         x_self.encsign(point.into(), self.digest)
     }
 
@@ -107,7 +107,7 @@ impl RefundTransaction {
         })
     }
 
-    pub fn sign_once(&self, x_self: &OwnershipKeyPair) -> Signature {
+    pub fn sign(&self, x_self: &OwnershipKeyPair) -> Signature {
         x_self.sign(self.digest)
     }
 

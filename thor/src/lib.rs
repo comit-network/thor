@@ -154,22 +154,25 @@ impl Channel {
     where
         T: SendMessage + ReceiveMessage,
     {
-        let split_output_self = SplitOutput::Balance {
-            amount: ours,
+        let out_ours = self.split_balance_output_ours(ours);
+        let out_theirs = self.split_balance_output_theirs(theirs);
+
+        self.update(transport, vec![out_ours, out_theirs], time_lock)
+            .await
+    }
+
+    fn split_balance_output_ours(&self, amount: Amount) -> SplitOutput {
+        SplitOutput::Balance {
+            amount,
             address: self.final_address_self.clone(),
-        };
+        }
+    }
 
-        let split_output_other = SplitOutput::Balance {
-            amount: theirs,
+    fn split_balance_output_theirs(&self, amount: Amount) -> SplitOutput {
+        SplitOutput::Balance {
+            amount,
             address: self.final_address_other.clone(),
-        };
-
-        self.update(
-            transport,
-            vec![split_output_self, split_output_other],
-            time_lock,
-        )
-        .await
+        }
     }
 
     /// Perform an atomic swap with a thor channel as beta ledger in the
@@ -202,15 +205,8 @@ impl Channel {
             )
         })?;
 
-        let balance_output_self = SplitOutput::Balance {
-            amount: ours,
-            address: self.final_address_self.clone(),
-        };
-
-        let balance_output_other = SplitOutput::Balance {
-            amount: theirs,
-            address: self.final_address_other.clone(),
-        };
+        let out_ours = self.split_balance_output_ours(ours);
+        let out_theirs = self.split_balance_output_theirs(theirs);
 
         let ptlc_output = SplitOutput::Ptlc(Ptlc {
             amount: ptlc_amount,
@@ -224,7 +220,7 @@ impl Channel {
 
         self.update(
             transport,
-            vec![balance_output_self, balance_output_other, ptlc_output],
+            vec![out_ours, out_theirs, ptlc_output],
             tx_s_time_lock,
         )
         .await?;
@@ -236,22 +232,11 @@ impl Channel {
         // Attempt to perform a channel update to merge PTLC output into Alice's balance
         // output
 
-        let balance_output_self = SplitOutput::Balance {
-            amount: ours + ptlc_amount,
-            address: self.final_address_self.clone(),
-        };
-
-        let balance_output_other = SplitOutput::Balance {
-            amount: theirs,
-            address: self.final_address_other.clone(),
-        };
+        let out_ours = self.split_balance_output_ours(ours + ptlc_amount);
+        let out_theirs = self.split_balance_output_theirs(theirs);
 
         let channel = self.clone();
-        let final_update = self.update(
-            transport,
-            vec![balance_output_self, balance_output_other],
-            tx_s_time_lock,
-        );
+        let final_update = self.update(transport, vec![out_ours, out_theirs], tx_s_time_lock);
 
         // TODO: Configure timeout based on expiries
         let timeout = tokio::time::delay_for(std::time::Duration::from_secs(5));
@@ -316,15 +301,8 @@ impl Channel {
                 )
             })?;
 
-            let balance_output_self = SplitOutput::Balance {
-                amount: ours,
-                address: self.final_address_self.clone(),
-            };
-
-            let balance_output_other = SplitOutput::Balance {
-                amount: theirs,
-                address: self.final_address_other.clone(),
-            };
+            let out_ours = self.split_balance_output_ours(ours);
+            let out_theirs = self.split_balance_output_theirs(theirs);
 
             let ptlc_output = SplitOutput::Ptlc(Ptlc {
                 amount: ptlc_amount,
@@ -338,7 +316,7 @@ impl Channel {
 
             self.update(
                 transport,
-                vec![balance_output_self, balance_output_other, ptlc_output],
+                vec![out_ours, out_theirs, ptlc_output],
                 tx_s_time_lock,
             )
             .await?;
@@ -359,23 +337,11 @@ impl Channel {
             co.yield_(secret).await;
 
             // Perform a channel update to merge PTLC output into Alice's balance output
+            let out_ours = self.split_balance_output_ours(ours);
+            let out_theirs = self.split_balance_output_theirs(theirs + ptlc_amount);
 
-            let balance_output_self = SplitOutput::Balance {
-                amount: ours,
-                address: self.final_address_self.clone(),
-            };
-
-            let balance_output_other = SplitOutput::Balance {
-                amount: theirs + ptlc_amount,
-                address: self.final_address_other.clone(),
-            };
-
-            self.update(
-                transport,
-                vec![balance_output_self, balance_output_other],
-                tx_s_time_lock,
-            )
-            .await?;
+            self.update(transport, vec![out_ours, out_theirs], tx_s_time_lock)
+                .await?;
 
             Ok(())
         })
@@ -654,7 +620,7 @@ impl StandardChannelState {
         x_self: &OwnershipKeyPair,
         X_other: &OwnershipPublicKey,
     ) -> Result<Transaction> {
-        let sig_self = self.tx_c.sign_once(x_self);
+        let sig_self = self.tx_c.sign(x_self);
         let sig_other = decrypt(self.y_self.clone().into(), self.encsig_tx_c_other.clone());
 
         let signed_tx_c = self.tx_c.clone().add_signatures(
@@ -671,7 +637,7 @@ impl StandardChannelState {
     }
 
     pub fn encsign_tx_c_self(&self, x_self: &OwnershipKeyPair) -> EncryptedSignature {
-        self.tx_c.encsign_once(x_self, self.Y_other.clone())
+        self.tx_c.encsign(x_self, self.Y_other.clone())
     }
 }
 
