@@ -64,13 +64,10 @@ pub(crate) struct FundingTransaction {
 
 impl FundingTransaction {
     pub fn new(
-        mut input_psbts: Vec<PartiallySignedTransaction>,
+        input_psbts: [PartiallySignedTransaction; 2],
         channel_balance: [(OwnershipPublicKey, Amount); 2],
     ) -> Result<Self> {
-        if input_psbts.is_empty() {
-            bail!("Cannot build a transaction without inputs")
-        }
-
+        let mut input_psbts = input_psbts.to_vec();
         // Sort the tuples of arguments based on the ascending lexicographical order of
         // bytes of each consensus encoded PSBT. Both parties _must_ do this so that
         // they compute the same funding transaction
