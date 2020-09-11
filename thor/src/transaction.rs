@@ -415,6 +415,7 @@ pub(crate) enum Error {
 
 impl SplitTransaction {
     pub(crate) fn new(tx_c: &CommitTransaction, outputs: Vec<SplitOutput>) -> Result<Self, Error> {
+        debug_assert!(outputs.len() >= 2); // One for each party and optionally a PTLC.
         let total_input = tx_c.value();
         let total_output =
             Amount::from_sat(outputs.iter().map(|output| output.amount().as_sat()).sum());
