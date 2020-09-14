@@ -34,8 +34,8 @@ use crate::{
     },
     signature::decrypt,
     transaction::{
-        CommitTransaction, FundingTransaction, RedeemTransaction, RefundTransaction,
-        SplitTransaction,
+        ptlc::{RedeemTransaction, RefundTransaction},
+        CommitTransaction, FundingTransaction, SplitTransaction,
     },
 };
 use ::serde::{Deserialize, Serialize};

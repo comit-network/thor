@@ -4,8 +4,9 @@ use crate::{
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
     transaction::{
-        balance, CommitTransaction, FundingTransaction, RedeemTransaction, RefundTransaction,
-        SplitTransaction,
+        balance,
+        ptlc::{RedeemTransaction, RefundTransaction},
+        CommitTransaction, FundingTransaction, SplitTransaction,
     },
     Channel, ChannelState, Ptlc, RevokedState, SplitOutput, StandardChannelState,
 };
