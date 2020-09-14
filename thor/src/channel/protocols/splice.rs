@@ -1,4 +1,5 @@
 use crate::{
+    channel::{BuildFundingPsbt, SignFundingPsbt},
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
@@ -6,8 +7,7 @@ use crate::{
     transaction::{
         CommitTransaction, FundOutput, FundingTransaction, SpliceTransaction, SplitTransaction,
     },
-    Balance, BuildFundingPsbt, Channel, ChannelState, SignFundingPsbt, SplitOutput,
-    StandardChannelState, TX_FEE,
+    Balance, Channel, ChannelState, SplitOutput, StandardChannelState, TX_FEE,
 };
 
 use anyhow::{Context, Result};

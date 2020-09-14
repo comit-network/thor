@@ -156,6 +156,7 @@ impl State0 {
 /// of said output, the party will transition to `State1PtlcFunder` or
 /// `State1PtlcRedeemer` respectively.
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 pub enum State1Kind {
     State1(State1),
     State1PtlcFunder(State1PtlcFunder),
@@ -184,6 +185,7 @@ pub struct SignaturesPtlcRedeemer {
 /// with the counterparty and is ready to start exchanging signatures for the
 /// `RedeemTransaction` and `RefundTransaction` involving a PTLC
 /// output which they are funding.
+#[derive(Debug)]
 pub struct State1PtlcFunder {
     inner: State1,
     ptlc: Ptlc,
@@ -257,6 +259,7 @@ impl State1PtlcFunder {
 /// with the counterparty and is ready to start exchanging signatures for the
 /// `RedeemTransaction` and `RefundTransaction` involving a PTLC
 /// output which they are redeeming.
+#[derive(Debug)]
 pub struct State1PtlcRedeemer {
     inner: State1,
     ptlc: Ptlc,
@@ -517,7 +520,7 @@ impl State3 {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WithPtlc<S> {
     state: S,
     ptlc: Ptlc,

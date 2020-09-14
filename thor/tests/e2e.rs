@@ -1,17 +1,15 @@
 #![allow(non_snake_case)]
 
-use crate::{
-    test_harness::{
-        assert_channel_balances, create_channels, generate_expiries, init_bitcoind, init_cli,
-        update_balances, Transport, Wallet, FUND,
-    },
-    Channel, PtlcPoint, PtlcSecret, Splice, TX_FEE,
-};
+mod harness;
 
-use anyhow::Result;
+use harness::{
+    assert_channel_balances, create_channels, generate_expiries, init_bitcoind, init_cli,
+    update_balances, FUND, swap_beta_ptlc_bob,
+};
+use thor::{ PtlcSecret, Splice, TX_FEE};
+
 use bitcoin::{Amount, TxOut};
 use futures::future;
-use genawaiter::GeneratorState;
 use spectral::prelude::*;
 
 // NOTE: For some reason running these tests overflows the stack. In order to
@@ -88,68 +86,6 @@ async fn e2e_channel_collaborative_close() {
 
     assert_eq!(a_balance_after_close, a_want);
     assert_eq!(b_balance_after_close, b_want);
-}
-
-#[tokio::test]
-async fn e2e_punish_publication_of_revoked_commit_transaction() {
-    let cli = init_cli();
-    let bitcoind = init_bitcoind(&cli).await;
-    let (
-        mut a_channel,
-        mut b_channel,
-        mut a_transport,
-        mut b_transport,
-        a_wallet,
-        b_wallet,
-        time_lock,
-        _,
-    ) = create_channels(&bitcoind).await;
-
-    let a_balance_after_open = a_wallet.balance().await.unwrap();
-    let b_balance_after_open = b_wallet.balance().await.unwrap();
-
-    // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
-    let payment = Amount::from_btc(0.5).unwrap();
-    let a_balance = FUND - payment;
-    let b_balance = FUND + payment;
-
-    update_balances(
-        &mut a_channel,
-        &mut b_channel,
-        &mut a_transport,
-        &mut b_transport,
-        a_balance,
-        b_balance,
-        time_lock,
-    )
-    .await;
-
-    // Alice attempts to cheat by publishing a revoked commit transaction.
-    let signed_revoked_tx_c = a_channel.latest_revoked_signed_tx_c().unwrap().unwrap();
-    a_wallet
-        .0
-        .send_raw_transaction(signed_revoked_tx_c.clone())
-        .await
-        .unwrap();
-
-    // Bob sees the transaction and punishes Alice.
-    b_channel
-        .punish(&b_wallet, signed_revoked_tx_c)
-        .await
-        .unwrap();
-
-    let a_balance_after_punish = a_wallet.balance().await.unwrap();
-    let b_balance_after_punish = b_wallet.balance().await.unwrap();
-
-    assert_eq!(
-        a_balance_after_punish, a_balance_after_open,
-        "Alice should get no money back after being punished"
-    );
-    assert_eq!(
-        b_balance_after_punish,
-        b_balance_after_open + FUND * 2 - Amount::from_sat(TX_FEE) * 2,
-        "Bob should get all the money back after punishing Alice"
-    );
 }
 
 #[tokio::test]
@@ -489,47 +425,4 @@ async fn e2e_atomic_swap_unresponsive_bob_after_secret_reveal() {
         b_balance_after_open + FUND - ptlc_amount - split_transaction_fee_bob,
         "Balance after closing channel should equal balance after opening minus PTLC amount, minus transaction fees"
     );
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn swap_beta_ptlc_bob(
-    channel: &mut Channel,
-    transport: &mut Transport,
-    wallet: &Wallet,
-    ptlc_amount: Amount,
-    point: PtlcPoint,
-    alpha_absolute_expiry: u32,
-    tx_s_time_lock: u32,
-    ptlc_redeem_time_lock: u32,
-    skip_update: bool,
-) -> Result<()> {
-    let mut swap_beta_ptlc_bob = channel.swap_beta_ptlc_bob(
-        transport,
-        wallet,
-        ptlc_amount,
-        point,
-        alpha_absolute_expiry,
-        tx_s_time_lock,
-        ptlc_redeem_time_lock,
-    );
-
-    match swap_beta_ptlc_bob.async_resume().await {
-        GeneratorState::Yielded(_secret) => {
-            // TODO: Redeem alpha asset
-
-            if skip_update {
-                return Ok(());
-            }
-
-            match swap_beta_ptlc_bob.async_resume().await {
-                GeneratorState::Complete(Ok(())) => (),
-                GeneratorState::Complete(Err(e)) => panic!("{}", e),
-                GeneratorState::Yielded(_) => panic!("unexpected yield"),
-            }
-        }
-        GeneratorState::Complete(Err(e)) => panic!("{}", e),
-        GeneratorState::Complete(Ok(())) => panic!("did not yield secret"),
-    }
-
-    Ok(())
 }
