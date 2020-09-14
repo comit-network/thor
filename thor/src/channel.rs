@@ -24,20 +24,6 @@ use std::{convert::TryInto, time::Duration};
 #[cfg(test)]
 mod tests;
 
-#[macro_export]
-macro_rules! update {
-    ($transport:expr, $state:expr) => {{
-        let transport = $transport;
-        let state = $state;
-
-        let (transport, state) = step!(transport, state);
-        let (transport, state) = step!(transport, state);
-        let (_, updated_channel) = step!(transport, state);
-
-        updated_channel
-    }};
-}
-
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub struct Channel {
@@ -474,6 +460,19 @@ impl Channel {
     {
         use update::*;
         use State1Kind::*;
+
+        macro_rules! update {
+            ($transport:expr, $state:expr) => {{
+                let transport = $transport;
+                let state = $state;
+
+                let (transport, state) = step!(transport, state);
+                let (transport, state) = step!(transport, state);
+                let (_, updated_channel) = step!(transport, state);
+
+                updated_channel
+            }};
+        }
 
         let state = State0::new(self.clone(), new_split_outputs, time_lock);
 
