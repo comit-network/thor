@@ -1,10 +1,11 @@
 use crate::{
+    channel::{ChannelState, StandardChannelState},
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey,
     },
     transaction::{balance, CommitTransaction, FundOutput, FundingTransaction, SplitTransaction},
-    Balance, Channel, ChannelState, SplitOutput, StandardChannelState,
+    Balance, Channel, SplitOutput,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;

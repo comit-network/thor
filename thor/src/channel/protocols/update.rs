@@ -1,4 +1,5 @@
 use crate::{
+    channel::{ChannelState, RevokedState, StandardChannelState},
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
@@ -8,7 +9,7 @@ use crate::{
         ptlc::{RedeemTransaction, RefundTransaction},
         CommitTransaction, FundingTransaction, SplitTransaction,
     },
-    Channel, ChannelState, Ptlc, RevokedState, SplitOutput, StandardChannelState,
+    Channel, Ptlc, SplitOutput,
 };
 use anyhow::{bail, Context, Result};
 use bitcoin::Address;

@@ -4,16 +4,20 @@ pub use protocols::create::{BuildFundingPsbt, SignFundingPsbt};
 use protocols::{close, create, punish::punish, splice, update};
 
 use crate::{
-    keys::{OwnershipKeyPair, OwnershipPublicKey},
+    keys::{
+        OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
+        RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
+    },
     signature,
     transaction::{ptlc, FundingTransaction},
-    Balance, ChannelState, GetRawTransaction, MedianTime, Message, Ptlc, PtlcPoint, PtlcSecret,
-    RevokedState, Role, Splice, SplitOutput, StandardChannelState,
+    Balance, CommitTransaction, EncryptedSignature, GetRawTransaction, MedianTime, Message, Ptlc,
+    PtlcPoint, PtlcSecret, Role, Signature, Splice, SplitOutput, SplitTransaction,
 };
 use ::serde::{Deserialize, Serialize};
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use bitcoin::{Address, Amount, Transaction, Txid};
+use enum_as_inner::EnumAsInner;
 use futures::{
     future::{Either, FutureExt},
     pin_mut, Future,
@@ -671,5 +675,112 @@ impl Channel {
         wallet.broadcast_signed_transaction(transaction).await?;
 
         Ok(channel)
+    }
+}
+
+#[allow(clippy::large_enum_variant)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, EnumAsInner)]
+pub(crate) enum ChannelState {
+    Standard(StandardChannelState),
+    WithPtlc {
+        inner: StandardChannelState,
+        ptlc: Ptlc,
+        tx_ptlc_redeem: ptlc::RedeemTransaction,
+        tx_ptlc_refund: ptlc::RefundTransaction,
+        encsig_tx_ptlc_redeem_funder: EncryptedSignature,
+        sig_tx_ptlc_redeem_redeemer: Signature,
+        sig_tx_ptlc_refund_funder: Signature,
+        sig_tx_ptlc_refund_redeemer: Signature,
+    },
+}
+
+impl From<ChannelState> for StandardChannelState {
+    fn from(from: ChannelState) -> Self {
+        match from {
+            ChannelState::Standard(state) | ChannelState::WithPtlc { inner: state, .. } => state,
+        }
+    }
+}
+
+impl AsRef<StandardChannelState> for ChannelState {
+    fn as_ref(&self) -> &StandardChannelState {
+        match self {
+            ChannelState::Standard(state) | ChannelState::WithPtlc { inner: state, .. } => state,
+        }
+    }
+}
+
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug)]
+pub struct StandardChannelState {
+    /// Proportion of the coins in the channel that currently belong to either
+    /// party. To actually claim these coins one or more transactions will have
+    /// to be submitted to the blockchain, so in practice the balance will see a
+    /// reduction to pay for transaction fees.
+    balance: Balance,
+    tx_c: CommitTransaction,
+    /// Encrypted signature received from the counterparty. It can be decrypted
+    /// using our `PublishingSecretKey` and used to sign `tx_c`. Keep in mind,
+    /// that publishing a revoked `tx_c` will allow the counterparty to punish
+    /// us.
+    encsig_tx_c_other: EncryptedSignature,
+    r_self: RevocationKeyPair,
+    R_other: RevocationPublicKey,
+    y_self: PublishingKeyPair,
+    Y_other: PublishingPublicKey,
+    /// Signed `SplitTransaction`.
+    signed_tx_s: SplitTransaction,
+}
+
+impl StandardChannelState {
+    fn signed_tx_c(
+        &self,
+        tx_f: &FundingTransaction,
+        x_self: &OwnershipKeyPair,
+        X_other: &OwnershipPublicKey,
+    ) -> Result<Transaction> {
+        let sig_self = self.tx_c.sign(x_self);
+        let sig_other =
+            signature::decrypt(self.y_self.clone().into(), self.encsig_tx_c_other.clone());
+
+        let signed_tx_c = self.tx_c.clone().add_signatures(
+            tx_f,
+            (x_self.public(), sig_self),
+            (X_other.clone(), sig_other),
+        )?;
+
+        Ok(signed_tx_c)
+    }
+
+    pub fn time_lock(&self) -> u32 {
+        self.tx_c.time_lock()
+    }
+
+    pub fn encsign_tx_c_self(&self, x_self: &OwnershipKeyPair) -> EncryptedSignature {
+        self.tx_c.encsign(x_self, self.Y_other.clone())
+    }
+}
+
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug)]
+pub(crate) struct RevokedState {
+    channel_state: ChannelState,
+    r_other: RevocationSecretKey,
+}
+
+impl RevokedState {
+    /// Add signatures to the `CommitTransaction`. Publishing the resulting
+    /// transaction is punishable by the counterparty, as they can recover the
+    /// `PublishingSecretKey` from it and they already know the
+    /// `RevocationSecretKey`, since this state has already been revoked.
+    #[cfg(test)]
+    fn signed_tx_c(
+        &self,
+        tx_f: &FundingTransaction,
+        x_self: OwnershipKeyPair,
+        X_other: OwnershipPublicKey,
+    ) -> Result<Transaction> {
+        StandardChannelState::from(self.channel_state.clone()).signed_tx_c(tx_f, &x_self, &X_other)
     }
 }
