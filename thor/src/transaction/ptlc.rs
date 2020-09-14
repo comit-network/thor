@@ -227,7 +227,7 @@ pub(crate) fn extract_signature_by_key(
     candidate_transaction: Transaction,
     TX_ptlc_redeem: RedeemTransaction,
     X_self: OwnershipPublicKey,
-) -> anyhow::Result<Signature> {
+) -> Result<Signature> {
     let input = match candidate_transaction.input.as_slice() {
         [input] => input,
         [] => bail!(NoInputs),
@@ -282,7 +282,7 @@ pub fn recover_secret(
     ptlc_point: PtlcPoint,
     sig_TX_ptlc_redeem_funder: Signature,
     encsig_TX_ptlc_redeem_funder: EncryptedSignature,
-) -> anyhow::Result<PtlcSecret> {
+) -> Result<PtlcSecret> {
     let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
 
     let secret = adaptor

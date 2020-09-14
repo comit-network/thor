@@ -56,12 +56,12 @@ pub const TX_FEE: u64 = 10_000;
 
 #[async_trait::async_trait]
 pub trait MedianTime {
-    async fn median_time(&self) -> anyhow::Result<u32>;
+    async fn median_time(&self) -> Result<u32>;
 }
 
 #[async_trait::async_trait]
 pub trait GetRawTransaction {
-    async fn get_raw_transaction(&self, txid: Txid) -> anyhow::Result<Transaction>;
+    async fn get_raw_transaction(&self, txid: Txid) -> Result<Transaction>;
 }
 
 #[derive(Clone, Debug)]

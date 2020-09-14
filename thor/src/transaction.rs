@@ -1037,7 +1037,7 @@ impl SpliceTransaction {
         input_descriptor: Descriptor<bitcoin::PublicKey>,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 

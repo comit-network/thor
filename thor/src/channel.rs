@@ -287,7 +287,7 @@ impl Channel {
         tx_s_time_lock: u32,
         _ptlc_refund_time_lock: u32,
         tx_ptlc_redeem: ptlc::RedeemTransaction,
-    ) -> anyhow::Result<()>
+    ) -> Result<()>
     where
         T: SendMessage + ReceiveMessage,
         W: NewAddress + BroadcastSignedTransaction,

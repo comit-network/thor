@@ -223,7 +223,7 @@ impl State1PtlcFunder {
         }
     }
 
-    pub fn interpret(self, message: SignaturesPtlcRedeemer) -> anyhow::Result<WithPtlc<State1>> {
+    pub fn interpret(self, message: SignaturesPtlcRedeemer) -> Result<WithPtlc<State1>> {
         self.tx_ptlc_refund
             .verify_sig(
                 self.inner.X_other.clone(),
