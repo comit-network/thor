@@ -8,6 +8,8 @@ use async_trait::async_trait;
 use bitcoin::{util::psbt::PartiallySignedTransaction, Address, Amount};
 use bitcoin_harness::{bitcoind_rpc::PsbtBase64, Bitcoind};
 use reqwest::Url;
+use std::time::Duration;
+use tokio::time;
 
 #[derive(Debug)]
 pub struct Wallet(pub bitcoin_harness::Wallet);
@@ -94,7 +96,7 @@ impl BroadcastSignedTransaction for Wallet {
         // mined we should ask bitcoind for the number of confirmations on `txid`
 
         // give time for transaction to be mined
-        tokio::time::delay_for(std::time::Duration::from_millis(1100)).await;
+        time::delay_for(Duration::from_millis(1100)).await;
 
         Ok(())
     }

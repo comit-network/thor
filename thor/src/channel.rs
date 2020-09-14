@@ -20,6 +20,7 @@ use futures::{
 };
 use genawaiter::sync::Gen;
 use std::{convert::TryInto, time::Duration};
+use tokio::time;
 
 #[cfg(test)]
 mod tests;
@@ -306,7 +307,7 @@ impl Channel {
         let final_update = self.update(transport, vec![out_ours, out_theirs], tx_s_time_lock);
 
         // TODO: Configure timeout based on expiries
-        let timeout = tokio::time::delay_for(std::time::Duration::from_secs(10));
+        let timeout = time::delay_for(Duration::from_secs(10));
 
         pin_mut!(final_update);
         pin_mut!(timeout);
@@ -394,7 +395,7 @@ impl Channel {
                         return Result::<(), anyhow::Error>::Ok(());
                     }
 
-                    tokio::time::delay_for(Duration::from_secs(1)).await;
+                    time::delay_for(Duration::from_secs(1)).await;
                 }
             };
 
@@ -457,7 +458,7 @@ impl Channel {
                                 return Result::<(), anyhow::Error>::Ok(());
                             }
 
-                            tokio::time::delay_for(Duration::from_secs(1)).await;
+                            time::delay_for(Duration::from_secs(1)).await;
                         }
                     };
                     let watch_redeem = async {
@@ -468,7 +469,7 @@ impl Channel {
                                 return transaction;
                             };
 
-                            tokio::time::delay_for(Duration::from_secs(1)).await;
+                            time::delay_for(Duration::from_secs(1)).await;
                         }
                     };
 
