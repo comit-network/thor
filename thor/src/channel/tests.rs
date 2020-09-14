@@ -1,7 +1,9 @@
 pub mod harness;
 
 use crate::{MedianTime, PtlcSecret, TX_FEE};
-use harness::{create_channels, init_bitcoind, init_cli, swap_beta_ptlc_bob, FUND, update_balances};
+use harness::{
+    create_channels, init_bitcoind, init_cli, swap_beta_ptlc_bob, update_balances, FUND,
+};
 
 use bitcoin::Amount;
 

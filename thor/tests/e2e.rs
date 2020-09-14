@@ -4,9 +4,9 @@ mod harness;
 
 use harness::{
     assert_channel_balances, create_channels, generate_expiries, init_bitcoind, init_cli,
-    update_balances, FUND, swap_beta_ptlc_bob,
+    swap_beta_ptlc_bob, update_balances, FUND,
 };
-use thor::{ PtlcSecret, Splice, TX_FEE};
+use thor::{PtlcSecret, Splice, TX_FEE};
 
 use bitcoin::{Amount, TxOut};
 use futures::future;
