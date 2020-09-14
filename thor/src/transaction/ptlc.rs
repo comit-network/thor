@@ -292,7 +292,7 @@ pub fn recover_secret(
             &encsig_TX_ptlc_redeem_funder,
         )
         .map(PtlcSecret::from)
-        .ok_or_else(|| anyhow::anyhow!("PTLC secret recovery failure"))?;
+        .ok_or_else(|| anyhow!("PTLC secret recovery failure"))?;
 
     Ok(secret)
 }
