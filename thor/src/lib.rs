@@ -54,40 +54,6 @@ use bitcoin::util::amount::serde::as_sat;
 /// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
 
-/// Conceptually each step in a channel protocol is made up of a send message, a
-/// receive message, and a transition to the next state based on interpreting
-/// the received message. This macro combines these three into a single step.
-/// Returns the output of transitioning to the next state.
-#[macro_export]
-macro_rules! step {
-    ($transport:expr, $state:expr) => {{
-        let transport = $transport;
-        let state = $state;
-
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let res = state.interpret(response)?;
-
-        (transport, res)
-    }};
-}
-
-/// The same as [step] but passes `wallet` into `interpret()`.
-#[macro_export]
-macro_rules! step_wallet {
-    ($transport:expr, $state:expr, $wallet:expr) => {{
-        let transport = $transport;
-        let state = $state;
-        let wallet = $wallet;
-
-        transport.send_message(state.compose().into()).await?;
-        let response = transport.receive_message().await?.try_into()?;
-        let res = state.interpret(response, wallet).await?;
-
-        (transport, res)
-    }};
-}
-
 #[async_trait::async_trait]
 pub trait MedianTime {
     async fn median_time(&self) -> anyhow::Result<u32>;

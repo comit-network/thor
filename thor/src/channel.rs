@@ -5,7 +5,7 @@ use protocols::{close, create, punish::punish, splice, update};
 
 use crate::{
     keys::{OwnershipKeyPair, OwnershipPublicKey},
-    signature, step, step_wallet,
+    signature,
     transaction::{ptlc, FundingTransaction},
     Balance, ChannelState, GetRawTransaction, MedianTime, Message, Ptlc, PtlcPoint, PtlcSecret,
     RevokedState, Role, Splice, SplitOutput, StandardChannelState,
@@ -42,6 +42,38 @@ pub trait SendMessage {
 #[async_trait]
 pub trait ReceiveMessage {
     async fn receive_message(&mut self) -> Result<Message>;
+}
+
+/// Conceptually each step in a channel protocol is made up of a send message, a
+/// receive message, and a transition to the next state based on interpreting
+/// the received message. This macro combines these three into a single step.
+/// Returns the output of transitioning to the next state.
+macro_rules! step {
+    ($transport:expr, $state:expr) => {{
+        let transport = $transport;
+        let state = $state;
+
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let res = state.interpret(response)?;
+
+        (transport, res)
+    }};
+}
+
+/// The same as [step] but passes `wallet` into `interpret()`.
+macro_rules! step_wallet {
+    ($transport:expr, $state:expr, $wallet:expr) => {{
+        let transport = $transport;
+        let state = $state;
+        let wallet = $wallet;
+
+        transport.send_message(state.compose().into()).await?;
+        let response = transport.receive_message().await?.try_into()?;
+        let res = state.interpret(response, wallet).await?;
+
+        (transport, res)
+    }};
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
