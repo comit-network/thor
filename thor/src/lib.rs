@@ -40,7 +40,6 @@ use crate::{
 };
 use ::serde::{Deserialize, Serialize};
 use anyhow::Result;
-use async_trait::async_trait;
 use bitcoin::{Address, Amount, Transaction, TxOut, Txid};
 use ecdsa_fun::{adaptor::EncryptedSignature, Signature};
 use enum_as_inner::EnumAsInner;
@@ -54,26 +53,6 @@ use bitcoin::util::amount::serde::as_sat;
 // TODO: Have it as an `Amount` instead
 /// Flat fee used for all transactions involved in the protocol, in satoshi.
 pub const TX_FEE: u64 = 10_000;
-
-#[async_trait]
-pub trait NewAddress {
-    async fn new_address(&self) -> Result<Address>;
-}
-
-#[async_trait]
-pub trait BroadcastSignedTransaction {
-    async fn broadcast_signed_transaction(&self, transaction: Transaction) -> Result<()>;
-}
-
-#[async_trait]
-pub trait SendMessage {
-    async fn send_message(&mut self, message: Message) -> Result<()>;
-}
-
-#[async_trait]
-pub trait ReceiveMessage {
-    async fn receive_message(&mut self) -> Result<Message>;
-}
 
 /// Conceptually each step in a channel protocol is made up of a send message, a
 /// receive message, and a transition to the next state based on interpreting

@@ -9,26 +9,28 @@
 //! on one side of the channel, this is not possible with the public API so we
 //! put those tests inside the `channel` module.
 
-//
-// If you modify this file please also modify the other harness files in `thor/tests/harness`
+// If you modify this file please also modify the other harness files in
+// `thor/tests/harness`
 //
 
-use crate::{Balance, Channel, Message, PtlcPoint, ReceiveMessage, SendMessage};
+use crate::{
+    channel::{ReceiveMessage, SendMessage},
+    Balance, Channel, Message, PtlcPoint,
+};
 
-use anyhow::{anyhow, Result, Context};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use bitcoin::Amount;
 use bitcoin_harness::{self, Bitcoind};
-use futures::future;
-use genawaiter::GeneratorState;
-use spectral::prelude::*;
 use futures::{
     channel::{
         mpsc,
         mpsc::{Receiver, Sender},
     },
-    SinkExt, StreamExt,
+    future, SinkExt, StreamExt,
 };
+use genawaiter::GeneratorState;
+use spectral::prelude::*;
 use testcontainers::clients::Cli;
 
 mod wallet;

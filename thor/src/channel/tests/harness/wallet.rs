@@ -1,6 +1,6 @@
 use crate::{
-    channel::{BuildFundingPsbt, SignFundingPsbt},
-    BroadcastSignedTransaction, GetRawTransaction, MedianTime, NewAddress,
+    channel::{BroadcastSignedTransaction, BuildFundingPsbt, NewAddress, SignFundingPsbt},
+    GetRawTransaction, MedianTime,
 };
 
 use anyhow::Result;
@@ -18,7 +18,7 @@ impl Wallet {
 
         Ok(Self(wallet))
     }
-    
+
     pub async fn balance(&self) -> Result<Amount> {
         let balance = self.0.balance().await?;
         Ok(balance)
@@ -38,11 +38,7 @@ pub async fn make_wallets(
     Ok((alice, bob))
 }
 
-async fn make_wallet(
-    name: &str,
-    bitcoind: &Bitcoind<'_>,
-    fund_amount: Amount,
-) -> Result<Wallet> {
+async fn make_wallet(name: &str, bitcoind: &Bitcoind<'_>, fund_amount: Amount) -> Result<Wallet> {
     let wallet = Wallet::new(name, bitcoind.node_url.clone()).await?;
     let buffer = Amount::from_btc(1.0).unwrap();
     let amount = fund_amount + buffer;

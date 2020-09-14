@@ -7,12 +7,12 @@ use crate::{
     keys::{OwnershipKeyPair, OwnershipPublicKey},
     signature, step, step_wallet,
     transaction::{ptlc, FundingTransaction},
-    Balance, BroadcastSignedTransaction, ChannelState, GetRawTransaction, MedianTime, Message,
-    NewAddress, Ptlc, PtlcPoint, PtlcSecret, ReceiveMessage, RevokedState, Role, SendMessage,
-    Splice, SplitOutput, StandardChannelState,
+    Balance, ChannelState, GetRawTransaction, MedianTime, Message, Ptlc, PtlcPoint, PtlcSecret,
+    RevokedState, Role, Splice, SplitOutput, StandardChannelState,
 };
 use ::serde::{Deserialize, Serialize};
 use anyhow::{anyhow, bail, Result};
+use async_trait::async_trait;
 use bitcoin::{Address, Amount, Transaction, Txid};
 use futures::{
     future::{Either, FutureExt},
@@ -23,6 +23,26 @@ use std::{convert::TryInto, time::Duration};
 
 #[cfg(test)]
 mod tests;
+
+#[async_trait]
+pub trait NewAddress {
+    async fn new_address(&self) -> Result<Address>;
+}
+
+#[async_trait]
+pub trait BroadcastSignedTransaction {
+    async fn broadcast_signed_transaction(&self, transaction: Transaction) -> Result<()>;
+}
+
+#[async_trait]
+pub trait SendMessage {
+    async fn send_message(&mut self, message: Message) -> Result<()>;
+}
+
+#[async_trait]
+pub trait ReceiveMessage {
+    async fn receive_message(&mut self) -> Result<Message>;
+}
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
