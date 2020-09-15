@@ -273,6 +273,12 @@ impl From<PtlcSecret> for Scalar {
     }
 }
 
+impl From<Scalar> for PtlcSecret {
+    fn from(from: Scalar) -> Self {
+        Self(from)
+    }
+}
+
 impl From<OwnershipPublicKey> for bitcoin::secp256k1::PublicKey {
     fn from(value: OwnershipPublicKey) -> Self {
         value.0.into()

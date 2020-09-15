@@ -1,7 +1,8 @@
 use crate::{
+    channel::Channel,
     keys::{OwnershipKeyPair, OwnershipPublicKey},
     transaction::{CloseTransaction, FundingTransaction},
-    Balance, Channel,
+    Balance,
 };
 use anyhow::{Context, Result};
 use bitcoin::{Address, Transaction};

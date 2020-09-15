@@ -1,4 +1,4 @@
-use thor::{
+use crate::{
     channel::{BroadcastSignedTransaction, BuildFundingPsbt, NewAddress, SignFundingPsbt},
     GetRawTransaction, MedianTime,
 };

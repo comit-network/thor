@@ -26,8 +26,7 @@ use sha2::Sha256;
 use signature::{verify_encsig, verify_sig};
 use std::{collections::HashMap, str::FromStr};
 
-mod ptlc;
-pub(crate) use ptlc::{RedeemTransaction, RefundTransaction};
+pub(crate) mod ptlc;
 
 #[derive(Clone, Debug)]
 pub(crate) struct FundOutput(Descriptor<bitcoin::PublicKey>);
@@ -1038,7 +1037,7 @@ impl SpliceTransaction {
         input_descriptor: Descriptor<bitcoin::PublicKey>,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> anyhow::Result<Transaction> {
+    ) -> Result<Transaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 

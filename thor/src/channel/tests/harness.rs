@@ -1,7 +1,7 @@
-//! This module is a copy of the code over in `thor/src/channel/test/harness*`
-//! with the following changes:
-//! - Use `mod.rs` instead of `harness.rs` (required by the build system)
-//! - Add some additional code: `SwapExpiries` and `generate_expiries`.
+//! This module is a copy of the code over in `thor/tests/harness/` with the
+//! following changes:
+//! - Use `harness.rs` instead of `mod.rs`
+//! - Remove unused code: `SwapExpiries` and `generate_expiries`.
 //!
 //! The reason we duplicate the test harness is because we want the integration
 //! tests to remain outside of this crate in order to enforce usage of the
@@ -10,12 +10,12 @@
 //! put those tests inside the `channel` module.
 
 // If you modify this file please also modify the other harness files in
-// `thor/src/channel/tests`
+// `thor/tests/harness`
 //
 
-use thor::{
+use crate::{
     channel::{ReceiveMessage, SendMessage},
-    Balance, Channel, MedianTime, Message, PtlcPoint,
+    Balance, Channel, Message, PtlcPoint,
 };
 
 use anyhow::{anyhow, Context, Result};
@@ -153,32 +153,6 @@ pub fn generate_balances(fund_amount: Amount) -> (Balance, Balance) {
         theirs: fund_amount,
     };
     (a_balance, b_balance)
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct SwapExpiries {
-    pub alpha_absolute: u32,
-    pub ptlc_absolute: u32,
-    pub split_transaction_relative: u32,
-}
-
-pub async fn generate_expiries<C>(connector: &C) -> Result<SwapExpiries>
-where
-    C: MedianTime,
-{
-    let now = connector.median_time().await?;
-    let twelve_hours = 12 * 60 * 60;
-
-    let ptlc_absolute = now + twelve_hours;
-    let alpha_absolute = ptlc_absolute + twelve_hours;
-
-    let split_transaction_relative = 1;
-
-    Ok(SwapExpiries {
-        alpha_absolute,
-        ptlc_absolute,
-        split_transaction_relative,
-    })
 }
 
 /// Wrapper around the `Channel::swap_beta_ptlc_bob` API. It allows to configure

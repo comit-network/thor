@@ -2,16 +2,25 @@ use crate::{
     keys::{OwnershipKeyPair, OwnershipPublicKey},
     signature,
     transaction::{build_shared_output_descriptor, SplitTransaction},
-    Ptlc, PtlcPoint, TX_FEE,
+    Ptlc, PtlcPoint, PtlcSecret, TX_FEE,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use arrayvec::ArrayVec;
 use bitcoin::{
     util::bip143::SighashComponents, Address, OutPoint, Script, SigHash, Transaction, TxIn, TxOut,
+    Txid,
 };
-use ecdsa_fun::{self, adaptor::EncryptedSignature, fun::Point, Signature};
+use ecdsa_fun::{
+    self,
+    adaptor::{Adaptor, EncryptedSignature},
+    fun::Point,
+    nonce::Deterministic,
+    Signature,
+};
 use miniscript::Descriptor;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use signature::{verify_encsig, verify_sig};
 use std::collections::HashMap;
 
@@ -47,7 +56,7 @@ impl RedeemTransaction {
         &self,
         (X_0, sig_0): (OwnershipPublicKey, Signature),
         (X_1, sig_1): (OwnershipPublicKey, Signature),
-    ) -> Result<Transaction> {
+    ) -> Result<RedeemTransaction> {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
@@ -67,10 +76,9 @@ impl RedeemTransaction {
             satisfier
         };
 
-        let mut transaction = self.inner.clone();
-
+        let mut transaction = self.clone();
         self.input_descriptor
-            .satisfy(&mut transaction.input[0], satisfier)?;
+            .satisfy(&mut transaction.inner.input[0], satisfier)?;
 
         Ok(transaction)
     }
@@ -84,6 +92,10 @@ impl RedeemTransaction {
         verify_encsig(verification_key, encryption_key, &self.digest, encsig)?;
 
         Ok(())
+    }
+
+    pub fn txid(&self) -> Txid {
+        self.inner.txid()
     }
 }
 
@@ -145,10 +157,8 @@ impl RefundTransaction {
             satisfier
         };
 
-        let mut transaction = self.inner.clone();
-
         self.input_descriptor
-            .satisfy(&mut transaction.input[0], satisfier)?;
+            .satisfy(&mut self.inner.input[0], satisfier)?;
 
         Ok(())
     }
@@ -158,7 +168,7 @@ pub(crate) fn spend_transaction(
     tx_s: &SplitTransaction,
     ptlc: Ptlc,
     refund_address: Address,
-    input_sequence: u32,
+    lock_time: u32,
 ) -> Result<(Transaction, SigHash, Descriptor<bitcoin::PublicKey>)> {
     let mut Xs = [ptlc.X_funder, ptlc.X_redeemer];
     Xs.sort_by(|a, b| a.partial_cmp(b).expect("comparison is possible"));
@@ -175,7 +185,7 @@ pub(crate) fn spend_transaction(
     let input = TxIn {
         previous_output: OutPoint::new(tx_s.txid(), vout as u32),
         script_sig: Script::new(),
-        sequence: input_sequence,
+        sequence: 0xFFFF_FFFF,
         witness: Vec::new(),
     };
 
@@ -187,7 +197,7 @@ pub(crate) fn spend_transaction(
 
     let transaction = Transaction {
         version: 2,
-        lock_time: 0,
+        lock_time,
         input: vec![input.clone()],
         output: vec![output],
     };
@@ -201,8 +211,88 @@ pub(crate) fn spend_transaction(
     Ok((transaction, digest, ptlc_output_descriptor))
 }
 
+impl From<RedeemTransaction> for Transaction {
+    fn from(from: RedeemTransaction) -> Self {
+        from.inner
+    }
+}
+
 impl From<RefundTransaction> for Transaction {
     fn from(from: RefundTransaction) -> Self {
         from.inner
     }
+}
+
+pub(crate) fn extract_signature_by_key(
+    candidate_transaction: Transaction,
+    TX_ptlc_redeem: RedeemTransaction,
+    X_self: OwnershipPublicKey,
+) -> Result<Signature> {
+    let input = match candidate_transaction.input.as_slice() {
+        [input] => input,
+        [] => bail!(NoInputs),
+        [inputs @ ..] => bail!(TooManyInputs(inputs.len())),
+    };
+
+    let sigs = match input
+        .witness
+        .iter()
+        .map(|vec| vec.as_slice())
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        [sig_1 @ [..], sig_2 @ [..], _script @ [..]] => [sig_1, sig_2]
+            .iter()
+            .map(|sig| {
+                bitcoin::secp256k1::Signature::from_der(&sig[..sig.len() - 1]).map(Signature::from)
+            })
+            .collect::<Result<ArrayVec<[_; 2]>, _>>()
+            .context("unknown witness layout")?
+            .into_inner()
+            .expect("inner array is full to capacity"),
+        [] => bail!(EmptyWitnessStack),
+        [witnesses @ ..] => bail!(NotThreeWitnesses(witnesses.len())),
+    };
+
+    let sig = sigs
+        .iter()
+        .find(|sig| signature::verify_sig(X_self.clone(), &TX_ptlc_redeem.digest, &sig).is_ok())
+        .context("neither signature on witness stack verifies against X_self")?;
+
+    Ok(sig.clone())
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("transaction does not spend anything")]
+pub struct NoInputs;
+
+#[derive(thiserror::Error, Debug)]
+#[error("transaction has {0} inputs, expected 1")]
+pub struct TooManyInputs(usize);
+
+#[derive(thiserror::Error, Debug)]
+#[error("empty witness stack")]
+pub struct EmptyWitnessStack;
+
+#[derive(thiserror::Error, Debug)]
+#[error("input has {0} witnesses, expected 3")]
+pub struct NotThreeWitnesses(usize);
+
+pub fn recover_secret(
+    ptlc_point: PtlcPoint,
+    sig_TX_ptlc_redeem_funder: Signature,
+    encsig_TX_ptlc_redeem_funder: EncryptedSignature,
+) -> Result<PtlcSecret> {
+    let adaptor = Adaptor::<Sha256, Deterministic<Sha256>>::default();
+
+    let secret = adaptor
+        .recover_decryption_key(
+            &ptlc_point.into(),
+            &sig_TX_ptlc_redeem_funder,
+            &encsig_TX_ptlc_redeem_funder,
+        )
+        .map(PtlcSecret::from)
+        .ok_or_else(|| anyhow!("PTLC secret recovery failure"))?;
+
+    Ok(secret)
 }

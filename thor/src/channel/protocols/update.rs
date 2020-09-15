@@ -1,13 +1,15 @@
 use crate::{
+    channel::{ChannelState, RevokedState, StandardChannelState},
     keys::{
         OwnershipKeyPair, OwnershipPublicKey, PublishingKeyPair, PublishingPublicKey,
         RevocationKeyPair, RevocationPublicKey, RevocationSecretKey,
     },
     transaction::{
-        balance, CommitTransaction, FundingTransaction, RedeemTransaction, RefundTransaction,
-        SplitTransaction,
+        balance,
+        ptlc::{RedeemTransaction, RefundTransaction},
+        CommitTransaction, FundingTransaction, SplitTransaction,
     },
-    Channel, ChannelState, Ptlc, RevokedState, SplitOutput, StandardChannelState,
+    Channel, Ptlc, SplitOutput,
 };
 use anyhow::{bail, Context, Result};
 use bitcoin::Address;
@@ -156,6 +158,7 @@ impl State0 {
 /// of said output, the party will transition to `State1PtlcFunder` or
 /// `State1PtlcRedeemer` respectively.
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 pub enum State1Kind {
     State1(State1),
     State1PtlcFunder(State1PtlcFunder),
@@ -184,6 +187,7 @@ pub struct SignaturesPtlcRedeemer {
 /// with the counterparty and is ready to start exchanging signatures for the
 /// `RedeemTransaction` and `RefundTransaction` involving a PTLC
 /// output which they are funding.
+#[derive(Debug)]
 pub struct State1PtlcFunder {
     inner: State1,
     ptlc: Ptlc,
@@ -220,14 +224,16 @@ impl State1PtlcFunder {
         }
     }
 
-    pub fn interpret(mut self, message: SignaturesPtlcRedeemer) -> Result<WithPtlc<State1>> {
+    pub fn interpret(self, message: SignaturesPtlcRedeemer) -> Result<WithPtlc<State1>> {
         self.tx_ptlc_refund
             .verify_sig(
                 self.inner.X_other.clone(),
                 &message.sig_tx_ptlc_refund_redeemer,
             )
             .context("failed to verify sig_tx_ptlc_refund sent by PTLC redeemer")?;
-        self.tx_ptlc_refund.add_signatures(
+
+        let mut tx_ptlc_refund = self.tx_ptlc_refund;
+        tx_ptlc_refund.add_signatures(
             (
                 self.inner.x_self.public(),
                 self.sig_tx_ptlc_refund_funder.clone(),
@@ -242,7 +248,7 @@ impl State1PtlcFunder {
             state: self.inner,
             ptlc: self.ptlc,
             tx_ptlc_redeem: self.tx_ptlc_redeem,
-            tx_ptlc_refund: self.tx_ptlc_refund,
+            tx_ptlc_refund,
             encsig_tx_ptlc_redeem_funder: self.encsig_tx_ptlc_redeem_funder,
             sig_tx_ptlc_redeem_redeemer: message.sig_tx_ptlc_redeem_redeemer,
             sig_tx_ptlc_refund_funder: self.sig_tx_ptlc_refund_funder,
@@ -255,6 +261,7 @@ impl State1PtlcFunder {
 /// with the counterparty and is ready to start exchanging signatures for the
 /// `RedeemTransaction` and `RefundTransaction` involving a PTLC
 /// output which they are redeeming.
+#[derive(Debug)]
 pub struct State1PtlcRedeemer {
     inner: State1,
     ptlc: Ptlc,
@@ -515,7 +522,7 @@ impl State3 {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WithPtlc<S> {
     state: S,
     ptlc: Ptlc,
