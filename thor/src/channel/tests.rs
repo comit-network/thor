@@ -2,10 +2,92 @@ pub mod harness;
 
 use crate::{MedianTime, PtlcSecret, TX_FEE};
 use harness::{
-    create_channels, init_bitcoind, init_cli, swap_beta_ptlc_bob, update_balances, FUND,
+    create_channels, init_bitcoind, init_cli, swap_beta_ptlc_bob, update_balances, BTC_FUND, XMR_FUND
 };
 
 use bitcoin::Amount;
+
+
+#[tokio::test]
+async fn e2e_alice_redeems_btc_off_chain_bob_redeems_monero_on_chain() {
+    let cli = init_cli();
+    let bitcoind = init_bitcoind(&cli).await;
+    let monero = init_monero(&cli).await;
+    let (
+        mut a_channel,
+        mut b_channel,
+        mut a_transport,
+        mut b_transport,
+        a_wallet,
+        b_wallet,
+        time_lock,
+        _,
+    ) = create_channels(&bitcoind, &monero).await;
+
+    let a_balance_after_open = a_wallet.balance().await.unwrap();
+    let b_balance_after_open = b_wallet.balance().await.unwrap();
+
+    // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
+    let btc_payment = Amount::from_btc(0.5).unwrap();
+
+    // Parties agree on a new channel balance: Bob pays 100 a XMR to Alice
+    let xmr_payment = unimplemented!();
+
+    let a_balance = BTC_FUND - btc_payment;
+    let b_balance = XMR_FUND + xmr_payment;
+
+    update_balances(
+        &mut a_channel,
+        &mut b_channel,
+        &mut a_transport,
+        &mut b_transport,
+        a_balance,
+        b_balance,
+        time_lock,
+    )
+        .await;
+
+    let secret = PtlcSecret::new_random();
+    let point = secret.point();
+    let ptlc_amount = Amount::from_btc(0.5).unwrap();
+
+    let (alpha_absolute_expiry, ptlc_absolute_expiry, split_transaction_relative_expiry) = {
+        let now = a_wallet.median_time().await.unwrap();
+
+        let five_seconds = 5;
+        let ptlc_absolute = now + five_seconds;
+        let alpha_absolute = ptlc_absolute + five_seconds;
+
+        let split_transaction_relative = 1;
+
+        (alpha_absolute, ptlc_absolute, split_transaction_relative)
+    };
+
+    // Alice collaborates to add the PTLC to the channel, but does not reveal the
+    // secret
+    let add_ptlc_alice = a_channel.add_ptlc_redeemer(
+        &mut a_transport,
+        ptlc_amount,
+        secret,
+        split_transaction_relative_expiry,
+        ptlc_absolute_expiry,
+    );
+
+    let skip_final_update = false;
+    let swap_beta_ptlc_bob = swap_beta_ptlc_bob(
+        &mut b_channel,
+        &mut b_transport,
+        &b_wallet,
+        ptlc_amount,
+        point,
+        alpha_absolute_expiry,
+        split_transaction_relative_expiry,
+        ptlc_absolute_expiry,
+        skip_final_update,
+    );
+
+    
+}
 
 #[tokio::test]
 async fn e2e_punish_publication_of_revoked_commit_transaction() {
@@ -27,8 +109,8 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
 
     // Parties agree on a new channel balance: Alice pays 0.5 a Bitcoin to Bob
     let payment = Amount::from_btc(0.5).unwrap();
-    let a_balance = FUND - payment;
-    let b_balance = FUND + payment;
+    let a_balance = BTC_FUND - payment;
+    let b_balance = BTC_FUND + payment;
 
     update_balances(
         &mut a_channel,
@@ -64,7 +146,7 @@ async fn e2e_punish_publication_of_revoked_commit_transaction() {
     );
     assert_eq!(
         b_balance_after_punish,
-        b_balance_after_open + FUND * 2 - Amount::from_sat(TX_FEE) * 2,
+        b_balance_after_open + BTC_FUND * 2 - Amount::from_sat(TX_FEE) * 2,
         "Bob should get all the money back after punishing Alice"
     );
 }
@@ -155,14 +237,14 @@ async fn bob_can_refund_ptlc_if_alice_holds_onto_secret_after_first_update() {
 
     assert_eq!(
         a_balance_after_close,
-        a_balance_after_open + FUND - a_split_transaction_fee,
+        a_balance_after_open + BTC_FUND - a_split_transaction_fee,
         "Balance after closing channel should equal balance after opening plus PTLC amount,
          minus transaction fees"
     );
 
     assert_eq!(
         b_balance_after_close,
-        b_balance_after_open + FUND - b_split_transaction_fee - fee_deduction_for_ptlc_refund,
+        b_balance_after_open + BTC_FUND - b_split_transaction_fee - fee_deduction_for_ptlc_refund,
         "Balance after closing channel and refunding PTLC should equal balance after opening
          plus PTLC amount, minus transaction fees"
     );

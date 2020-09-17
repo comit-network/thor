@@ -34,11 +34,17 @@ use spectral::prelude::*;
 use testcontainers::clients::Cli;
 
 mod wallet;
+mod monero;
 
-pub use wallet::{make_wallets, Wallet};
+pub use wallet::{make_bitcoin_wallets, BitcoinWallet};
+use crate::channel::tests::harness::monero::Monero;
 
 // Alice and Bob both fund the channel with this much.
-pub const FUND: Amount = Amount::ONE_BTC;
+pub const BTC_FUND: Amount = Amount::ONE_BTC;
+
+// Alice and Bob both fund the channel with this much.
+pub const XMR_FUND: u64 = 100;
+
 
 pub async fn create_channels(
     bitcoind: &Bitcoind<'_>,
@@ -47,14 +53,14 @@ pub async fn create_channels(
     Channel,
     Transport,
     Transport,
-    Wallet,
-    Wallet,
+    BitcoinWallet,
+    BitcoinWallet,
     u32,
     Amount,
 ) {
     let (mut a_transport, mut b_transport) = make_transports();
-    let (a_balance, b_balance) = generate_balances(FUND);
-    let (a_wallet, b_wallet) = make_wallets(bitcoind, FUND)
+    let (a_balance, b_balance) = generate_balances(BTC_FUND);
+    let (a_wallet, b_wallet) = make_bitcoin_wallets(bitcoind, BTC_FUND)
         .await
         .expect("failed to make wallets");
     let time_lock = 1;
@@ -68,10 +74,57 @@ pub async fn create_channels(
         .await
         .expect("failed to create channels");
 
-    assert_channel_balances(&a_channel, &b_channel, FUND, FUND);
+    assert_channel_balances(&a_channel, &b_channel, BTC_FUND, BTC_FUND);
 
     let final_balance = a_wallet.balance().await.unwrap();
-    let tx_fee = initial_balance - final_balance - FUND;
+    let tx_fee = initial_balance - final_balance - BTC_FUND;
+
+    (
+        a_channel,
+        b_channel,
+        a_transport,
+        b_transport,
+        a_wallet,
+        b_wallet,
+        time_lock,
+        tx_fee,
+    )
+}
+
+
+pub async fn create_btc_xmr_channels(
+    bitcoind: &Bitcoind<'_>,
+    monero: &Monero,
+) -> (
+    Channel,
+    Channel,
+    Transport,
+    Transport,
+    BitcoinWallet,
+    BitcoinWallet,
+    u32,
+    Amount,
+) {
+    let (mut a_transport, mut b_transport) = make_transports();
+    let (a_balance, b_balance) = generate_balances(BTC_FUND);
+    let (a_wallet, b_wallet) = make_bitcoin_wallets(bitcoind, BTC_FUND)
+        .await
+        .expect("failed to make wallets");
+    let time_lock = 1;
+
+    let initial_balance = a_wallet.balance().await.unwrap();
+
+    let a_create = Channel::create(&mut a_transport, &a_wallet, a_balance, time_lock);
+    let b_create = Channel::create(&mut b_transport, &b_wallet, b_balance, time_lock);
+
+    let (a_channel, b_channel) = future::try_join(a_create, b_create)
+        .await
+        .expect("failed to create channels");
+
+    assert_channel_balances(&a_channel, &b_channel, BTC_FUND, BTC_FUND);
+
+    let final_balance = a_wallet.balance().await.unwrap();
+    let tx_fee = initial_balance - final_balance - BTC_FUND;
 
     (
         a_channel,
@@ -162,7 +215,7 @@ pub fn generate_balances(fund_amount: Amount) -> (Balance, Balance) {
 pub async fn swap_beta_ptlc_bob(
     channel: &mut Channel,
     transport: &mut Transport,
-    wallet: &Wallet,
+    wallet: &BitcoinWallet,
     ptlc_amount: Amount,
     point: PtlcPoint,
     alpha_absolute_expiry: u32,

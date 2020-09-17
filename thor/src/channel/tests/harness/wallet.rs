@@ -12,9 +12,26 @@ use std::time::Duration;
 use tokio::time;
 
 #[derive(Debug)]
-pub struct Wallet(pub bitcoin_harness::Wallet);
+pub struct BitcoinWallet(pub bitcoin_harness::Wallet);
 
-impl Wallet {
+impl BitcoinWallet {
+    async fn new(name: &str, url: Url) -> Result<Self> {
+        let wallet = bitcoin_harness::Wallet::new(name, url).await?;
+
+        Ok(Self(wallet))
+    }
+
+    pub async fn balance(&self) -> Result<Amount> {
+        let balance = self.0.balance().await?;
+        Ok(balance)
+    }
+}
+
+
+#[derive(Debug)]
+pub struct MoneroWallet(pub bitcoin_harness::Wallet);
+
+impl MoneroWallet {
     async fn new(name: &str, url: Url) -> Result<Self> {
         let wallet = bitcoin_harness::Wallet::new(name, url).await?;
 
@@ -30,18 +47,43 @@ impl Wallet {
 /// Create two bitcoind wallets on the node passed as an argument and fund them
 /// with the amount that they will contribute to the channel, plus a buffer to
 /// account for transaction fees.
-pub async fn make_wallets(
+pub async fn make_bitcoin_wallets(
     bitcoind: &Bitcoind<'_>,
     fund_amount: Amount,
-) -> Result<(Wallet, Wallet)> {
-    let alice = make_wallet("alice", bitcoind, fund_amount).await?;
-    let bob = make_wallet("bob", bitcoind, fund_amount).await?;
+) -> Result<(BitcoinWallet, BitcoinWallet)> {
+    let alice = make_bitcoin_wallet("alice", bitcoind, fund_amount).await?;
+    let bob = make_bitcoin_wallet("bob", bitcoind, fund_amount).await?;
 
     Ok((alice, bob))
 }
 
-async fn make_wallet(name: &str, bitcoind: &Bitcoind<'_>, fund_amount: Amount) -> Result<Wallet> {
-    let wallet = Wallet::new(name, bitcoind.node_url.clone()).await?;
+/// Create two bitcoind wallets on the node passed as an argument and fund them
+/// with the amount that they will contribute to the channel, plus a buffer to
+/// account for transaction fees.
+pub async fn make_bitcoin_monero_wallets(
+    bitcoind: &Bitcoind<'_>,
+    fund_amount: Amount,
+) -> Result<(BitcoinWallet, MoneroWallet)> {
+    let alice = make_bitcoin_wallet("alice", bitcoind, fund_amount).await?;
+    let bob = make_monero_wallet("bob", bitcoind, fund_amount).await?;
+
+    Ok((alice, bob))
+}
+
+async fn make_bitcoin_wallet(name: &str, bitcoind: &Bitcoind<'_>, fund_amount: Amount) -> Result<BitcoinWallet> {
+    let wallet = BitcoinWallet::new(name, bitcoind.node_url.clone()).await?;
+    let buffer = Amount::from_btc(1.0).unwrap();
+    let amount = fund_amount + buffer;
+
+    let address = wallet.0.new_address().await.unwrap();
+
+    bitcoind.mint(address, amount).await.unwrap();
+
+    Ok(wallet)
+}
+
+async fn make_monero_wallet(name: &str, bitcoind: &Bitcoind<'_>, fund_amount: Amount) -> Result<MoneroWallet> {
+    let wallet = MoneroWallet::new(name, bitcoind.node_url.clone()).await?;
     let buffer = Amount::from_btc(1.0).unwrap();
     let amount = fund_amount + buffer;
 
@@ -53,7 +95,7 @@ async fn make_wallet(name: &str, bitcoind: &Bitcoind<'_>, fund_amount: Amount) -
 }
 
 #[async_trait]
-impl BuildFundingPsbt for Wallet {
+impl BuildFundingPsbt for BitcoinWallet {
     async fn build_funding_psbt(
         &self,
         output_address: Address,
@@ -69,7 +111,7 @@ impl BuildFundingPsbt for Wallet {
 }
 
 #[async_trait]
-impl SignFundingPsbt for Wallet {
+impl SignFundingPsbt for BitcoinWallet {
     async fn sign_funding_psbt(
         &self,
         psbt: PartiallySignedTransaction,
@@ -88,7 +130,7 @@ impl SignFundingPsbt for Wallet {
 }
 
 #[async_trait]
-impl BroadcastSignedTransaction for Wallet {
+impl BroadcastSignedTransaction for BitcoinWallet {
     async fn broadcast_signed_transaction(&self, transaction: bitcoin::Transaction) -> Result<()> {
         let _txid = self.0.send_raw_transaction(transaction).await?;
 
@@ -103,21 +145,21 @@ impl BroadcastSignedTransaction for Wallet {
 }
 
 #[async_trait]
-impl NewAddress for Wallet {
+impl NewAddress for BitcoinWallet {
     async fn new_address(&self) -> Result<Address> {
         self.0.new_address().await.map_err(Into::into)
     }
 }
 
 #[async_trait]
-impl MedianTime for Wallet {
+impl MedianTime for BitcoinWallet {
     async fn median_time(&self) -> Result<u32> {
         self.0.median_time().await.map_err(Into::into)
     }
 }
 
 #[async_trait]
-impl GetRawTransaction for Wallet {
+impl GetRawTransaction for BitcoinWallet {
     async fn get_raw_transaction(&self, txid: bitcoin::Txid) -> Result<bitcoin::Transaction> {
         self.0.get_raw_transaction(txid).await.map_err(Into::into)
     }
