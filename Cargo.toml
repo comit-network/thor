@@ -1,2 +1,2 @@
 [workspace]
-members = ["thor", "thunder"]
+members = ["thor", "thunder", "monero-harness"]
