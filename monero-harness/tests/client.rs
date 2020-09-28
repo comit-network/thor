@@ -17,7 +17,7 @@ async fn init_monero(tc: &'_ Cli) -> Monero<'_> {
 }
 
 #[tokio::test]
-async fn init_accounts_for_alice_and_bob() {
+async fn init_wallets_for_alice_and_bob() {
     let cli = init_cli();
     let monero = init_monero(&cli).await;
 

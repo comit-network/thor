@@ -79,6 +79,25 @@ impl Client {
 
         Ok(res.result.block_header)
     }
+
+    pub async fn get_block_count(&self) -> Result<u32> {
+        let request = Request::new("get_block_count", "");
+
+        let response = self
+            .inner
+            .post(self.url.clone())
+            .json(&request)
+            .send()
+            .await?
+            .text()
+            .await?;
+
+        debug!("get block count response: {}", response);
+
+        let res: Response<BlockCount> = serde_json::from_str(&response)?;
+
+        Ok(res.result.count)
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -104,4 +123,10 @@ struct GetBlockHeaderByHeight {
     block_header: BlockHeader,
     status: String,
     untrusted: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct BlockCount {
+    count: u32,
+    status: String,
 }
