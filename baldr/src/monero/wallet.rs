@@ -48,7 +48,7 @@ impl CheckTransfer for BobWallet<'_> {
     ) -> Result<()> {
         let address = Address::standard(Network::Mainnet, public_spend_key, public_view_key.into());
 
-        let cli = self.0.wallet_rpc_client();
+        let cli = self.0.bob_wallet_rpc_client();
 
         let res = cli
             .check_tx_key(
@@ -84,7 +84,6 @@ impl ImportOutput for BobWallet<'_> {
 
         let _ = self
             .0
-            .wallet_rpc_client()
             .generate_from_keys(
                 &address.to_string(),
                 &private_spend_key.to_string(),
@@ -110,7 +109,7 @@ impl ImportOutput for AliceWallet<'_> {
 
         let _ = self
             .0
-            .wallet_rpc_client()
+            .alice_wallet_rpc_client()
             .generate_from_keys(
                 &address.to_string(),
                 &private_spend_key.to_string(),

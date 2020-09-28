@@ -244,6 +244,12 @@ mod tests {
 
         let alice_final_btc_balance = alice_btc_wallet.balance().await.unwrap();
         let bob_final_btc_balance = bob_btc_wallet.balance().await.unwrap();
+        // let alice_final_xmr_balance =
+        // alice_monero_wallet.0.get_balance_alice().await.unwrap();
+        // let bob_final_xmr_balance =
+        // bob_monero_wallet.0.get_balance_bob().await.unwrap();
+        // assert_eq!(alice_final_xmr_balance, alice_initial_xmr_balance);
+        // assert_eq!(bob_final_xmr_balance, bob_initial_xmr_balance);
 
         // lock_tx_fee is determined by the wallet, it is not necessarily equal to
         // TX_FEE
@@ -258,17 +264,6 @@ mod tests {
             // The 2 * TX_FEE corresponds to tx_refund and tx_cancel.
             bob_initial_btc_balance - Amount::from_sat(2 * TX_FEE) - lock_tx_fee
         );
-
-        // Todo: implement balance fetching for monero
-        // let alice_final_xmr_balance =
-        // alice_monero_wallet.0.get_balance_alice().await.unwrap(); let
-        // bob_final_xmr_balance =
-        // bob_monero_wallet.0.get_balance_bob().await.unwrap();
-        // assert_eq!(alice_final_xmr_balance, alice_initial_xmr_balance);
-        // assert_eq!(
-        //     bob_final_xmr_balance,
-        //     bob_initial_xmr_balance
-        // );
     }
 
     #[tokio::test]
