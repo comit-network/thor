@@ -6,16 +6,19 @@ use testcontainers::clients::Cli;
 async fn wallet_and_accounts() {
     let tc = Cli::default();
     let monero = Monero::new(&tc);
-    let cli = Client::localhost(monero.wallet_rpc_port);
+    let miner_wallet = Client::localhost(monero.miner_wallet_rpc_port);
 
     println!("creating wallet ...");
 
-    let _ = cli
+    let _ = miner_wallet
         .create_wallet("wallet")
         .await
         .expect("failed to create wallet");
 
-    let got = cli.get_balance(0).await.expect("failed to get balance");
+    let got = miner_wallet
+        .get_balance(0)
+        .await
+        .expect("failed to get balance");
     let want = 0;
 
     assert_that!(got).is_equal_to(want);
@@ -25,7 +28,7 @@ async fn wallet_and_accounts() {
 async fn create_account_and_retrieve_it() {
     let tc = Cli::default();
     let monero = Monero::new(&tc);
-    let cli = Client::localhost(monero.wallet_rpc_port);
+    let cli = Client::localhost(monero.miner_wallet_rpc_port);
 
     let label = "Iron Man"; // This is intentionally _not_ Alice or Bob.
 
@@ -76,7 +79,7 @@ async fn transfer_and_check_tx_key() {
     let tx_id = transfer.tx_hash;
     let tx_key = transfer.tx_key;
 
-    let cli = monero.wallet_rpc_client();
+    let cli = monero.miner_wallet_rpc_client();
     let res = cli
         .check_tx_key(&tx_id, &tx_key, &address_bob)
         .await

@@ -5,7 +5,9 @@ use testcontainers::{
 };
 
 pub const MONEROD_RPC_PORT: u16 = 48081;
-pub const WALLET_RPC_PORT: u16 = 48083;
+pub const MINER_WALLET_RPC_PORT: u16 = 48083;
+pub const ALICE_WALLET_RPC_PORT: u16 = 48084;
+pub const BOB_WALLET_RPC_PORT: u16 = 48085;
 
 #[derive(Debug)]
 pub struct Monero {
@@ -101,12 +103,25 @@ impl Monero {
         self.ports = Some(ports);
         self
     }
+
+    pub fn with_wallet(self, name: &str, rpc_port: u16) -> Self {
+        let wallet = WalletArgs::new(name, rpc_port);
+        let mut wallet_args = self.args.wallets;
+        wallet_args.push(wallet);
+        Self {
+            args: Args {
+                monerod: self.args.monerod,
+                wallets: wallet_args,
+            },
+            ..self
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Args {
     monerod: MonerodArgs,
-    wallet: WalletArgs,
+    wallets: Vec<WalletArgs>,
 }
 
 #[derive(Debug, Clone)]
@@ -150,21 +165,6 @@ impl Default for MonerodArgs {
             rpc_bind_port: MONEROD_RPC_PORT,
             fixed_difficulty: 1,
             data_dir: "/monero".to_string(),
-        }
-    }
-}
-
-impl Default for WalletArgs {
-    fn default() -> Self {
-        let daemon_address = format!("localhost:{}", MONEROD_RPC_PORT);
-        WalletArgs {
-            disable_rpc_login: true,
-            confirm_external_bind: true,
-            wallet_dir: "/monero".into(),
-            rpc_bind_ip: "0.0.0.0".into(),
-            rpc_bind_port: WALLET_RPC_PORT,
-            daemon_address,
-            log_level: 4,
         }
     }
 }
@@ -223,6 +223,19 @@ impl MonerodArgs {
 }
 
 impl WalletArgs {
+    pub fn new(wallet_dir: &str, rpc_port: u16) -> Self {
+        let daemon_address = format!("localhost:{}", MONEROD_RPC_PORT);
+        WalletArgs {
+            disable_rpc_login: true,
+            confirm_external_bind: true,
+            wallet_dir: wallet_dir.into(),
+            rpc_bind_ip: "0.0.0.0".into(),
+            rpc_bind_port: rpc_port,
+            daemon_address,
+            log_level: 4,
+        }
+    }
+
     // Return monero-wallet-rpc args as is single string so we can pass it to bash.
     fn args(&self) -> String {
         let mut args = vec!["monero-wallet-rpc".to_string()];
@@ -269,7 +282,10 @@ impl IntoIterator for Args {
         args.push("/bin/bash".into());
         args.push("-c".into());
 
-        let cmd = format!("{} & {}", self.monerod.args(), self.wallet.args());
+        let wallet_args: Vec<String> = self.wallets.iter().map(|wallet| wallet.args()).collect();
+        let wallet_args = wallet_args.join(" & ");
+
+        let cmd = format!("{} & {} ", self.monerod.args(), wallet_args);
         args.push(cmd);
 
         args.into_iter()
